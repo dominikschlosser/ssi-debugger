@@ -1,0 +1,414 @@
+package mdoc
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/fxamacker/cbor/v2"
+	"github.com/dominikschlosser/ssi-debugger/internal/format"
+)
+
+// Parse decodes an mDOC credential from hex or base64url encoded input.
+func Parse(raw string) (*Document, error) {
+	raw = strings.TrimSpace(raw)
+
+	data, err := format.DecodeHexOrBase64URL(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decoding input: %w", err)
+	}
+
+	// Try parsing as DeviceResponse first
+	doc, err := parseDeviceResponse(data)
+	if err == nil {
+		return doc, nil
+	}
+
+	// Try as IssuerSigned directly
+	return parseIssuerSigned(data)
+}
+
+func parseDeviceResponse(data []byte) (*Document, error) {
+	var resp map[any]any
+	if err := cborDecMode.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+
+	docs, ok := resp["documents"]
+	if !ok {
+		return nil, fmt.Errorf("no documents field")
+	}
+
+	docArr, ok := docs.([]any)
+	if !ok || len(docArr) == 0 {
+		return nil, fmt.Errorf("empty documents array")
+	}
+
+	// Parse first document
+	docMap, ok := docArr[0].(map[any]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid document entry")
+	}
+
+	issuerSigned, ok := docMap["issuerSigned"].(map[any]any)
+	if !ok {
+		return nil, fmt.Errorf("no issuerSigned in document")
+	}
+
+	// Re-encode issuerSigned to CBOR for parsing
+	issuerBytes, err := cbor.Marshal(issuerSigned)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := parseIssuerSigned(issuerBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	if dt, ok := docMap["docType"].(string); ok {
+		doc.DocType = dt
+	}
+
+	// Parse deviceSigned
+	if ds, ok := docMap["deviceSigned"].(map[any]any); ok {
+		doc.DeviceSigned = parseDeviceSigned(ds)
+	}
+
+	doc.IsDeviceResponse = true
+	doc.Raw = data
+
+	return doc, nil
+}
+
+func parseDeviceSigned(ds map[any]any) *DeviceSigned {
+	result := &DeviceSigned{}
+	if da, ok := ds["deviceAuth"].(map[any]any); ok {
+		result.DeviceAuth = convertCBORMapToStringKeys(da)
+	}
+	return result
+}
+
+func parseIssuerSigned(data []byte) (*Document, error) {
+	var issuerSigned map[any]any
+	if err := cborDecMode.Unmarshal(data, &issuerSigned); err != nil {
+		return nil, fmt.Errorf("decoding IssuerSigned CBOR: %w", err)
+	}
+
+	doc := &Document{
+		Raw:        data,
+		NameSpaces: make(map[string][]IssuerSignedItem),
+	}
+
+	// Parse nameSpaces
+	if ns, ok := issuerSigned["nameSpaces"]; ok {
+		nsMap, ok := ns.(map[any]any)
+		if !ok {
+			return nil, fmt.Errorf("nameSpaces is not a map")
+		}
+		for nsKey, nsVal := range nsMap {
+			namespace := fmt.Sprintf("%v", nsKey)
+			items, ok := nsVal.([]any)
+			if !ok {
+				continue
+			}
+			seen := make(map[string]bool)
+			for _, item := range items {
+				isi, err := parseIssuerSignedItem(item)
+				if err != nil {
+					continue // skip unparseable items
+				}
+				if seen[isi.ElementIdentifier] {
+					continue // skip duplicate claims
+				}
+				seen[isi.ElementIdentifier] = true
+				doc.NameSpaces[namespace] = append(doc.NameSpaces[namespace], *isi)
+			}
+		}
+	}
+
+	// Parse issuerAuth (COSE_Sign1)
+	if auth, ok := issuerSigned["issuerAuth"]; ok {
+		ia, err := parseIssuerAuth(auth)
+		if err == nil {
+			doc.IssuerAuth = ia
+			if ia.MSO != nil {
+				doc.DocType = ia.MSO.DocType
+			}
+		}
+	}
+
+	return doc, nil
+}
+
+func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
+	// Items are Tag-24 wrapped CBOR bstr
+	var itemBytes []byte
+
+	switch v := raw.(type) {
+	case []byte:
+		itemBytes = v
+	case cbor.Tag:
+		if v.Number == 24 {
+			if b, ok := v.Content.([]byte); ok {
+				itemBytes = b
+			} else {
+				return nil, fmt.Errorf("tag 24 content is not bstr")
+			}
+		} else {
+			return nil, fmt.Errorf("unexpected tag: %d", v.Number)
+		}
+	default:
+		// Try to marshal and re-parse
+		b, err := cbor.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cannot handle item type %T", raw)
+		}
+		inner, err := unmarshalTag24(b)
+		if err != nil {
+			return nil, err
+		}
+		itemBytes = inner
+	}
+
+	var itemMap map[any]any
+	if err := cborDecMode.Unmarshal(itemBytes, &itemMap); err != nil {
+		return nil, fmt.Errorf("decoding IssuerSignedItem: %w", err)
+	}
+
+	isi := &IssuerSignedItem{}
+
+	if did, ok := itemMap["digestID"]; ok {
+		switch v := did.(type) {
+		case uint64:
+			isi.DigestID = v
+		case int64:
+			isi.DigestID = uint64(v)
+		}
+	}
+
+	if r, ok := itemMap["random"].([]byte); ok {
+		isi.Random = r
+	}
+
+	if ei, ok := itemMap["elementIdentifier"].(string); ok {
+		isi.ElementIdentifier = ei
+	}
+
+	isi.ElementValue = convertCBORValue(itemMap["elementValue"])
+
+	return isi, nil
+}
+
+func parseIssuerAuth(raw any) (*IssuerAuth, error) {
+	// COSE_Sign1 = [protected, unprotected, payload, signature]
+	var coseBytes []byte
+
+	switch v := raw.(type) {
+	case []byte:
+		coseBytes = v
+	case cbor.Tag:
+		if b, ok := v.Content.([]byte); ok {
+			coseBytes = b
+		} else {
+			// Tag 18 (COSE_Sign1) wrapping an array
+			b, err := cbor.Marshal(v.Content)
+			if err != nil {
+				return nil, err
+			}
+			coseBytes = b
+		}
+	default:
+		b, err := cbor.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cannot handle issuerAuth type %T", raw)
+		}
+		coseBytes = b
+	}
+
+	var coseArr []cbor.RawMessage
+	if err := cborDecMode.Unmarshal(coseBytes, &coseArr); err != nil {
+		return nil, fmt.Errorf("decoding COSE_Sign1 array: %w", err)
+	}
+
+	if len(coseArr) != 4 {
+		return nil, fmt.Errorf("COSE_Sign1 expected 4 elements, got %d", len(coseArr))
+	}
+
+	ia := &IssuerAuth{RawCOSE: coseBytes}
+
+	// Protected header (bstr containing CBOR map)
+	var protectedBytes []byte
+	if err := cborDecMode.Unmarshal(coseArr[0], &protectedBytes); err == nil && len(protectedBytes) > 0 {
+		var ph map[any]any
+		if err := cborDecMode.Unmarshal(protectedBytes, &ph); err == nil {
+			ia.ProtectedHeader = ph
+		}
+	}
+
+	// Unprotected header (CBOR map)
+	var uph map[any]any
+	if err := cborDecMode.Unmarshal(coseArr[1], &uph); err == nil {
+		ia.UnprotectedHeader = uph
+	}
+
+	// Payload (bstr, possibly nil or Tag-24 wrapped)
+	var payload []byte
+	if err := cborDecMode.Unmarshal(coseArr[2], &payload); err == nil {
+		ia.Payload = payload
+	} else {
+		// Try tag 24
+		inner, err := unmarshalTag24(coseArr[2])
+		if err == nil {
+			ia.Payload = inner
+		}
+	}
+
+	// Signature
+	var sig []byte
+	if err := cborDecMode.Unmarshal(coseArr[3], &sig); err == nil {
+		ia.Signature = sig
+	}
+
+	// Parse MSO from payload
+	if ia.Payload != nil {
+		// MSO may be Tag-24 wrapped
+		msoBytes := ia.Payload
+		if inner, err := unmarshalTag24(msoBytes); err == nil {
+			msoBytes = inner
+		}
+		mso, err := parseMSO(msoBytes)
+		if err == nil {
+			ia.MSO = mso
+		}
+	}
+
+	return ia, nil
+}
+
+func parseMSO(data []byte) (*MSO, error) {
+	var msoMap map[any]any
+	if err := cborDecMode.Unmarshal(data, &msoMap); err != nil {
+		return nil, err
+	}
+
+	mso := &MSO{}
+
+	if v, ok := msoMap["version"].(string); ok {
+		mso.Version = v
+	}
+	if v, ok := msoMap["digestAlgorithm"].(string); ok {
+		mso.DigestAlgorithm = v
+	}
+	if v, ok := msoMap["docType"].(string); ok {
+		mso.DocType = v
+	}
+
+	// Parse valueDigests
+	if vd, ok := msoMap["valueDigests"].(map[any]any); ok {
+		mso.ValueDigests = make(map[string]map[uint64][]byte)
+		for nsKey, nsVal := range vd {
+			ns := fmt.Sprintf("%v", nsKey)
+			mso.ValueDigests[ns] = make(map[uint64][]byte)
+			if digestMap, ok := nsVal.(map[any]any); ok {
+				for dk, dv := range digestMap {
+					var idx uint64
+					switch v := dk.(type) {
+					case uint64:
+						idx = v
+					case int64:
+						idx = uint64(v)
+					}
+					if b, ok := dv.([]byte); ok {
+						mso.ValueDigests[ns][idx] = b
+					}
+				}
+			}
+		}
+	}
+
+	// Parse validityInfo
+	if vi, ok := msoMap["validityInfo"].(map[any]any); ok {
+		mso.ValidityInfo = parseValidityInfo(vi)
+	}
+
+	// Parse deviceKeyInfo
+	if dk, ok := msoMap["deviceKeyInfo"].(map[any]any); ok {
+		mso.DeviceKeyInfo = convertCBORMapToStringKeys(dk)
+	}
+
+	// Parse status
+	if st, ok := msoMap["status"].(map[any]any); ok {
+		mso.Status = convertCBORMapToStringKeys(st)
+	}
+
+	return mso, nil
+}
+
+func parseValidityInfo(vi map[any]any) *ValidityInfo {
+	info := &ValidityInfo{}
+
+	parseTime := func(key string) *time.Time {
+		v, ok := vi[key]
+		if !ok {
+			return nil
+		}
+		switch val := v.(type) {
+		case string:
+			t, err := time.Parse(time.RFC3339, val)
+			if err != nil {
+				return nil
+			}
+			return &t
+		case time.Time:
+			return &val
+		case cbor.Tag:
+			// Tag 0 = date-time string
+			if s, ok := val.Content.(string); ok {
+				t, err := time.Parse(time.RFC3339, s)
+				if err != nil {
+					return nil
+				}
+				return &t
+			}
+		}
+		return nil
+	}
+
+	info.Signed = parseTime("signed")
+	info.ValidFrom = parseTime("validFrom")
+	info.ValidUntil = parseTime("validUntil")
+
+	return info
+}
+
+func convertCBORValue(v any) any {
+	switch val := v.(type) {
+	case map[any]any:
+		return convertCBORMapToStringKeys(val)
+	case []any:
+		result := make([]any, len(val))
+		for i, item := range val {
+			result[i] = convertCBORValue(item)
+		}
+		return result
+	case cbor.Tag:
+		if val.Number == 0 {
+			// Date-time string
+			if s, ok := val.Content.(string); ok {
+				return s
+			}
+		}
+		if val.Number == 24 {
+			if b, ok := val.Content.([]byte); ok {
+				decoded, err := decodeCBOR(b)
+				if err == nil {
+					return convertCBORValue(decoded)
+				}
+			}
+		}
+		return convertCBORValue(val.Content)
+	default:
+		return v
+	}
+}

@@ -105,7 +105,7 @@ func PrintSDJWT(token *sdjwt.Token, opts Options) {
 
 	// Header
 	printSection("Header")
-	printMap(token.Header, 1)
+	printMapFiltered(token.Header, 1, opts.Verbose, "x5c")
 
 	// Payload (without resolving disclosures)
 	printSection("Payload (signed claims)")
@@ -170,7 +170,7 @@ func PrintJWT(token *sdjwt.Token, opts Options) {
 
 	// Header
 	printSection("Header")
-	printMap(token.Header, 1)
+	printMapFiltered(token.Header, 1, opts.Verbose, "x5c")
 
 	// Payload
 	printSection("Payload")
@@ -256,8 +256,8 @@ func PrintMDOC(doc *mdoc.Document, opts Options) {
 			printMap(mso.Status, 1)
 		}
 
-		// Device Key
-		if mso.DeviceKeyInfo != nil {
+		// Device Key (verbose only)
+		if mso.DeviceKeyInfo != nil && opts.Verbose {
 			printSection("Device Key")
 			printMap(mso.DeviceKeyInfo, 1)
 		}
@@ -374,6 +374,31 @@ func printKV(key, value string, indent int) {
 	prefix := strings.Repeat("  ", indent)
 	labelColor.Printf("%s%s: ", prefix, key)
 	valueColor.Println(value)
+}
+
+// printMapFiltered prints a map but hides verbose-only keys unless verbose is true.
+// When a key is hidden, a summary line is shown instead.
+func printMapFiltered(m map[string]any, indent int, verbose bool, hiddenKeys ...string) {
+	if verbose {
+		printMap(m, indent)
+		return
+	}
+	hidden := make(map[string]bool, len(hiddenKeys))
+	for _, k := range hiddenKeys {
+		hidden[k] = true
+	}
+	keys := sortedKeys(m)
+	prefix := strings.Repeat("  ", indent)
+	for _, k := range keys {
+		if hidden[k] {
+			if arr, ok := m[k].([]any); ok {
+				dimColor.Printf("%s%s: (%d entries, use -v to show)\n", prefix, k, len(arr))
+			}
+			continue
+		}
+		labelColor.Printf("%s%s: ", prefix, k)
+		fmt.Println(formatValue(m[k]))
+	}
 }
 
 func printMap(m map[string]any, indent int) {

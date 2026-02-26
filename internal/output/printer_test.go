@@ -1,9 +1,97 @@
 package output
 
 import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/fatih/color"
 )
+
+// captureOutput captures all terminal output (both fmt and color) during fn execution.
+func captureOutput(fn func()) string {
+	color.NoColor = true
+	defer func() { color.NoColor = false }()
+
+	r, w, _ := os.Pipe()
+
+	oldStdout := os.Stdout
+	oldOutput := color.Output
+	os.Stdout = w
+	color.Output = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = oldStdout
+	color.Output = oldOutput
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestPrintMapFiltered_HidesX5cByDefault(t *testing.T) {
+	m := map[string]any{
+		"alg": "ES256",
+		"typ": "dc+sd-jwt",
+		"x5c": []any{"MIIC...", "MIID..."},
+	}
+
+	out := captureOutput(func() {
+		printMapFiltered(m, 1, false, "x5c")
+	})
+
+	if strings.Contains(out, "MIIC") {
+		t.Error("x5c certificate data should be hidden when not verbose")
+	}
+	if !strings.Contains(out, "x5c: (2 entries, use -v to show)") {
+		t.Error("expected x5c summary line")
+	}
+	if !strings.Contains(out, "alg: ES256") {
+		t.Error("non-hidden keys should still be shown")
+	}
+}
+
+func TestPrintMapFiltered_ShowsX5cWhenVerbose(t *testing.T) {
+	m := map[string]any{
+		"alg": "ES256",
+		"x5c": []any{"MIIC...", "MIID..."},
+	}
+
+	out := captureOutput(func() {
+		printMapFiltered(m, 1, true, "x5c")
+	})
+
+	if !strings.Contains(out, "MIIC") {
+		t.Error("x5c certificate data should be shown in verbose mode")
+	}
+	if strings.Contains(out, "use -v to show") {
+		t.Error("should not show summary hint in verbose mode")
+	}
+}
+
+func TestPrintMapFiltered_NonArrayHiddenKey(t *testing.T) {
+	m := map[string]any{
+		"alg":    "ES256",
+		"secret": "hidden-string",
+	}
+
+	out := captureOutput(func() {
+		printMapFiltered(m, 1, false, "secret")
+	})
+
+	if strings.Contains(out, "hidden-string") {
+		t.Error("hidden non-array key should not show its value")
+	}
+	// Non-array hidden keys are silently omitted (no summary line)
+	if strings.Contains(out, "secret") {
+		t.Error("non-array hidden key should be silently omitted")
+	}
+}
 
 func TestRelativeTime(t *testing.T) {
 	now := time.Date(2026, 2, 26, 12, 0, 0, 0, time.UTC)

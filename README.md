@@ -105,7 +105,7 @@ mDOC Credential
   resident_street: HEIDESTRAẞE 17
 ```
 
-With `-v`, each claim also shows its `digestID`. With `--json`, output is machine-readable:
+With `-v`, each claim also shows its `digestID`, x5c certificate chains are displayed, and mDOC device key info is included. With `--json`, output is machine-readable:
 
 ```json
 {
@@ -229,7 +229,7 @@ ssi-debugger dcql credential.txt
 |--------------|--------------------------|
 | `--json`     | Output as JSON           |
 | `--no-color` | Disable colored output   |
-| `-v`         | Verbose output           |
+| `-v`         | Verbose output (x5c chain, device key, digest IDs) |
 
 ## License
 

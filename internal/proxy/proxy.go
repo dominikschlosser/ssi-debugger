@@ -139,8 +139,12 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	}
 
 	Classify(entry)
-	s.store.Add(entry)
-	PrintEntry(entry)
+
+	// Only log OID4VP/VCI-related traffic, skip unrelated requests
+	if entry.Class != ClassUnknown {
+		s.store.Add(entry)
+		PrintEntry(entry)
+	}
 
 	return nil
 }

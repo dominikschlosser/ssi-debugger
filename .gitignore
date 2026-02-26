@@ -1,2 +1,3 @@
 ssi-debugger
 dist/
+.playwright-mcp/

@@ -121,4 +121,4 @@ ssi-debugger dcql credential.txt
 
 ## License
 
-MIT
+Apache-2.0

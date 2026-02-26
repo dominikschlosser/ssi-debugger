@@ -1,0 +1,153 @@
+package format
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"testing"
+)
+
+func makeJWT(header, payload map[string]any, sig string) string {
+	h, _ := json.Marshal(header)
+	p, _ := json.Marshal(payload)
+	return base64.RawURLEncoding.EncodeToString(h) + "." +
+		base64.RawURLEncoding.EncodeToString(p) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(sig))
+}
+
+func TestParseJWTParts_Valid(t *testing.T) {
+	jwt := makeJWT(
+		map[string]any{"alg": "ES256", "typ": "JWT"},
+		map[string]any{"sub": "user123", "iss": "https://example.com"},
+		"test-sig",
+	)
+
+	header, payload, sig, err := ParseJWTParts(jwt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if header["alg"] != "ES256" {
+		t.Errorf("header.alg = %v, want ES256", header["alg"])
+	}
+	if header["typ"] != "JWT" {
+		t.Errorf("header.typ = %v, want JWT", header["typ"])
+	}
+	if payload["sub"] != "user123" {
+		t.Errorf("payload.sub = %v, want user123", payload["sub"])
+	}
+	if payload["iss"] != "https://example.com" {
+		t.Errorf("payload.iss = %v, want https://example.com", payload["iss"])
+	}
+	if len(sig) == 0 {
+		t.Error("expected non-empty signature bytes")
+	}
+}
+
+func TestParseJWTParts_EmptySignature(t *testing.T) {
+	h, _ := json.Marshal(map[string]any{"alg": "none"})
+	p, _ := json.Marshal(map[string]any{"sub": "test"})
+	jwt := base64.RawURLEncoding.EncodeToString(h) + "." +
+		base64.RawURLEncoding.EncodeToString(p) + "."
+
+	header, payload, _, err := ParseJWTParts(jwt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if header["alg"] != "none" {
+		t.Errorf("header.alg = %v, want none", header["alg"])
+	}
+	if payload["sub"] != "test" {
+		t.Errorf("payload.sub = %v, want test", payload["sub"])
+	}
+}
+
+func TestParseJWTParts_TwoParts(t *testing.T) {
+	_, _, _, err := ParseJWTParts("part1.part2")
+	if err == nil {
+		t.Error("expected error for 2-part input")
+	}
+}
+
+func TestParseJWTParts_FourParts(t *testing.T) {
+	// SplitN with 3 means the third part contains the rest, so "a.b.c.d" → ["a","b","c.d"]
+	// The third part "c.d" is not valid base64url for sig but that's silently ignored.
+	// Header/payload still need to be valid though.
+	_, _, _, err := ParseJWTParts("not-base64.not-base64.c.d")
+	if err == nil {
+		t.Error("expected error for invalid base64url header")
+	}
+}
+
+func TestParseJWTParts_InvalidHeaderBase64(t *testing.T) {
+	_, _, _, err := ParseJWTParts("!!!.aGVsbG8.c2ln")
+	if err == nil {
+		t.Error("expected error for invalid header base64url")
+	}
+}
+
+func TestParseJWTParts_InvalidPayloadBase64(t *testing.T) {
+	h, _ := json.Marshal(map[string]any{"alg": "ES256"})
+	jwt := base64.RawURLEncoding.EncodeToString(h) + ".!!!.c2ln"
+	_, _, _, err := ParseJWTParts(jwt)
+	if err == nil {
+		t.Error("expected error for invalid payload base64url")
+	}
+}
+
+func TestParseJWTParts_InvalidHeaderJSON(t *testing.T) {
+	// Valid base64url but not JSON
+	notJSON := base64.RawURLEncoding.EncodeToString([]byte("not json"))
+	p, _ := json.Marshal(map[string]any{"sub": "test"})
+	jwt := notJSON + "." + base64.RawURLEncoding.EncodeToString(p) + ".c2ln"
+	_, _, _, err := ParseJWTParts(jwt)
+	if err == nil {
+		t.Error("expected error for non-JSON header")
+	}
+}
+
+func TestParseJWTParts_InvalidPayloadJSON(t *testing.T) {
+	h, _ := json.Marshal(map[string]any{"alg": "ES256"})
+	notJSON := base64.RawURLEncoding.EncodeToString([]byte("not json"))
+	jwt := base64.RawURLEncoding.EncodeToString(h) + "." + notJSON + ".c2ln"
+	_, _, _, err := ParseJWTParts(jwt)
+	if err == nil {
+		t.Error("expected error for non-JSON payload")
+	}
+}
+
+func TestParseJWTParts_NestedPayload(t *testing.T) {
+	jwt := makeJWT(
+		map[string]any{"alg": "ES256"},
+		map[string]any{
+			"iss":    "https://example.com",
+			"nested": map[string]any{"key": "value"},
+			"arr":    []any{1, 2, 3},
+		},
+		"sig",
+	)
+
+	_, payload, _, err := ParseJWTParts(jwt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	nested, ok := payload["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested map, got %T", payload["nested"])
+	}
+	if nested["key"] != "value" {
+		t.Errorf("nested.key = %v, want value", nested["key"])
+	}
+	arr, ok := payload["arr"].([]any)
+	if !ok {
+		t.Fatalf("expected arr slice, got %T", payload["arr"])
+	}
+	if len(arr) != 3 {
+		t.Errorf("arr length = %d, want 3", len(arr))
+	}
+}
+
+func TestParseJWTParts_EmptyInput(t *testing.T) {
+	_, _, _, err := ParseJWTParts("")
+	if err == nil {
+		t.Error("expected error for empty input")
+	}
+}

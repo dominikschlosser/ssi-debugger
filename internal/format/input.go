@@ -49,7 +49,7 @@ func ReadInput(input string) (string, error) {
 
 	// Try as URL
 	if strings.HasPrefix(input, "https://") || strings.HasPrefix(input, "http://") {
-		return fetchURL(input)
+		return FetchURL(input)
 	}
 
 	// Try as file path
@@ -65,7 +65,8 @@ func ReadInput(input string) (string, error) {
 	return input, nil
 }
 
-func fetchURL(url string) (string, error) {
+// FetchURL fetches content from a URL and returns it as a trimmed string.
+func FetchURL(url string) (string, error) {
 	resp, err := httpClient.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", url, err)

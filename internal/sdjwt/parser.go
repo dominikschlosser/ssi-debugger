@@ -155,33 +155,10 @@ func checkFullyUndisclosedChildren(disclosures []Disclosure) []string {
 }
 
 func parseJWT(raw string) (*JWT, error) {
-	parts := strings.SplitN(raw, ".", 3)
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("expected 3 parts separated by '.', got %d", len(parts))
-	}
-
-	headerBytes, err := format.DecodeBase64URL(parts[0])
+	header, payload, sig, err := format.ParseJWTParts(raw)
 	if err != nil {
-		return nil, fmt.Errorf("decoding header: %w", err)
+		return nil, err
 	}
-
-	payloadBytes, err := format.DecodeBase64URL(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decoding payload: %w", err)
-	}
-
-	var header map[string]any
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, fmt.Errorf("unmarshaling header: %w", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return nil, fmt.Errorf("unmarshaling payload: %w", err)
-	}
-
-	sig, _ := format.DecodeBase64URL(parts[2])
-
 	return &JWT{
 		Raw:       raw,
 		Header:    header,

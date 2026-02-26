@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
+	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
 	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
 )
 
@@ -449,6 +450,368 @@ func TestBuildMDOCJSON_MultipleNamespaces(t *testing.T) {
 	ns2 := claims["org.iso.18013.5.1"].(map[string]any)
 	if ns2["portrait"] != "base64data" {
 		t.Errorf("ns2.portrait = %v, want base64data", ns2["portrait"])
+	}
+}
+
+func TestBuildCredentialOfferJSON_Basic(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"pid", "mdl"},
+	}
+	result := BuildCredentialOfferJSON(offer)
+
+	if result["type"] != "OID4VCI Credential Offer" {
+		t.Errorf("type = %v, want OID4VCI Credential Offer", result["type"])
+	}
+	if result["credential_issuer"] != "https://issuer.example" {
+		t.Errorf("credential_issuer = %v, want https://issuer.example", result["credential_issuer"])
+	}
+	ids := result["credential_configuration_ids"].([]string)
+	if len(ids) != 2 || ids[0] != "pid" || ids[1] != "mdl" {
+		t.Errorf("unexpected credential_configuration_ids: %v", ids)
+	}
+}
+
+func TestBuildCredentialOfferJSON_WithGrants(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"pid"},
+		Grants: openid4.OfferGrants{
+			PreAuthorizedCode: "code123",
+			TxCode:            map[string]any{"input_mode": "numeric", "length": float64(6)},
+			IssuerState:       "state456",
+		},
+	}
+	result := BuildCredentialOfferJSON(offer)
+
+	grants, ok := result["grants"].(map[string]any)
+	if !ok {
+		t.Fatalf("grants should be map, got %T", result["grants"])
+	}
+	preAuth := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any)
+	if preAuth["pre-authorized_code"] != "code123" {
+		t.Errorf("pre-authorized_code = %v, want code123", preAuth["pre-authorized_code"])
+	}
+	txCode := preAuth["tx_code"].(map[string]any)
+	if txCode["input_mode"] != "numeric" {
+		t.Errorf("tx_code.input_mode = %v, want numeric", txCode["input_mode"])
+	}
+	authCode := grants["authorization_code"].(map[string]any)
+	if authCode["issuer_state"] != "state456" {
+		t.Errorf("issuer_state = %v, want state456", authCode["issuer_state"])
+	}
+}
+
+func TestBuildCredentialOfferJSON_NoGrants(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"pid"},
+	}
+	result := BuildCredentialOfferJSON(offer)
+
+	if _, ok := result["grants"]; ok {
+		t.Error("grants should be omitted when empty")
+	}
+}
+
+func TestBuildAuthorizationRequestJSON_Basic(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "https://verifier.example",
+		ResponseType: "vp_token",
+		ResponseMode: "direct_post",
+		Nonce:        "n1",
+		State:        "s1",
+		ResponseURI:  "https://verifier.example/cb",
+	}
+	result := BuildAuthorizationRequestJSON(req)
+
+	if result["type"] != "OID4VP Authorization Request" {
+		t.Errorf("type = %v", result["type"])
+	}
+	if result["client_id"] != "https://verifier.example" {
+		t.Errorf("client_id = %v", result["client_id"])
+	}
+	if result["response_type"] != "vp_token" {
+		t.Errorf("response_type = %v", result["response_type"])
+	}
+	if result["response_mode"] != "direct_post" {
+		t.Errorf("response_mode = %v", result["response_mode"])
+	}
+	if result["nonce"] != "n1" {
+		t.Errorf("nonce = %v", result["nonce"])
+	}
+	if result["state"] != "s1" {
+		t.Errorf("state = %v", result["state"])
+	}
+	if result["response_uri"] != "https://verifier.example/cb" {
+		t.Errorf("response_uri = %v", result["response_uri"])
+	}
+}
+
+func TestBuildAuthorizationRequestJSON_EmptyFieldsOmitted(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+	}
+	result := BuildAuthorizationRequestJSON(req)
+
+	for _, key := range []string{"response_mode", "nonce", "state", "redirect_uri", "response_uri", "scope"} {
+		if _, ok := result[key]; ok {
+			t.Errorf("%s should be omitted when empty", key)
+		}
+	}
+}
+
+func TestBuildAuthorizationRequestJSON_WithRequestObject(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		RequestObject: &openid4.RequestObjectJWT{
+			Header:  map[string]any{"alg": "ES256"},
+			Payload: map[string]any{"client_id": "v", "nonce": "n"},
+		},
+	}
+	result := BuildAuthorizationRequestJSON(req)
+
+	ro, ok := result["request_object"].(map[string]any)
+	if !ok {
+		t.Fatalf("request_object should be map, got %T", result["request_object"])
+	}
+	header := ro["header"].(map[string]any)
+	if header["alg"] != "ES256" {
+		t.Errorf("request_object.header.alg = %v", header["alg"])
+	}
+}
+
+func TestBuildAuthorizationRequestJSON_WithPD(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		PresentationDefinition: map[string]any{
+			"id":                "pd1",
+			"input_descriptors": []any{},
+		},
+	}
+	result := BuildAuthorizationRequestJSON(req)
+
+	pd := result["presentation_definition"].(map[string]any)
+	if pd["id"] != "pd1" {
+		t.Errorf("pd.id = %v, want pd1", pd["id"])
+	}
+}
+
+func TestBuildAuthorizationRequestJSON_WithDCQL(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		DCQLQuery:    map[string]any{"credentials": []any{}},
+	}
+	result := BuildAuthorizationRequestJSON(req)
+
+	dq := result["dcql_query"].(map[string]any)
+	if dq["credentials"] == nil {
+		t.Error("expected dcql_query.credentials")
+	}
+}
+
+func TestPrintCredentialOffer_Terminal(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"org.iso.18013.5.1.mDL", "eu.europa.ec.eudi.pid.1"},
+		Grants: openid4.OfferGrants{
+			PreAuthorizedCode: "code-abc",
+			TxCode:            map[string]any{"input_mode": "numeric", "length": float64(4)},
+		},
+	}
+
+	out := captureOutput(func() {
+		PrintCredentialOffer(offer, Options{})
+	})
+
+	if !strings.Contains(out, "OID4VCI Credential Offer") {
+		t.Error("missing title")
+	}
+	if !strings.Contains(out, "https://issuer.example") {
+		t.Error("missing issuer")
+	}
+	if !strings.Contains(out, "org.iso.18013.5.1.mDL") {
+		t.Error("missing first credential config")
+	}
+	if !strings.Contains(out, "eu.europa.ec.eudi.pid.1") {
+		t.Error("missing second credential config")
+	}
+	if !strings.Contains(out, "code-abc") {
+		t.Error("missing pre-authorized code")
+	}
+	if !strings.Contains(out, "input_mode=numeric") {
+		t.Error("missing tx_code input_mode")
+	}
+	if !strings.Contains(out, "length=4") {
+		t.Error("missing tx_code length")
+	}
+}
+
+func TestPrintCredentialOffer_NoGrants(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"pid"},
+	}
+
+	out := captureOutput(func() {
+		PrintCredentialOffer(offer, Options{})
+	})
+
+	if strings.Contains(out, "Grants") {
+		t.Error("should not show Grants section when empty")
+	}
+}
+
+func TestPrintAuthorizationRequest_Terminal(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "https://verifier.example",
+		ResponseType: "vp_token",
+		ResponseMode: "direct_post",
+		Nonce:        "nonce-123",
+		State:        "state-456",
+		ResponseURI:  "https://verifier.example/callback",
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{})
+	})
+
+	if !strings.Contains(out, "OID4VP Authorization Request") {
+		t.Error("missing title")
+	}
+	if !strings.Contains(out, "https://verifier.example") {
+		t.Error("missing client_id")
+	}
+	if !strings.Contains(out, "vp_token") {
+		t.Error("missing response_type")
+	}
+	if !strings.Contains(out, "direct_post") {
+		t.Error("missing response_mode")
+	}
+	if !strings.Contains(out, "nonce-123") {
+		t.Error("missing nonce")
+	}
+	if !strings.Contains(out, "state-456") {
+		t.Error("missing state")
+	}
+}
+
+func TestPrintAuthorizationRequest_WithRequestObject(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		RequestObject: &openid4.RequestObjectJWT{
+			Header:  map[string]any{"alg": "ES256", "kid": "key-1"},
+			Payload: map[string]any{"client_id": "v", "nonce": "n"},
+		},
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{})
+	})
+
+	if !strings.Contains(out, "Request Object (JWT)") {
+		t.Error("missing Request Object section")
+	}
+	if !strings.Contains(out, "ES256") {
+		t.Error("missing alg in request object header")
+	}
+	if !strings.Contains(out, "key-1") {
+		t.Error("missing kid in request object header")
+	}
+}
+
+func TestPrintAuthorizationRequest_WithPD(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		PresentationDefinition: map[string]any{
+			"id":                "pd-test",
+			"input_descriptors": []any{},
+		},
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{})
+	})
+
+	if !strings.Contains(out, "Presentation Definition") {
+		t.Error("missing Presentation Definition section")
+	}
+	if !strings.Contains(out, "pd-test") {
+		t.Error("missing PD id in output")
+	}
+}
+
+func TestPrintAuthorizationRequest_WithDCQL(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		DCQLQuery:    map[string]any{"credentials": []any{}},
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{})
+	})
+
+	if !strings.Contains(out, "DCQL Query") {
+		t.Error("missing DCQL Query section")
+	}
+}
+
+func TestPrintAuthorizationRequest_NoSessionWhenEmpty(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{})
+	})
+
+	if strings.Contains(out, "Session") {
+		t.Error("should not show Session section when nonce and state are empty")
+	}
+}
+
+func TestPrintCredentialOffer_JSON(t *testing.T) {
+	offer := &openid4.CredentialOffer{
+		CredentialIssuer:           "https://issuer.example",
+		CredentialConfigurationIDs: []string{"pid"},
+	}
+
+	out := captureOutput(func() {
+		PrintCredentialOffer(offer, Options{JSON: true})
+	})
+
+	if !strings.Contains(out, `"credential_issuer"`) {
+		t.Error("JSON output should contain credential_issuer key")
+	}
+	if !strings.Contains(out, "https://issuer.example") {
+		t.Error("JSON output should contain issuer value")
+	}
+}
+
+func TestPrintAuthorizationRequest_JSON(t *testing.T) {
+	req := &openid4.AuthorizationRequest{
+		ClientID:     "v",
+		ResponseType: "vp_token",
+		Nonce:        "n1",
+	}
+
+	out := captureOutput(func() {
+		PrintAuthorizationRequest(req, Options{JSON: true})
+	})
+
+	if !strings.Contains(out, `"client_id"`) {
+		t.Error("JSON output should contain client_id key")
+	}
+	if !strings.Contains(out, `"nonce"`) {
+		t.Error("JSON output should contain nonce key")
 	}
 }
 

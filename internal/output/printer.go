@@ -24,6 +24,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
+	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
 	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
 )
 
@@ -506,6 +507,209 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// BuildCredentialOfferJSON returns the JSON-serializable map for a credential offer.
+func BuildCredentialOfferJSON(offer *openid4.CredentialOffer) map[string]any {
+	out := map[string]any{
+		"type":                         "OID4VCI Credential Offer",
+		"credential_issuer":            offer.CredentialIssuer,
+		"credential_configuration_ids": offer.CredentialConfigurationIDs,
+	}
+	grants := map[string]any{}
+	if offer.Grants.PreAuthorizedCode != "" {
+		preAuth := map[string]any{
+			"pre-authorized_code": offer.Grants.PreAuthorizedCode,
+		}
+		if offer.Grants.TxCode != nil {
+			preAuth["tx_code"] = offer.Grants.TxCode
+		}
+		grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"] = preAuth
+	}
+	if offer.Grants.AuthorizationCode != "" || offer.Grants.IssuerState != "" {
+		authCode := map[string]any{}
+		if offer.Grants.AuthorizationCode != "" {
+			authCode["authorization_code"] = offer.Grants.AuthorizationCode
+		}
+		if offer.Grants.IssuerState != "" {
+			authCode["issuer_state"] = offer.Grants.IssuerState
+		}
+		grants["authorization_code"] = authCode
+	}
+	if len(grants) > 0 {
+		out["grants"] = grants
+	}
+	return out
+}
+
+// PrintCredentialOffer prints a decoded OID4VCI credential offer to the terminal.
+func PrintCredentialOffer(offer *openid4.CredentialOffer, opts Options) {
+	if opts.JSON {
+		PrintJSON(BuildCredentialOfferJSON(offer))
+		return
+	}
+
+	headerColor.Println("OID4VCI Credential Offer")
+	headerColor.Println(strings.Repeat("─", 50))
+
+	printSection("Issuer")
+	printKV("Credential Issuer", offer.CredentialIssuer, 1)
+
+	if len(offer.CredentialConfigurationIDs) > 0 {
+		printSection("Credential Configurations")
+		for i, id := range offer.CredentialConfigurationIDs {
+			dimColor.Printf("  [%d] ", i+1)
+			valueColor.Println(id)
+		}
+	}
+
+	hasGrants := offer.Grants.PreAuthorizedCode != "" || offer.Grants.AuthorizationCode != "" || offer.Grants.IssuerState != ""
+	if hasGrants {
+		printSection("Grants")
+		if offer.Grants.PreAuthorizedCode != "" {
+			printKV("Pre-Authorized Code", offer.Grants.PreAuthorizedCode, 1)
+			if offer.Grants.TxCode != nil {
+				parts := []string{}
+				if mode, ok := offer.Grants.TxCode["input_mode"].(string); ok {
+					parts = append(parts, "input_mode="+mode)
+				}
+				if length, ok := offer.Grants.TxCode["length"].(float64); ok {
+					parts = append(parts, fmt.Sprintf("length=%d", int(length)))
+				}
+				if desc, ok := offer.Grants.TxCode["description"].(string); ok {
+					parts = append(parts, "description="+desc)
+				}
+				printKV("TX Code", strings.Join(parts, ", "), 1)
+			}
+		}
+		if offer.Grants.AuthorizationCode != "" {
+			printKV("Authorization Code", offer.Grants.AuthorizationCode, 1)
+		}
+		if offer.Grants.IssuerState != "" {
+			printKV("Issuer State", offer.Grants.IssuerState, 1)
+		}
+	}
+
+	if opts.Verbose && offer.FullJSON != nil {
+		printSection("Full JSON")
+		printMap(offer.FullJSON, 1)
+	}
+
+	fmt.Println()
+}
+
+// BuildAuthorizationRequestJSON returns the JSON-serializable map for an authorization request.
+func BuildAuthorizationRequestJSON(req *openid4.AuthorizationRequest) map[string]any {
+	out := map[string]any{
+		"type": "OID4VP Authorization Request",
+	}
+	if req.ClientID != "" {
+		out["client_id"] = req.ClientID
+	}
+	if req.ResponseType != "" {
+		out["response_type"] = req.ResponseType
+	}
+	if req.ResponseMode != "" {
+		out["response_mode"] = req.ResponseMode
+	}
+	if req.Nonce != "" {
+		out["nonce"] = req.Nonce
+	}
+	if req.State != "" {
+		out["state"] = req.State
+	}
+	if req.RedirectURI != "" {
+		out["redirect_uri"] = req.RedirectURI
+	}
+	if req.ResponseURI != "" {
+		out["response_uri"] = req.ResponseURI
+	}
+	if req.Scope != "" {
+		out["scope"] = req.Scope
+	}
+	if req.RequestObject != nil {
+		out["request_object"] = map[string]any{
+			"header":  req.RequestObject.Header,
+			"payload": req.RequestObject.Payload,
+		}
+	}
+	if req.PresentationDefinition != nil {
+		out["presentation_definition"] = req.PresentationDefinition
+	}
+	if req.DCQLQuery != nil {
+		out["dcql_query"] = req.DCQLQuery
+	}
+	return out
+}
+
+// PrintAuthorizationRequest prints a decoded OID4VP authorization request to the terminal.
+func PrintAuthorizationRequest(req *openid4.AuthorizationRequest, opts Options) {
+	if opts.JSON {
+		PrintJSON(BuildAuthorizationRequestJSON(req))
+		return
+	}
+
+	headerColor.Println("OID4VP Authorization Request")
+	headerColor.Println(strings.Repeat("─", 50))
+
+	printSection("Client")
+	if req.ClientID != "" {
+		printKV("Client ID", req.ClientID, 1)
+	}
+	if req.ResponseType != "" {
+		printKV("Response Type", req.ResponseType, 1)
+	}
+	if req.ResponseMode != "" {
+		printKV("Response Mode", req.ResponseMode, 1)
+	}
+	if req.RedirectURI != "" {
+		printKV("Redirect URI", req.RedirectURI, 1)
+	}
+	if req.ResponseURI != "" {
+		printKV("Response URI", req.ResponseURI, 1)
+	}
+	if req.Scope != "" {
+		printKV("Scope", req.Scope, 1)
+	}
+
+	if req.Nonce != "" || req.State != "" {
+		printSection("Session")
+		if req.Nonce != "" {
+			printKV("Nonce", req.Nonce, 1)
+		}
+		if req.State != "" {
+			printKV("State", req.State, 1)
+		}
+	}
+
+	if req.RequestObject != nil {
+		printSection("Request Object (JWT)")
+		labelColor.Println("  Header:")
+		printMap(req.RequestObject.Header, 2)
+		labelColor.Println("  Payload:")
+		printMap(req.RequestObject.Payload, 2)
+	}
+
+	if req.PresentationDefinition != nil {
+		printSection("Presentation Definition")
+		b, _ := json.MarshalIndent(req.PresentationDefinition, "  ", "  ")
+		fmt.Printf("  %s\n", string(b))
+	}
+
+	if req.DCQLQuery != nil {
+		printSection("DCQL Query")
+		b, _ := json.MarshalIndent(req.DCQLQuery, "  ", "  ")
+		fmt.Printf("  %s\n", string(b))
+	}
+
+	if opts.Verbose && len(req.FullParams) > 0 {
+		printSection("All Parameters")
+		for _, k := range sortedKeys(req.FullParams) {
+			printKV(k, req.FullParams[k], 1)
+		}
+	}
+
+	fmt.Println()
 }
 
 // PrintError prints an error message.

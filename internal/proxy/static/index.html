@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSI Debugger Proxy</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>SSI Debugger Proxy</h1>
+    <div class="header-right">
+      <span id="status" class="status">Connected</span>
+      <button class="btn" id="theme-toggle">Theme</button>
+      <button class="btn" id="clear-btn">Clear</button>
+    </div>
+  </header>
+  <div class="entries" id="entries">
+    <div class="empty-state" id="empty">Waiting for traffic...</div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

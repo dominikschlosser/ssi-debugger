@@ -7,6 +7,14 @@ A local-first CLI tool for decoding, validating, and inspecting SSI credentials 
 
 No network calls by default. Decode and verify credentials entirely offline.
 
+## Highlights
+
+- **Reverse Proxy** — intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
+- **Web UI** — paste and decode credentials in a split-pane browser interface ([serve](#serve))
+- **QR Screen Capture** — scan a QR code straight from your screen to decode OID4VP/VCI requests ([openid --screen](#qr-code-scanning))
+- **Offline Decode & Validate** — SD-JWT, mDOC, JWT with signature verification and trust list support
+- **DCQL Generation** — generate Digital Credentials Query Language queries from existing credentials
+
 ## Install
 
 ### From GitHub Releases
@@ -40,14 +48,92 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 
 | Command    | Purpose                                                    |
 |------------|------------------------------------------------------------|
+| `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
+| `serve`    | Web UI for decoding credentials in the browser             |
 | `decode`   | Auto-detect & decode SD-JWT or mDOC, show all claims       |
 | `validate` | Decode + verify signatures, check status/trust              |
+| `openid`   | Decode OID4VCI credential offers or OID4VP auth requests    |
+| `dcql`     | Generate a DCQL query from a credential's claims            |
 | `status`   | Check revocation via status list (network call)             |
 | `trust`    | Inspect an ETSI TS 119 602 trust list JWT                   |
-| `dcql`     | Generate a DCQL query from a credential's claims            |
-| `openid`   | Decode OID4VCI credential offers or OID4VP auth requests     |
-| `serve`    | Start a local web UI for decoding credentials               |
 | `version`  | Print version                                               |
+
+---
+
+### Proxy
+
+Intercept and debug OID4VP/VCI traffic between a wallet and a verifier/issuer. Point your wallet at the proxy instead of the real server — every request and response is captured, classified by protocol step, decoded, and displayed both in the terminal and a live web dashboard.
+
+```bash
+ssi-debugger proxy --target http://localhost:8080
+ssi-debugger proxy --target http://localhost:8080 --port 9090 --dashboard 9091
+ssi-debugger proxy --target http://localhost:8080 --no-dashboard
+```
+
+```
+Wallet  <-->  Proxy (:9090)  <-->  Verifier/Issuer (:8080)
+                  |
+            Live dashboard (:9091)
+```
+
+Traffic is automatically classified into protocol steps:
+
+| Badge               | Detected when                                       |
+|---------------------|-----------------------------------------------------|
+| VP Auth Request     | `client_id` + `response_type=vp_token` in query     |
+| VP Request Object   | Response body is a JWT (request object fetch)        |
+| VP Auth Response    | POST body contains `vp_token`                        |
+| VCI Credential Offer| `credential_offer` / `credential_offer_uri` in query |
+| VCI Metadata        | Path contains `.well-known/openid-credential-issuer` |
+| VCI Token Request   | POST to path ending `/token`                         |
+| VCI Credential Req  | POST to path ending `/credential`                    |
+
+Decoded payloads are shown inline — JWT headers/payloads, credential offer JSON, vp_token contents (SD-JWT, JWT, mDOC), token responses, and more.
+
+The **web dashboard** at `http://localhost:9091` shows the same traffic with expandable cards, live SSE updates, and dark/light theme support. Open it alongside your terminal for full visibility.
+
+| Flag             | Default | Description                              |
+|------------------|---------|------------------------------------------|
+| `--target`       | —       | URL of the verifier/issuer (required)    |
+| `--port`         | `9090`  | Proxy listen port                        |
+| `--dashboard`    | `9091`  | Dashboard listen port                    |
+| `--no-dashboard` | `false` | Disable web dashboard                    |
+
+Terminal output example:
+
+```
+━━━ [14:32:05] GET /authorize?client_id=...  ← 200 (45ms)  [VP Auth Request]
+    ┌ client_id: did:web:verifier.example
+    ┌ response_mode: direct_post
+    ┌ nonce: abc123
+
+━━━ [14:32:06] POST /response  ← 200 (89ms)  [VP Auth Response]
+    ┌ vp_token_preview: eyJhbGciOiJFUzI1NiIsInR5cCI6InZjK3NkLWp3dCJ9.eyJpc3MiOi...
+    ┌ state: xyz456
+```
+
+---
+
+### Serve
+
+Start a local web UI for pasting and decoding credentials in the browser.
+
+```bash
+ssi-debugger serve
+ssi-debugger serve --port 3000
+ssi-debugger serve credential.txt
+ssi-debugger serve "eyJhbGci..."
+```
+
+Opens a split-pane interface at `http://localhost:8080` (default) where you can paste SD-JWT, JWT, or mDOC credentials and instantly see decoded output. Features include auto-decode on paste, format detection badges, collapsible sections, JSON syntax highlighting, cross-highlighting between raw and decoded views, signature verification, and dark/light theme toggle.
+
+> **Warning:** Credentials are sent to the server for decoding. Only run `ssi-debugger serve` locally on your own machine — do not expose it on a network or use it with real production credentials on a shared server.
+
+![Web UI screenshot](docs/web-ui.png)
+
+Pass a credential as an argument (file path, URL, or raw string) to pre-fill the input on load. You can also use the `?credential=` query parameter on the URL, e.g. `http://localhost:8080/?credential=eyJhbGci...`.
+
+---
 
 ### Decode
 
@@ -114,19 +200,19 @@ With `-v`, each claim also shows its `digestID`, x5c certificate chains are disp
 {
   "format": "dc+sd-jwt",
   "header": { "alg": "ES256", "typ": "dc+sd-jwt" },
-  "payload": { "iss": "https://issuer.example", "vct": "urn:eudi:pid:1", ... },
+  "payload": { "iss": "https://issuer.example", "vct": "urn:eudi:pid:1", "..." : "..." },
   "resolvedClaims": {
     "given_name": "Erika",
     "family_name": "Mustermann",
-    "birth_date": "1984-08-12",
-    ...
+    "birth_date": "1984-08-12"
   },
   "disclosures": [
-    { "name": "given_name", "value": "Erika", "salt": "...", "digest": "..." },
-    ...
+    { "name": "given_name", "value": "Erika", "salt": "...", "digest": "..." }
   ]
 }
 ```
+
+---
 
 ### Validate
 
@@ -148,87 +234,7 @@ ssi-debugger validate --key key.pem --allow-expired credential.txt
 
 When a trust list is provided and the credential contains an x5c (SD-JWT) or x5chain (mDOC) certificate chain, the chain is validated against the trust list before verifying the signature.
 
-### Status
-
-Check credential revocation via the status list endpoint embedded in the credential.
-
-```bash
-ssi-debugger status credential.txt
-```
-
-### Trust
-
-Inspect an ETSI TS 119 602 trust list JWT. Accepts a file path or URL.
-
-```bash
-ssi-debugger trust trust-list.jwt
-ssi-debugger trust https://example.com/trust-list.jwt
-```
-
-### Serve
-
-Start a local web UI for pasting and decoding credentials in the browser.
-
-```bash
-ssi-debugger serve
-ssi-debugger serve --port 3000
-ssi-debugger serve credential.txt
-ssi-debugger serve "eyJhbGci..."
-```
-
-Opens a split-pane interface at `http://localhost:8080` (default) where you can paste SD-JWT, JWT, or mDOC credentials and instantly see decoded output. Features include auto-decode on paste, format detection badges, collapsible sections, JSON syntax highlighting, cross-highlighting between raw and decoded views, signature verification, and dark/light theme toggle.
-
-> **Warning:** Credentials are sent to the server for decoding. Only run `ssi-debugger serve` locally on your own machine — do not expose it on a network or use it with real production credentials on a shared server.
-
-![Web UI screenshot](docs/web-ui.png)
-
-Pass a credential as an argument (file path, URL, or raw string) to pre-fill the input on load. You can also use the `?credential=` query parameter on the URL, e.g. `http://localhost:8080/?credential=eyJhbGci...`.
-
-### DCQL
-
-Generate a DCQL (Digital Credentials Query Language) query from a credential's claims. Always outputs JSON.
-
-```bash
-ssi-debugger dcql credential.txt
-```
-
-**Example output (SD-JWT):**
-
-```json
-{
-  "credentials": [
-    {
-      "id": "urn_eudi_pid_1",
-      "format": "dc+sd-jwt",
-      "meta": { "vct_values": ["urn:eudi:pid:1"] },
-      "claims": [
-        { "path": ["birth_date"] },
-        { "path": ["family_name"] },
-        { "path": ["given_name"] }
-      ]
-    }
-  ]
-}
-```
-
-**Example output (mDOC):**
-
-```json
-{
-  "credentials": [
-    {
-      "id": "eu_europa_ec_eudi_pid_1",
-      "format": "mso_mdoc",
-      "meta": { "doctype_value": "eu.europa.ec.eudi.pid.1" },
-      "claims": [
-        { "path": ["eu.europa.ec.eudi.pid.1", "birth_date"] },
-        { "path": ["eu.europa.ec.eudi.pid.1", "family_name"] },
-        ...
-      ]
-    }
-  ]
-}
-```
+---
 
 ### OpenID
 
@@ -262,6 +268,54 @@ ssi-debugger openid --screen
 `--screen` uses the native macOS `screencapture` tool in interactive selection mode — a crosshair appears to let you select the region containing the QR code. On other platforms, take a screenshot and use `--qr screenshot.png` instead.
 
 > **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `ssi-debugger` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
+
+---
+
+### DCQL
+
+Generate a DCQL (Digital Credentials Query Language) query from a credential's claims. Always outputs JSON.
+
+```bash
+ssi-debugger dcql credential.txt
+```
+
+**Example output (SD-JWT):**
+
+```json
+{
+  "credentials": [
+    {
+      "id": "urn_eudi_pid_1",
+      "format": "dc+sd-jwt",
+      "meta": { "vct_values": ["urn:eudi:pid:1"] },
+      "claims": [
+        { "path": ["birth_date"] },
+        { "path": ["family_name"] },
+        { "path": ["given_name"] }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### Status
+
+Check credential revocation via the status list endpoint embedded in the credential.
+
+```bash
+ssi-debugger status credential.txt
+```
+
+### Trust
+
+Inspect an ETSI TS 119 602 trust list JWT. Accepts a file path or URL.
+
+```bash
+ssi-debugger trust trust-list.jwt
+ssi-debugger trust https://example.com/trust-list.jwt
+```
 
 ## Supported Formats
 

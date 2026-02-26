@@ -1,0 +1,338 @@
+// Copyright 2025 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package mock
+
+import (
+	"testing"
+
+	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
+)
+
+func TestGenerateMDOC_DefaultClaims(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	if result == "" {
+		t.Fatal("empty output")
+	}
+
+	// Parse with existing parser
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	// Check DocType
+	if doc.DocType != "eu.europa.ec.eudi.pid.1" {
+		t.Errorf("expected docType eu.europa.ec.eudi.pid.1, got %s", doc.DocType)
+	}
+
+	// Check namespace claims
+	ns, ok := doc.NameSpaces["eu.europa.ec.eudi.pid.1"]
+	if !ok {
+		t.Fatal("missing namespace eu.europa.ec.eudi.pid.1")
+	}
+
+	if len(ns) != len(DefaultClaims) {
+		t.Errorf("expected %d claims, got %d", len(DefaultClaims), len(ns))
+	}
+
+	// Check claim names are present
+	claimNames := make(map[string]bool)
+	for _, item := range ns {
+		claimNames[item.ElementIdentifier] = true
+	}
+	for name := range DefaultClaims {
+		if !claimNames[name] {
+			t.Errorf("missing claim %q", name)
+		}
+	}
+
+	// Check MSO
+	if doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
+		t.Fatal("missing IssuerAuth/MSO")
+	}
+	if doc.IssuerAuth.MSO.Version != "1.0" {
+		t.Errorf("expected MSO version 1.0, got %s", doc.IssuerAuth.MSO.Version)
+	}
+	if doc.IssuerAuth.MSO.DigestAlgorithm != "SHA-256" {
+		t.Errorf("expected digest alg SHA-256, got %s", doc.IssuerAuth.MSO.DigestAlgorithm)
+	}
+
+	// Verify COSE signature
+	verifyResult := mdoc.Verify(doc, &key.PublicKey)
+	if !verifyResult.SignatureValid {
+		t.Errorf("COSE signature verification failed: %v", verifyResult.Errors)
+	}
+}
+
+func TestGenerateMDOC_PIDClaims(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    PIDClaims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	ns := doc.NameSpaces["eu.europa.ec.eudi.pid.1"]
+	if len(ns) != len(PIDClaims) {
+		t.Errorf("expected %d claims, got %d", len(PIDClaims), len(ns))
+	}
+
+	verifyResult := mdoc.Verify(doc, &key.PublicKey)
+	if !verifyResult.SignatureValid {
+		t.Errorf("COSE signature verification failed: %v", verifyResult.Errors)
+	}
+}
+
+func TestGenerateMDOC_CustomClaims(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	claims := map[string]any{"name": "Test", "active": true}
+
+	cfg := MDOCConfig{
+		DocType:   "com.example.test",
+		Namespace: "com.example.test",
+		Claims:    claims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	if doc.DocType != "com.example.test" {
+		t.Errorf("expected docType com.example.test, got %s", doc.DocType)
+	}
+
+	verifyResult := mdoc.Verify(doc, &key.PublicKey)
+	if !verifyResult.SignatureValid {
+		t.Errorf("COSE signature verification failed: %v", verifyResult.Errors)
+	}
+}
+
+func TestGenerateMDOC_EmptyClaims(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    map[string]any{},
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	ns := doc.NameSpaces["eu.europa.ec.eudi.pid.1"]
+	if len(ns) != 0 {
+		t.Errorf("expected 0 claims, got %d", len(ns))
+	}
+
+	verifyResult := mdoc.Verify(doc, &key.PublicKey)
+	if !verifyResult.SignatureValid {
+		t.Errorf("COSE signature verification failed: %v", verifyResult.Errors)
+	}
+}
+
+func TestGenerateMDOC_ValidityInfo(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	if doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
+		t.Fatal("missing IssuerAuth/MSO")
+	}
+
+	vi := doc.IssuerAuth.MSO.ValidityInfo
+	if vi == nil {
+		t.Fatal("missing ValidityInfo")
+	}
+	if vi.Signed == nil {
+		t.Error("missing Signed time")
+	}
+	if vi.ValidFrom == nil {
+		t.Error("missing ValidFrom time")
+	}
+	if vi.ValidUntil == nil {
+		t.Error("missing ValidUntil time")
+	}
+	if vi.ValidFrom != nil && vi.ValidUntil != nil {
+		diff := vi.ValidUntil.Sub(*vi.ValidFrom)
+		// Should be ~90 days
+		if diff.Hours() < 89*24 || diff.Hours() > 91*24 {
+			t.Errorf("expected ~90 days validity, got %v", diff)
+		}
+	}
+}
+
+func TestGenerateMDOC_WrongKeyFailsVerify(t *testing.T) {
+	key1, _ := GenerateKey()
+	key2, _ := GenerateKey()
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key1,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	verifyResult := mdoc.Verify(doc, &key2.PublicKey)
+	if verifyResult.SignatureValid {
+		t.Error("COSE signature should not verify with a different key")
+	}
+}
+
+func TestGenerateMDOC_OutputIsHex(t *testing.T) {
+	key, _ := GenerateKey()
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	for _, c := range result {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Fatalf("output is not lowercase hex: found character %q", string(c))
+		}
+	}
+
+	if len(result)%2 != 0 {
+		t.Error("hex output should have even length")
+	}
+}
+
+func TestGenerateMDOC_ClaimValuesPreserved(t *testing.T) {
+	key, _ := GenerateKey()
+
+	claims := map[string]any{
+		"string_val": "hello",
+		"bool_val":   true,
+		"int_val":    42,
+	}
+
+	cfg := MDOCConfig{
+		DocType:   "com.test",
+		Namespace: "com.test",
+		Claims:    claims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatalf("mdoc.Parse: %v", err)
+	}
+
+	ns := doc.NameSpaces["com.test"]
+	found := make(map[string]any)
+	for _, item := range ns {
+		found[item.ElementIdentifier] = item.ElementValue
+	}
+
+	if v, ok := found["string_val"]; !ok || v != "hello" {
+		t.Errorf("string_val: expected hello, got %v", v)
+	}
+	if v, ok := found["bool_val"]; !ok || v != true {
+		t.Errorf("bool_val: expected true, got %v", v)
+	}
+}

@@ -18,7 +18,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -133,5 +133,5 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 		return "", fmt.Errorf("encoding IssuerSigned: %w", err)
 	}
 
-	return hex.EncodeToString(issuerSignedBytes), nil
+	return base64.RawURLEncoding.EncodeToString(issuerSignedBytes), nil
 }

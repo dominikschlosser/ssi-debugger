@@ -271,7 +271,7 @@ func TestGenerateMDOC_WrongKeyFailsVerify(t *testing.T) {
 	}
 }
 
-func TestGenerateMDOC_OutputIsHex(t *testing.T) {
+func TestGenerateMDOC_OutputIsBase64URL(t *testing.T) {
 	key, _ := GenerateKey()
 
 	cfg := MDOCConfig{
@@ -286,14 +286,11 @@ func TestGenerateMDOC_OutputIsHex(t *testing.T) {
 		t.Fatalf("GenerateMDOC: %v", err)
 	}
 
+	// base64url uses A-Z, a-z, 0-9, -, _ (no padding in RawURLEncoding)
 	for _, c := range result {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			t.Fatalf("output is not lowercase hex: found character %q", string(c))
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			t.Fatalf("output is not base64url: found character %q", string(c))
 		}
-	}
-
-	if len(result)%2 != 0 {
-		t.Error("hex output should have even length")
 	}
 }
 

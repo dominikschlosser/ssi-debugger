@@ -177,6 +177,18 @@ func TestDetect_OID4_JSON(t *testing.T) {
 	}
 }
 
+func TestDetect_TrustList_JWT(t *testing.T) {
+	// Build a JWT with TrustedEntitiesList in the payload
+	encHeader := EncodeBase64URL([]byte(`{"alg":"ES256"}`))
+	payload := EncodeBase64URL([]byte(`{"TrustedEntitiesList":[{"TrustedEntityInformation":{"TEName":[{"value":"Test"}]}}]}`))
+	jwt := encHeader + "." + payload + ".sig"
+
+	got := Detect(jwt)
+	if got != FormatTrustList {
+		t.Errorf("Detect(trust list JWT) = %q, want %q", got, FormatTrustList)
+	}
+}
+
 func TestIsHex(t *testing.T) {
 	tests := []struct {
 		input string

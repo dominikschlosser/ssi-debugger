@@ -26,6 +26,7 @@ import (
 	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
 	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
 	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
 )
 
 var (
@@ -715,6 +716,79 @@ func PrintAuthorizationRequest(req *openid4.AuthorizationRequest, opts Options) 
 		}
 	}
 
+	fmt.Println()
+}
+
+// BuildTrustListJSON returns a JSON-serializable map for a trust list.
+func BuildTrustListJSON(tl *trustlist.TrustList) map[string]any {
+	out := map[string]any{
+		"format": "trustlist",
+		"header": tl.Header,
+	}
+	if tl.SchemeInfo != nil {
+		out["schemeInfo"] = map[string]any{
+			"loTEType":           tl.SchemeInfo.LoTEType,
+			"schemeOperatorName": tl.SchemeInfo.SchemeOperatorName,
+			"listIssueDatetime":  tl.SchemeInfo.ListIssueDatetime,
+		}
+	}
+	entities := make([]map[string]any, 0)
+	for _, e := range tl.Entities {
+		entity := map[string]any{"name": e.Name}
+		services := make([]map[string]any, 0)
+		for _, s := range e.Services {
+			svc := map[string]any{"serviceType": s.ServiceType}
+			certs := make([]map[string]any, 0)
+			for _, c := range s.Certificates {
+				certs = append(certs, map[string]any{
+					"subject":   c.Subject,
+					"issuer":    c.Issuer,
+					"notBefore": c.NotBefore,
+					"notAfter":  c.NotAfter,
+				})
+			}
+			svc["certificates"] = certs
+			services = append(services, svc)
+		}
+		entity["services"] = services
+		entities = append(entities, entity)
+	}
+	out["entities"] = entities
+	return out
+}
+
+// PrintTrustList prints a trust list in terminal format.
+func PrintTrustList(tl *trustlist.TrustList, opts Options) {
+	if opts.JSON {
+		PrintJSON(BuildTrustListJSON(tl))
+		return
+	}
+
+	fmt.Println("ETSI TS 119 602 Trust List")
+	fmt.Println("──────────────────────────────────────────────────")
+
+	if tl.SchemeInfo != nil {
+		fmt.Printf("\n  Operator:  %s\n", tl.SchemeInfo.SchemeOperatorName)
+		fmt.Printf("  Type:      %s\n", tl.SchemeInfo.LoTEType)
+		fmt.Printf("  Issued:    %s\n", tl.SchemeInfo.ListIssueDatetime)
+	}
+
+	if alg, ok := tl.Header["alg"].(string); ok {
+		fmt.Printf("  Algorithm: %s\n", alg)
+	}
+
+	fmt.Printf("\n  Trusted Entities (%d):\n", len(tl.Entities))
+	for _, e := range tl.Entities {
+		fmt.Printf("\n  ┌ %s\n", e.Name)
+		for _, s := range e.Services {
+			fmt.Printf("  │ Service: %s\n", s.ServiceType)
+			for _, c := range s.Certificates {
+				fmt.Printf("  │   Subject: %s\n", c.Subject)
+				fmt.Printf("  │   Issuer:  %s\n", c.Issuer)
+				fmt.Printf("  │   Valid:   %s → %s\n", c.NotBefore, c.NotAfter)
+			}
+		}
+	}
 	fmt.Println()
 }
 

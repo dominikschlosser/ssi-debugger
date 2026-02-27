@@ -24,6 +24,7 @@ import (
 	"github.com/dominikschlosser/ssi-debugger/internal/output"
 	"github.com/dominikschlosser/ssi-debugger/internal/qr"
 	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
 	"github.com/spf13/cobra"
 )
 
@@ -36,13 +37,13 @@ var (
 var decodeCmd = &cobra.Command{
 	Use:   "decode [input]",
 	Short: "Auto-detect and decode credentials and OpenID4VCI/VP requests",
-	Long: `Decode and inspect SSI credentials (JWT, SD-JWT, mDOC) and OpenID4VCI/VP requests.
+	Long: `Decode and inspect SSI credentials (JWT, SD-JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 Accepts:
   - Credential strings: SD-JWT, JWT, mDOC (hex or base64url)
   - URI schemes: openid-credential-offer://, openid4vp://, haip://, eudi-openid4vp://
   - HTTPS URLs with OID4 query parameters
-  - JWT request objects
+  - JWT request objects (OID4VP, trust lists)
   - Raw JSON
   - File paths
   - Stdin (pipe or use -)
@@ -56,7 +57,7 @@ Auto-detects the format. Use --format to override detection.`,
 func init() {
 	decodeCmd.Flags().StringVar(&decodeQRSource, "qr", "", "scan QR code from image file")
 	decodeCmd.Flags().BoolVar(&decodeQRScreen, "screen", false, "scan QR code from screen capture")
-	decodeCmd.Flags().StringVarP(&decodeFormat, "format", "f", "", "pin format: sdjwt, jwt, mdoc, vci, vp")
+	decodeCmd.Flags().StringVarP(&decodeFormat, "format", "f", "", "pin format: sdjwt, jwt, mdoc, vci, vp, trustlist")
 	rootCmd.AddCommand(decodeCmd)
 }
 
@@ -68,8 +69,10 @@ var formatAliases = map[string]format.CredentialFormat{
 	"mso_mdoc": format.FormatMDOC,
 	"vci":     format.FormatOID4VCI,
 	"oid4vci": format.FormatOID4VCI,
-	"vp":      format.FormatOID4VP,
-	"oid4vp":  format.FormatOID4VP,
+	"vp":        format.FormatOID4VP,
+	"oid4vp":    format.FormatOID4VP,
+	"trustlist": format.FormatTrustList,
+	"trust":     format.FormatTrustList,
 }
 
 func runDecode(cmd *cobra.Command, args []string) error {
@@ -109,15 +112,16 @@ func runDecode(cmd *cobra.Command, args []string) error {
 	if decodeFormat != "" {
 		f, ok := formatAliases[strings.ToLower(decodeFormat)]
 		if !ok {
-			return fmt.Errorf("unknown format %q (valid: sdjwt, jwt, mdoc, vci, vp)", decodeFormat)
+			return fmt.Errorf("unknown format %q (valid: sdjwt, jwt, mdoc, vci, vp, trustlist)", decodeFormat)
 		}
 		detected = f
 	} else {
 		detected = format.Detect(raw)
 	}
 
-	// For credential formats where input is an HTTP URL, fetch first then re-detect
-	if isCredentialFormat(detected) && isHTTPURL(raw) {
+	// For non-OID4 formats where input is an HTTP URL, fetch first then re-detect.
+	// This covers credentials and trust lists hosted at plain URLs.
+	if detected != format.FormatOID4VCI && detected != format.FormatOID4VP && isHTTPURL(raw) {
 		raw, err = format.FetchURL(raw)
 		if err != nil {
 			return err
@@ -152,8 +156,11 @@ func runDecode(cmd *cobra.Command, args []string) error {
 	case format.FormatOID4VCI, format.FormatOID4VP:
 		return decodeOID4(raw, opts)
 
+	case format.FormatTrustList:
+		return decodeTrustList(raw, opts)
+
 	default:
-		return fmt.Errorf("unable to auto-detect format (not a credential or OpenID4VCI/VP request)")
+		return fmt.Errorf("unable to auto-detect format (not a credential, OpenID4VCI/VP request, or trust list)")
 	}
 
 	return nil
@@ -183,8 +190,13 @@ func decodeOID4(raw string, opts output.Options) error {
 	return nil
 }
 
-func isCredentialFormat(f format.CredentialFormat) bool {
-	return f == format.FormatSDJWT || f == format.FormatJWT || f == format.FormatMDOC
+func decodeTrustList(raw string, opts output.Options) error {
+	tl, err := trustlist.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parsing trust list: %w", err)
+	}
+	output.PrintTrustList(tl, opts)
+	return nil
 }
 
 func isHTTPURL(s string) bool {

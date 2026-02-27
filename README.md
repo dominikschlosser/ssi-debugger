@@ -11,7 +11,7 @@ No network calls by default. Decode and verify credentials entirely offline.
 
 - **Reverse Proxy** — intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
 - **Web UI** — paste and decode credentials in a split-pane browser interface ([serve](#serve))
-- **Unified Decode** — a single `decode` command handles SD-JWT, JWT, mDOC, OID4VCI offers, and OID4VP requests
+- **Unified Decode** — a single `decode` command handles SD-JWT, JWT, mDOC, OID4VCI offers, OID4VP requests, and ETSI trust lists
 - **QR Screen Capture** — scan a QR code straight from your screen to decode credentials or OpenID requests ([decode --screen](#qr-code-scanning))
 - **Offline Decode & Validate** — SD-JWT, mDOC, JWT with signature verification and trust list support
 - **DCQL Generation** — generate Digital Credentials Query Language queries from existing credentials
@@ -52,11 +52,10 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | `issue`    | Generate test SD-JWT or mDOC credentials                   |
 | `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
 | `serve`    | Web UI for decoding credentials in the browser             |
-| `decode`   | Auto-detect & decode credentials and OpenID4VCI/VP requests |
+| `decode`   | Auto-detect & decode credentials, OpenID4VCI/VP, and trust lists |
 | `validate` | Decode + verify signatures, check status/trust              |
 | `dcql`     | Generate a DCQL query from a credential's claims            |
 | `status`   | Check revocation via status list (network call)             |
-| `trust`    | Inspect an ETSI TS 119 602 trust list JWT                   |
 | `version`  | Print version                                               |
 
 ---
@@ -263,7 +262,7 @@ Pass a credential as an argument (file path, URL, or raw string) to pre-fill the
 
 ### Decode
 
-Auto-detect and decode credentials (SD-JWT, JWT, mDOC) and OpenID4VCI/VP requests.
+Auto-detect and decode credentials (SD-JWT, JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 ```bash
 # Credentials
@@ -283,6 +282,10 @@ ssi-debugger decode 'haip://authorize?...'
 ssi-debugger decode 'eudi-openid4vp://authorize?...'
 ssi-debugger decode request.jwt
 cat offer.json | ssi-debugger decode
+
+# ETSI trust lists
+ssi-debugger decode trust-list.jwt
+ssi-debugger decode -f trustlist https://example.com/trust-list.jwt
 ```
 
 Auto-detection order:
@@ -292,7 +295,7 @@ Auto-detection order:
 3. **SD-JWT** — contains `~` separator
 4. **mDOC** — hex or base64url encoded CBOR
 5. **JSON** — inspected for OID4 marker keys (`credential_issuer` → VCI, `client_id` → VP)
-6. **JWT** — 3 dot-separated parts; payload inspected for OID4 markers
+6. **JWT** — 3 dot-separated parts; payload inspected for OID4 markers and trust list markers (`TrustedEntitiesList`)
 
 #### Format override
 
@@ -306,7 +309,7 @@ ssi-debugger decode -f vci 'openid-credential-offer://...'
 ssi-debugger decode -f vp request.jwt
 ```
 
-Accepted values: `sdjwt` (or `sd-jwt`), `jwt`, `mdoc` (or `mso_mdoc`), `vci` (or `oid4vci`), `vp` (or `oid4vp`).
+Accepted values: `sdjwt` (or `sd-jwt`), `jwt`, `mdoc` (or `mso_mdoc`), `vci` (or `oid4vci`), `vp` (or `oid4vp`), `trustlist` (or `trust`).
 
 #### QR Code Scanning
 
@@ -325,7 +328,7 @@ ssi-debugger decode --screen
 
 | Flag             | Description                                                  |
 |------------------|--------------------------------------------------------------|
-| `-f`, `--format` | Pin format: `sdjwt`, `jwt`, `mdoc`, `vci`, `vp`             |
+| `-f`, `--format` | Pin format: `sdjwt`, `jwt`, `mdoc`, `vci`, `vp`, `trustlist` |
 | `--qr`           | Decode QR from a PNG or JPEG image file                      |
 | `--screen`       | Open interactive screen region selector and decode a QR code from the selection (macOS only) |
 
@@ -459,15 +462,6 @@ Check credential revocation via the status list endpoint embedded in the credent
 ssi-debugger status credential.txt
 ```
 
-### Trust
-
-Inspect an ETSI TS 119 602 trust list JWT. Accepts a file path or URL.
-
-```bash
-ssi-debugger trust trust-list.jwt
-ssi-debugger trust https://example.com/trust-list.jwt
-```
-
 ## Supported Formats
 
 ### SD-JWT (`dc+sd-jwt`)
@@ -489,6 +483,12 @@ ssi-debugger trust https://example.com/trust-list.jwt
 - Decodes OID4VP authorization requests (query params, `request_uri`, JWT request objects)
 - Supports URI schemes: `openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`
 - Auto-detects VCI vs VP based on content
+
+### ETSI Trust Lists
+
+- Decodes ETSI TS 119 602 trust list JWTs
+- Displays trusted entities with names, identifiers, and service types
+- Accepts file paths or URLs
 
 ## Global Flags
 

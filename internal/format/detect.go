@@ -27,9 +27,10 @@ const (
 	FormatSDJWT   CredentialFormat = "dc+sd-jwt"
 	FormatJWT     CredentialFormat = "jwt"
 	FormatMDOC    CredentialFormat = "mso_mdoc"
-	FormatOID4VCI CredentialFormat = "oid4vci"
-	FormatOID4VP  CredentialFormat = "oid4vp"
-	FormatUnknown CredentialFormat = "unknown"
+	FormatOID4VCI   CredentialFormat = "oid4vci"
+	FormatOID4VP    CredentialFormat = "oid4vp"
+	FormatTrustList CredentialFormat = "trustlist"
+	FormatUnknown   CredentialFormat = "unknown"
 )
 
 // Detect auto-detects the format from raw input.
@@ -127,6 +128,9 @@ func detectJWTPayloadOID4(payloadB64 string) CredentialFormat {
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return FormatUnknown
+	}
+	if _, ok := m["TrustedEntitiesList"]; ok {
+		return FormatTrustList
 	}
 	if _, ok := m["credential_issuer"]; ok {
 		return FormatOID4VCI

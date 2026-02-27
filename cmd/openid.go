@@ -30,6 +30,6 @@ var openidCmd = &cobra.Command{
 func init() {
 	openidCmd.Flags().StringVar(&decodeQRSource, "qr", "", "scan QR code from image file")
 	openidCmd.Flags().BoolVar(&decodeQRScreen, "screen", false, "scan QR code from screen capture")
-	openidCmd.Flags().StringVarP(&decodeFormat, "format", "f", "", "pin format: sdjwt, jwt, mdoc, vci, vp")
+	openidCmd.Flags().StringVarP(&decodeFormat, "format", "f", "", "pin format: sdjwt, jwt, mdoc, vci, vp, trustlist")
 	rootCmd.AddCommand(openidCmd)
 }

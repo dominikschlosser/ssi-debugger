@@ -1,6 +1,13 @@
 (() => {
   "use strict";
 
+  // Compute base path so API calls work when mounted under a sub-path (e.g. /decode/).
+  const basePath = (() => {
+    const path = window.location.pathname;
+    // If path ends with /, use it; otherwise strip the last segment.
+    return path.endsWith("/") ? path : path.substring(0, path.lastIndexOf("/") + 1);
+  })();
+
   const input = document.getElementById("input");
   const outputEl = document.getElementById("output");
   const formatBadge = document.getElementById("format-badge");
@@ -297,7 +304,7 @@
       return;
     }
 
-    fetch("/api/validate", {
+    fetch(basePath + "api/validate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: text, checkStatus: true }),
@@ -330,7 +337,7 @@
     if (keyText) body.key = keyText;
     if (trustListURL) body.trustListURL = trustListURL;
 
-    fetch("/api/validate", {
+    fetch(basePath + "api/validate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -964,7 +971,7 @@
   if (queryCredential) {
     prefill(queryCredential);
   } else {
-    fetch("/api/prefill")
+    fetch(basePath + "api/prefill")
       .then((res) => res.json())
       .then((data) => {
         if (data.credential) {

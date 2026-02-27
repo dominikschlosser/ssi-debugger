@@ -148,9 +148,10 @@ func selectClaims(cred StoredCredential, cqMap map[string]any) []string {
 }
 
 // selectFromClaimSets picks the first satisfiable claim_set (preference order).
+// claim_sets entries reference claims by their "id" property (string).
 func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []any) []string {
-	// Build index: claim query index → claim path
-	claimPaths := buildClaimPaths(claimsQuery)
+	// Build index: claim id → claim path
+	claimByID := buildClaimByID(claimsQuery)
 
 	for _, cs := range claimSets {
 		csArr, ok := cs.([]any)
@@ -161,24 +162,19 @@ func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []a
 		var selected []string
 		satisfiable := true
 
-		for _, idx := range csArr {
-			var index int
-			switch v := idx.(type) {
-			case float64:
-				index = int(v)
-			case int:
-				index = v
-			default:
+		for _, ref := range csArr {
+			id, ok := ref.(string)
+			if !ok {
 				satisfiable = false
 				break
 			}
 
-			if index < 0 || index >= len(claimPaths) {
+			path := claimByID[id]
+			if path == nil {
 				satisfiable = false
 				break
 			}
 
-			path := claimPaths[index]
 			key := claimKeyFromPath(cred, path)
 			if key == "" {
 				satisfiable = false
@@ -193,6 +189,27 @@ func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []a
 	}
 
 	return nil
+}
+
+// buildClaimByID builds a map of claim id → path from claims query entries.
+func buildClaimByID(claimsQuery []any) map[string][]any {
+	byID := make(map[string][]any)
+	for _, cq := range claimsQuery {
+		cqMap, ok := cq.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := cqMap["id"].(string)
+		if id == "" {
+			continue
+		}
+		path, ok := cqMap["path"].([]any)
+		if !ok {
+			continue
+		}
+		byID[id] = path
+	}
+	return byID
 }
 
 // selectAllRequestedClaims returns all requested claims that exist in the credential.
@@ -216,25 +233,6 @@ func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string
 		return nil
 	}
 	return selected
-}
-
-// buildClaimPaths extracts path arrays from claims query entries.
-func buildClaimPaths(claimsQuery []any) [][]any {
-	var paths [][]any
-	for _, cq := range claimsQuery {
-		cqMap, ok := cq.(map[string]any)
-		if !ok {
-			paths = append(paths, nil)
-			continue
-		}
-		path, ok := cqMap["path"].([]any)
-		if !ok {
-			paths = append(paths, nil)
-			continue
-		}
-		paths = append(paths, path)
-	}
-	return paths
 }
 
 // claimKeyFromPath resolves a DCQL claim path to a credential claim key.

@@ -220,7 +220,43 @@ func TestEvaluateDCQL_MultipleCredentialQueries(t *testing.T) {
 	}
 }
 
-func TestEvaluateDCQL_ClaimSets(t *testing.T) {
+func TestEvaluateDCQL_ClaimSets_StringIDs(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid_sd_jwt",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"id": "family", "path": []any{"family_name"}},
+					map[string]any{"id": "given", "path": []any{"given_name"}},
+					map[string]any{"id": "birth", "path": []any{"birthdate"}},
+				},
+				"claim_sets": []any{
+					[]any{"family", "given", "birth"}, // all three
+					[]any{"family", "given"},          // just name
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+
+	// First claim_set should be selected (preference order) — all three claims
+	if len(matches[0].SelectedKeys) != 3 {
+		t.Errorf("expected 3 selected keys (first claim_set), got %d: %v",
+			len(matches[0].SelectedKeys), matches[0].SelectedKeys)
+	}
+}
+
+func TestEvaluateDCQL_ClaimSets_FallbackToSecond(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
 	query := map[string]any{
@@ -232,13 +268,13 @@ func TestEvaluateDCQL_ClaimSets(t *testing.T) {
 					"vct_values": []any{mock.DefaultPIDVCT},
 				},
 				"claims": []any{
-					map[string]any{"path": []any{"given_name"}},
-					map[string]any{"path": []any{"family_name"}},
-					map[string]any{"path": []any{"birthdate"}},
+					map[string]any{"id": "family", "path": []any{"family_name"}},
+					map[string]any{"id": "given", "path": []any{"given_name"}},
+					map[string]any{"id": "email", "path": []any{"email"}}, // not in PID
 				},
 				"claim_sets": []any{
-					[]any{float64(0), float64(1)},            // given_name + family_name
-					[]any{float64(0), float64(1), float64(2)}, // all three
+					[]any{"family", "email"}, // unsatisfiable (no email claim)
+					[]any{"family", "given"}, // satisfiable
 				},
 			},
 		},
@@ -249,10 +285,68 @@ func TestEvaluateDCQL_ClaimSets(t *testing.T) {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
 
-	// First claim_set should be selected (preference order)
+	// Second claim_set should be selected (first was unsatisfiable)
 	if len(matches[0].SelectedKeys) != 2 {
-		t.Errorf("expected 2 selected keys (first claim_set), got %d: %v",
+		t.Errorf("expected 2 selected keys (second claim_set), got %d: %v",
 			len(matches[0].SelectedKeys), matches[0].SelectedKeys)
+	}
+}
+
+func TestEvaluateDCQL_ClaimSets_NoneMatchable(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"id": "email", "path": []any{"email"}},
+					map[string]any{"id": "phone", "path": []any{"phone_number"}},
+				},
+				"claim_sets": []any{
+					[]any{"email"},
+					[]any{"phone"},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Errorf("expected 0 matches when no claim_set satisfiable, got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_ClaimSets_IntegerIndicesRejected(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	// Integer indices are not valid per spec — claim_sets must use string IDs
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+					map[string]any{"path": []any{"family_name"}},
+				},
+				"claim_sets": []any{
+					[]any{float64(0), float64(1)},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Errorf("expected 0 matches when claim_sets uses integer indices, got %d", len(matches))
 	}
 }
 

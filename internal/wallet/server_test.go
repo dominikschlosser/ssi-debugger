@@ -347,9 +347,25 @@ func TestPresentationFlow_AutoAccept(t *testing.T) {
 		t.Fatalf("parsing verifier body: %v", err)
 	}
 
-	vpToken := parsedForm.Get("vp_token")
-	if vpToken == "" {
+	vpTokenRaw := parsedForm.Get("vp_token")
+	if vpTokenRaw == "" {
 		t.Fatal("expected vp_token in verifier request")
+	}
+
+	// Per OID4VP 1.0: vp_token is a JSON object where values are arrays of strings
+	var vpToken map[string][]any
+	if err := json.Unmarshal([]byte(vpTokenRaw), &vpToken); err != nil {
+		t.Fatalf("vp_token should be a JSON object: %v", err)
+	}
+	pidArr, ok := vpToken["pid"]
+	if !ok {
+		t.Fatal("expected 'pid' key in vp_token")
+	}
+	if len(pidArr) != 1 {
+		t.Errorf("expected single-element array for 'pid', got %d elements", len(pidArr))
+	}
+	if _, ok := pidArr[0].(string); !ok {
+		t.Errorf("expected string presentation in array, got %T", pidArr[0])
 	}
 
 	state := parsedForm.Get("state")
@@ -409,8 +425,11 @@ func TestPresentationFlow_AutoAccept_NoMatch(t *testing.T) {
 func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 	srv := newTestServer(t, true)
 
-	// Create verifier
+	// Create verifier that captures the request body
+	var receivedBody string
 	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
 		w.Write([]byte(`{}`))
@@ -473,6 +492,42 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 	}
 	if len(vpTokenKeys) != 2 {
 		t.Errorf("expected 2 vp_token_keys, got %d", len(vpTokenKeys))
+	}
+
+	// Validate the actual vp_token structure sent to the verifier
+	parsedForm, err := url.ParseQuery(receivedBody)
+	if err != nil {
+		t.Fatalf("parsing verifier body: %v", err)
+	}
+
+	// Per OID4VP 1.0: vp_token is a JSON object with query IDs as keys and arrays as values
+	var vpToken map[string][]any
+	if err := json.Unmarshal([]byte(parsedForm.Get("vp_token")), &vpToken); err != nil {
+		t.Fatalf("vp_token should be a JSON object with array values: %v", err)
+	}
+
+	// Must have both credential query IDs
+	if _, ok := vpToken["pid_sdjwt"]; !ok {
+		t.Error("expected 'pid_sdjwt' key in vp_token")
+	}
+	if _, ok := vpToken["pid_mdoc"]; !ok {
+		t.Error("expected 'pid_mdoc' key in vp_token")
+	}
+
+	// Each value must be a single-element array (multiple not set)
+	for _, qid := range []string{"pid_sdjwt", "pid_mdoc"} {
+		arr := vpToken[qid]
+		if len(arr) != 1 {
+			t.Errorf("expected single-element array for %q, got %d elements", qid, len(arr))
+		}
+		if _, ok := arr[0].(string); !ok {
+			t.Errorf("expected string presentation for %q, got %T", qid, arr[0])
+		}
+	}
+
+	// Must not have extra keys
+	if len(vpToken) != 2 {
+		t.Errorf("expected exactly 2 keys in vp_token, got %d", len(vpToken))
 	}
 }
 

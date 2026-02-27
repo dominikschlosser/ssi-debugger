@@ -16,18 +16,11 @@ func SubmitDirectPost(responseURI, state string, vpToken any) (*DirectPostResult
 		form.Set("state", state)
 	}
 
-	switch v := vpToken.(type) {
-	case string:
-		form.Set("vp_token", v)
-	case map[string]string:
-		tokenJSON, err := json.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling vp_token map: %w", err)
-		}
-		form.Set("vp_token", string(tokenJSON))
-	default:
-		return nil, fmt.Errorf("unsupported vp_token type: %T", vpToken)
+	tokenJSON, err := json.Marshal(vpToken)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling vp_token: %w", err)
 	}
+	form.Set("vp_token", string(tokenJSON))
 
 	resp, err := http.PostForm(responseURI, form)
 	if err != nil {
@@ -68,9 +61,9 @@ type DirectPostResult struct {
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
-// SubmitDirectPostJWT submits a VP token via direct_post.jwt (JARM encrypted).
-// For this test wallet, we submit as signed JWT (not encrypted) for simplicity.
-func SubmitDirectPostJWT(responseURI, state string, vpToken any, responseJWT string) (*DirectPostResult, error) {
+// SubmitDirectPostJWT submits an encrypted JARM response via direct_post.jwt.
+// The vp_token and state are inside the encrypted responseJWT payload.
+func SubmitDirectPostJWT(responseURI string, responseJWT string) (*DirectPostResult, error) {
 	form := url.Values{}
 	form.Set("response", responseJWT)
 

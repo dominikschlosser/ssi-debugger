@@ -424,6 +424,34 @@ func (w *Wallet) CreateVPTokenMap(matches []CredentialMatch, params Presentation
 	return result, nil
 }
 
+// VPToken builds the spec-compliant vp_token JSON object.
+// Per OID4VP 1.0: values are arrays of one or more presentations.
+func (r *VPTokenMapResult) VPToken() map[string][]string {
+	vpToken := make(map[string][]string, len(r.TokenMap))
+	for k, v := range r.TokenMap {
+		vpToken[k] = []string{v}
+	}
+	return vpToken
+}
+
+// QueryIDs returns the credential query IDs in the token map.
+func (r *VPTokenMapResult) QueryIDs() []string {
+	return mapKeys(r.TokenMap)
+}
+
+// SubmitPresentation builds the vp_token, optionally encrypts it, and submits to the verifier.
+func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+	vpToken := vpResult.VPToken()
+
+	if params.ResponseMode == "direct_post.jwt" && HasEncryptionKey(params.RequestObject) {
+		jwe, err := w.EncryptResponse(vpToken, state, vpResult.MDocNonce, params)
+		if err != nil {
+			return nil, fmt.Errorf("encrypting response: %w", err)
+		}
+		return SubmitDirectPostJWT(responseURI, jwe)
+	}
+	return SubmitDirectPost(responseURI, state, vpToken)
+}
 
 // extractJWKThumbprint extracts the encryption JWK from the request object's
 // client_metadata.jwks.keys[0] and computes its RFC 7638 thumbprint (SHA-256).

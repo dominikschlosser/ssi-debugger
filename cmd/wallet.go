@@ -578,31 +578,8 @@ func submitPresentation(w *wallet.Wallet, store *wallet.WalletStore, matches []w
 		return fmt.Errorf("creating VP tokens: %w", err)
 	}
 
-	// Determine vp_token
-	var vpToken any
-	if len(vpResult.TokenMap) == 1 {
-		for _, v := range vpResult.TokenMap {
-			vpToken = v
-		}
-	} else {
-		vpToken = vpResult.TokenMap
-	}
-
-	// Submit — encrypt if direct_post.jwt with encryption key
-	var result *wallet.DirectPostResult
-	if parsed.ResponseMode == "direct_post.jwt" && wallet.HasEncryptionKey(parsed.RequestObject) {
-		jwe, encErr := w.EncryptResponse(vpToken, parsed.State, vpResult.MDocNonce, params)
-		if encErr != nil {
-			w.AddLog("presentation", fmt.Sprintf("JWE encryption failed: %v", encErr), false)
-			if submissionCh != nil {
-				submissionCh <- wallet.SubmissionResult{Error: encErr.Error()}
-			}
-			return fmt.Errorf("encrypting response: %w", encErr)
-		}
-		result, err = wallet.SubmitDirectPostJWT(responseURI, parsed.State, vpToken, jwe)
-	} else {
-		result, err = wallet.SubmitDirectPost(responseURI, parsed.State, vpToken)
-	}
+	// Submit to verifier (encrypts if direct_post.jwt with encryption key)
+	result, err := w.SubmitPresentation(vpResult, parsed.State, responseURI, params)
 	if err != nil {
 		w.AddLog("presentation", fmt.Sprintf("Submission failed: %v", err), false)
 		if submissionCh != nil {

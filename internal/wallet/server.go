@@ -660,31 +660,8 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 
 	s.log("  VP tokens:     %d created", len(vpResult.TokenMap))
 
-	// Determine what to submit as vp_token
-	var vpToken any
-	if len(vpResult.TokenMap) == 1 {
-		for _, v := range vpResult.TokenMap {
-			vpToken = v
-		}
-	} else {
-		vpToken = vpResult.TokenMap
-	}
-
-	// Submit to verifier — encrypt if direct_post.jwt with encryption key
-	var result *DirectPostResult
-	if authReq.ResponseMode == "direct_post.jwt" && HasEncryptionKey(authReq.RequestObject) {
-		s.log("  Encrypting response (JARM)")
-		jwe, encErr := s.wallet.EncryptResponse(vpToken, authReq.State, vpResult.MDocNonce, params)
-		if encErr != nil {
-			s.log("  ERROR: JWE encryption failed: %v", encErr)
-			s.wallet.AddLog("presentation", fmt.Sprintf("JWE encryption failed: %v", encErr), false)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": encErr.Error()})
-			return SubmissionResult{Error: encErr.Error()}
-		}
-		result, err = SubmitDirectPostJWT(responseURI, authReq.State, vpToken, jwe)
-	} else {
-		result, err = SubmitDirectPost(responseURI, authReq.State, vpToken)
-	}
+	// Submit to verifier (encrypts if direct_post.jwt with encryption key)
+	result, err := s.wallet.SubmitPresentation(vpResult, authReq.State, responseURI, params)
 	if err != nil {
 		s.log("  ERROR: Submission failed: %v", err)
 		s.wallet.AddLog("presentation", fmt.Sprintf("Submission failed: %v", err), false)
@@ -705,7 +682,7 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "submitted",
 		"response":      result,
-		"vp_token_keys": mapKeys(vpResult.TokenMap),
+		"vp_token_keys": vpResult.QueryIDs(),
 	})
 
 	return SubmissionResult{

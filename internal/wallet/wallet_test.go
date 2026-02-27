@@ -240,6 +240,42 @@ func TestImportMDoc(t *testing.T) {
 	}
 }
 
+func TestImportPlainJWT(t *testing.T) {
+	w := generateTestWallet(t)
+
+	jwt, err := signJWT(
+		map[string]any{"alg": "ES256", "typ": "JWT"},
+		map[string]any{"sub": "user123", "vct": "urn:test:credential", "given_name": "Erika", "family_name": "Mustermann"},
+		w.IssuerKey,
+	)
+	if err != nil {
+		t.Fatalf("creating test JWT: %v", err)
+	}
+
+	if err := w.ImportCredential(jwt); err != nil {
+		t.Fatalf("importing plain JWT: %v", err)
+	}
+
+	creds := w.GetCredentials()
+	if len(creds) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(creds))
+	}
+
+	cred := creds[0]
+	if cred.Format != "jwt_vc_json" {
+		t.Errorf("expected format jwt_vc_json, got %s", cred.Format)
+	}
+	if cred.VCT != "urn:test:credential" {
+		t.Errorf("expected VCT urn:test:credential, got %s", cred.VCT)
+	}
+	if len(cred.Disclosures) != 0 {
+		t.Errorf("expected 0 disclosures, got %d", len(cred.Disclosures))
+	}
+	if cred.Claims["given_name"] != "Erika" {
+		t.Errorf("expected given_name Erika, got %v", cred.Claims["given_name"])
+	}
+}
+
 func TestImportInvalidCredential(t *testing.T) {
 	w := generateTestWallet(t)
 	err := w.ImportCredential("not-a-credential")

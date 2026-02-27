@@ -53,6 +53,9 @@ func (w *Wallet) CreateVPToken(match CredentialMatch, params PresentationParams)
 		}
 		log.Printf("[VP] SD-JWT presentation created: %d disclosures selected, aud=%s", len(match.SelectedKeys), params.ClientID)
 		return VPTokenResult{Token: token}, nil
+	case "jwt_vc_json":
+		log.Printf("[VP] Plain JWT presentation (no selective disclosure)")
+		return VPTokenResult{Token: cred.Raw}, nil
 	case "mso_mdoc":
 		result, err := w.createMDocPresentation(cred, match.SelectedKeys, params)
 		if err != nil {

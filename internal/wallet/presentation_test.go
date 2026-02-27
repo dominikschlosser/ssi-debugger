@@ -130,6 +130,52 @@ func TestCreateVPToken_SDJWT_SelectiveDisclosure(t *testing.T) {
 	}
 }
 
+func TestCreateVPToken_PlainJWT(t *testing.T) {
+	w := generateTestWallet(t)
+
+	// Create and import a plain JWT
+	jwt, err := signJWT(
+		map[string]any{"alg": "ES256", "typ": "JWT"},
+		map[string]any{"sub": "user123", "vct": "urn:test:credential", "given_name": "Erika"},
+		w.IssuerKey,
+	)
+	if err != nil {
+		t.Fatalf("creating test JWT: %v", err)
+	}
+	if err := w.ImportCredential(jwt); err != nil {
+		t.Fatalf("importing plain JWT: %v", err)
+	}
+
+	cred := w.GetCredentials()[0]
+	match := CredentialMatch{
+		QueryID:      "test",
+		CredentialID: cred.ID,
+		Format:       "jwt_vc_json",
+		SelectedKeys: []string{"given_name"},
+	}
+
+	result, err := w.CreateVPToken(match, PresentationParams{Nonce: "n", ClientID: "client", ResponseURI: "response"})
+	if err != nil {
+		t.Fatalf("CreateVPToken error: %v", err)
+	}
+
+	// Should return the raw JWT as-is (no ~ separator, no KB-JWT)
+	if result.Token != jwt {
+		t.Errorf("expected raw JWT to be returned as-is")
+	}
+
+	// Should be a 3-part JWT
+	parts := strings.Split(result.Token, ".")
+	if len(parts) != 3 {
+		t.Errorf("expected 3 JWT parts, got %d", len(parts))
+	}
+
+	// Should NOT contain ~ (SD-JWT separator)
+	if strings.Contains(result.Token, "~") {
+		t.Error("plain JWT presentation should not contain ~ separator")
+	}
+}
+
 func TestCreateVPToken_MDoc(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 

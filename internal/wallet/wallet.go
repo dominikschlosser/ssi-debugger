@@ -76,7 +76,7 @@ type WalletError struct {
 // StoredCredential is a credential stored in the wallet.
 type StoredCredential struct {
 	ID          string         `json:"id"`
-	Format      string         `json:"format"`       // "dc+sd-jwt" or "mso_mdoc"
+	Format      string         `json:"format"`       // "dc+sd-jwt", "mso_mdoc", or "jwt_vc_json"
 	Raw         string         `json:"raw"`           // original credential string
 	Claims      map[string]any `json:"claims"`        // decoded claims for display/matching
 	VCT         string         `json:"vct,omitempty"` // SD-JWT vct
@@ -302,13 +302,13 @@ func (w *Wallet) ImportCredential(raw string) error {
 		return nil
 	}
 
-	// Try as SD-JWT without disclosures (just a JWT)
+	// Try as plain JWT VC (3-part JWT without ~)
 	if strings.Count(raw, ".") == 2 {
-		if err := w.importSDJWT(raw + "~"); err != nil {
+		if err := w.importPlainJWT(raw); err != nil {
 			return err
 		}
 		cred := w.Credentials[len(w.Credentials)-1]
-		log.Printf("[Wallet] Imported SD-JWT credential (no disclosures): vct=%s claims=%d", cred.VCT, len(cred.Claims))
+		log.Printf("[Wallet] Imported plain JWT credential: vct=%s claims=%d", cred.VCT, len(cred.Claims))
 		return nil
 	}
 
@@ -330,6 +330,29 @@ func (w *Wallet) importSDJWT(raw string) error {
 	}
 
 	if vct, ok := token.Payload["vct"].(string); ok {
+		cred.VCT = vct
+	}
+
+	w.mu.Lock()
+	w.Credentials = append(w.Credentials, cred)
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *Wallet) importPlainJWT(raw string) error {
+	_, payload, _, err := format.ParseJWTParts(raw)
+	if err != nil {
+		return fmt.Errorf("parsing JWT: %w", err)
+	}
+
+	cred := StoredCredential{
+		ID:     uuid.New().String(),
+		Format: "jwt_vc_json",
+		Raw:    raw,
+		Claims: payload,
+	}
+
+	if vct, ok := payload["vct"].(string); ok {
 		cred.VCT = vct
 	}
 

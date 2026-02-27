@@ -76,7 +76,7 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 | `generate-pid` | Generate default EUDI PID credentials (SD-JWT + mDoc)           |
 | `accept`       | Accept an OID4VP presentation request or OID4VCI credential offer (auto-detects) |
 | `scan`         | Scan a QR code and auto-dispatch to accept/import               |
-| `trust-list`   | Print the trust list URL for a running wallet server            |
+| `trust-list`   | Print the trust list JWT (or just the URL with `--url`)         |
 | `register`     | Register OS URL scheme handlers (macOS only)                    |
 | `unregister`   | Remove OS URL scheme handlers                                   |
 
@@ -122,6 +122,8 @@ All wallet state is stored in `~/.ssi-debugger/wallet/` by default:
 ```
 
 Keys are P-256 EC keys, auto-generated on first use and reused across invocations.
+
+![Wallet UI](docs/wallet-ui.png)
 
 #### `wallet serve`
 
@@ -263,7 +265,7 @@ ssi-debugger issue mdoc  | ssi-debugger decode
 | `--claims` | —                         | Claims as JSON string or `@filepath`           |
 | `--key`    | —                         | Private key file (PEM or JWK); ephemeral if omitted |
 | `--iss`    | `https://issuer.example`  | Issuer URL                                     |
-| `--vct`    | `urn:eudi:pid:1`          | Verifiable Credential Type                     |
+| `--vct`    | `urn:eudi:pid:de:1`       | Verifiable Credential Type                     |
 | `--exp`    | `24h`                     | Expiration duration                            |
 | `--pid`    | `false`                   | Use full EUDI PID Rulebook claims              |
 | `--omit`   | —                         | Comma-separated claim names to exclude         |
@@ -315,55 +317,13 @@ Traffic is automatically classified into protocol steps:
 
 By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, health checks, etc.) are still proxied but hidden from the output. Pass `--all-traffic` or toggle the "All traffic" checkbox in the dashboard to see everything.
 
-#### NDJSON output
+#### Features
 
-Use `--json` to get machine-readable output (one JSON object per line), suitable for piping to `jq` or logging:
-
-```bash
-ssi-debugger proxy --target http://localhost:8080 --json
-ssi-debugger proxy --target http://localhost:8080 --json 2>/dev/null | jq .classLabel
-ssi-debugger proxy --target http://localhost:8080 --json --all-traffic >> traffic.jsonl
-```
-
-#### Flow correlation
-
-Related protocol steps (e.g., VP Auth Request → Request Object → Auth Response) are automatically grouped into flows using shared `state` or `nonce` values. Each entry includes a `flowId` field when correlated. In the dashboard, click **"Timeline"** to switch from a flat list to a grouped flow view with collapsible sections.
-
-#### Smart decoding
-
-Decoded payloads are shown inline — the proxy understands the structure of each protocol step:
-
-- **VP Auth Request**: `client_id`, `response_mode`, `nonce`, `state`, `request_uri`, `response_uri`, plus `dcql_query` and `presentation_definition` parsed as JSON
-- **VP Request Object**: JWT header and payload, including the verifier's `jwks` (ephemeral encryption key for JARM)
-- **VP Auth Response**: `vp_token` decoded as SD-JWT/JWT/mDOC, `presentation_submission` as JSON, `state`
-- **VCI flows**: credential offer JSON, issuer metadata, token request/response, credential request/response with inline credential decoding
-
-#### Encrypted responses (direct_post.jwt / JARM)
-
-When `response_mode=direct_post.jwt` is used, the wallet sends an encrypted JWE instead of plain form parameters. The proxy detects this and shows:
-
-- The JWE protected header (`alg`, `enc`, `kid`, `epk`, `apu`, `apv`)
-- A note that the payload is encrypted
-
-The **verifier's ephemeral public key** (used by the wallet for encryption) is extracted from the request object's `jwks` claim and shown in the VP Request Object entry, so you can correlate the two sides of the flow.
-
-> **Why can't the proxy decrypt JARM responses?** The verifier generates an **ephemeral key pair** for each authorization session. It sends the public key to the wallet (in the signed request object JWT), and the wallet encrypts the response to that key. The proxy can see the public key but never has access to the private key — it lives only inside the verifier. Modifying the request object to substitute the proxy's own key would break the verifier's signature, which the wallet verifies.
->
-> **Workaround:** If your verifier has a debug mode that logs or exports ephemeral private keys, you can use those to decrypt the JWE offline. The proxy shows the `kid` to help you match the right key.
-
-#### Web dashboard
-
-The **web dashboard** at `http://localhost:9091` shows the same traffic with expandable cards, live SSE updates, and dark/light theme support. Open it alongside your terminal for full visibility.
-
-When the proxy captures a credential (vp_token, id_token, or issued credential), the expanded entry shows a **"View in Decoder"** button that opens the credential in the full decoder web UI (served at `/decode/` on the dashboard port). This gives you the same decode experience as `ssi-debugger serve` without running a separate command.
-
-#### HAR export
-
-Click **"Export HAR"** in the dashboard header to download all captured traffic as a HAR 1.2 file. The file can be imported into Chrome DevTools, Firefox, or any HAR viewer for offline analysis.
-
-#### cURL copy
-
-Expand any entry in the dashboard and click **"Copy cURL"** to copy a `curl` command that reproduces the request. Paste it in a terminal to replay requests during debugging.
+- **Smart decoding** — payloads are decoded inline (SD-JWT, JWT, mDOC, DCQL queries, JWE headers)
+- **Flow correlation** — related protocol steps are grouped by shared `state`/`nonce` values
+- **Web dashboard** at `http://localhost:9091` with live SSE updates, expandable cards, "View in Decoder" links, HAR export, and cURL copy
+- **JARM/JWE detection** — shows encrypted response headers and the verifier's ephemeral public key
+- **NDJSON output** — `--json` for machine-readable output, pipe to `jq` or log to file
 
 #### Flags
 
@@ -376,38 +336,22 @@ Expand any entry in the dashboard and click **"Copy cURL"** to copy a `curl` com
 | `--all-traffic`  | `false` | Show all traffic, not just OID4VP/VCI    |
 | `--json`         | `false` | NDJSON output to stdout (global flag)    |
 
-#### Terminal output example
+#### Example
 
 ```
 ━━━ [14:32:05] GET /authorize?client_id=...  ← 200 (45ms)  [VP Auth Request]
     ┌ client_id: did:web:verifier.example
     ┌ response_mode: direct_post.jwt
     ┌ nonce: abc123
-    ┌ dcql_query:
-      {
-        "credentials": [
-          {
-            "id": "cred1",
-            "format": "dc+sd-jwt",
-            "meta": { "vct_values": ["urn:eudi:pid:1"] },
-            "claims": [
-              { "id": "claim1", "path": ["given_name"] },
-              { "id": "claim2", "path": ["family_name"] }
-            ]
-          }
-        ]
-      }
+    ┌ dcql_query: { "credentials": [...] }
 
 ━━━ [14:32:05] GET /request/abc123  ← 200 (12ms)  [VP Request Object]
     ┌ header: {"alg":"ES256","typ":"oauth-authz-req+jwt"}
     ┌ payload: { ... }
-    ┌ encryption_jwks: {"keys":[{"kty":"EC","crv":"P-256","x":"...","y":"..."}]}
 
 ━━━ [14:32:06] POST /response  ← 200 (89ms)  [VP Auth Response]
     ┌ response_type: JWE (encrypted)
     ┌ encryption_alg: ECDH-ES
-    ┌ encryption_enc: A256GCM
-    ┌ encryption_epk: {"kty":"EC","crv":"P-256","x":"...","y":"..."}
 ```
 
 ---
@@ -423,13 +367,11 @@ ssi-debugger serve credential.txt
 ssi-debugger serve "eyJhbGci..."
 ```
 
-Opens a split-pane interface at `http://localhost:8080` (default) where you can paste SD-JWT, JWT, or mDOC credentials and instantly see decoded output. Features include auto-decode on paste, format detection badges, collapsible sections, JSON syntax highlighting, cross-highlighting between raw and decoded views, signature verification, and dark/light theme toggle.
-
-> **Warning:** Credentials are sent to the server for decoding. Only run `ssi-debugger serve` locally on your own machine — do not expose it on a network or use it with real production credentials on a shared server.
+Opens a split-pane interface at `http://localhost:8080` (default) with auto-decode on paste, format detection, collapsible sections, signature verification, and dark/light theme. Pass a credential as an argument to pre-fill the input on load.
 
 ![Web UI screenshot](docs/web-ui.png)
 
-Pass a credential as an argument (file path, URL, or raw string) to pre-fill the input on load. You can also use the `?credential=` query parameter on the URL, e.g. `http://localhost:8080/?credential=eyJhbGci...`.
+> **Warning:** Only run locally — credentials are sent to the local server for decoding.
 
 ---
 
@@ -507,7 +449,7 @@ ssi-debugger decode --screen
 
 `--qr`, `--screen`, and positional input arguments are mutually exclusive.
 
-#### SD-JWT example
+#### Example
 
 ```
 SD-JWT Credential
@@ -520,10 +462,8 @@ SD-JWT Credential
 ┌ Payload (signed claims)
   _sd: ["77ofip...", "EyNwlR...", "X3X1zI..."]
   _sd_alg: sha-256
-  exp: 1742592000
-  iat: 1740000000
   iss: https://issuer.example
-  vct: urn:eudi:pid:1
+  vct: urn:eudi:pid:de:1
 
 ┌ Disclosed Claims (3)
   [1] given_name: Erika
@@ -531,48 +471,7 @@ SD-JWT Credential
   [3] birth_date: 1984-08-12
 ```
 
-#### mDOC example
-
-```
-mDOC Credential
-──────────────────────────────────────────────────
-  (parsed from DeviceResponse)
-
-┌ Document Info
-  DocType: eu.europa.ec.eudi.pid.1
-  MSO Version: 1.0
-  Digest Algorithm: SHA-256
-  Signed: 2026-02-25T00:00:00Z
-  Valid From: 2026-02-25T00:00:00Z
-  Valid Until: 2026-03-11T00:00:00Z (in 13 days)
-
-┌ Namespace: eu.europa.ec.eudi.pid.1 (7 claims)
-  birth_date: 1984-08-12
-  family_name: MUSTERMANN
-  given_name: ERIKA
-  resident_city: KÖLN
-  resident_country: DE
-  resident_postal_code: 51147
-  resident_street: HEIDESTRAẞE 17
-```
-
-With `-v`, each claim also shows its `digestID`, x5c certificate chains are displayed, and mDOC device key info is included. With `--json`, output is machine-readable:
-
-```json
-{
-  "format": "dc+sd-jwt",
-  "header": { "alg": "ES256", "typ": "dc+sd-jwt" },
-  "payload": { "iss": "https://issuer.example", "vct": "urn:eudi:pid:1", "..." : "..." },
-  "resolvedClaims": {
-    "given_name": "Erika",
-    "family_name": "Mustermann",
-    "birth_date": "1984-08-12"
-  },
-  "disclosures": [
-    { "name": "given_name", "value": "Erika", "salt": "...", "digest": "..." }
-  ]
-}
-```
+Use `-v` for x5c chains, digest IDs, and device key info. Use `--json` for machine-readable output.
 
 ---
 
@@ -621,7 +520,7 @@ ssi-debugger dcql credential.txt
     {
       "id": "urn_eudi_pid_1",
       "format": "dc+sd-jwt",
-      "meta": { "vct_values": ["urn:eudi:pid:1"] },
+      "meta": { "vct_values": ["urn:eudi:pid:de:1"] },
       "claims": [
         { "path": ["birth_date"] },
         { "path": ["family_name"] },

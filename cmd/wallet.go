@@ -104,6 +104,7 @@ func walletServeCmd() *cobra.Command {
 		noRegister        bool
 		statusList        bool
 		baseURL           string
+		preferredFormat   string
 	)
 
 	cmd := &cobra.Command{
@@ -149,6 +150,10 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			if err := applySessionTranscriptMode(w, sessionTranscript); err != nil {
 				return err
+			}
+
+			if preferredFormat != "" {
+				w.PreferredFormat = preferredFormat
 			}
 
 			if statusList {
@@ -197,6 +202,9 @@ so the wallet automatically receives incoming protocol requests.`,
 				fmt.Printf("  Mode:        interactive (consent UI)\n")
 			}
 			fmt.Printf("  Transcript:  %s\n", w.SessionTranscript)
+			if w.PreferredFormat != "" {
+				fmt.Printf("  Preferred:   %s\n", w.PreferredFormat)
+			}
 			if w.BaseURL != "" {
 				fmt.Printf("  Status List: %s/api/statuslist\n", w.BaseURL)
 			}
@@ -262,6 +270,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip URL scheme registration (overrides --register)")
 	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")
+	cmd.Flags().StringVar(&preferredFormat, "preferred-format", "", "Preferred credential format when multiple match: 'dc+sd-jwt' or 'mso_mdoc'")
 	return cmd
 }
 

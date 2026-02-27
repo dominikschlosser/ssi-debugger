@@ -39,12 +39,19 @@ type StatusEntry struct {
 	Status int `json:"status"` // 0=valid, 1=revoked
 }
 
+// NextErrorOverride is a one-shot error override for the next presentation request.
+type NextErrorOverride struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
 // Wallet holds credentials, keys, and manages presentation consent flows.
 type Wallet struct {
 	HolderKey            *ecdsa.PrivateKey
 	IssuerKey            *ecdsa.PrivateKey
 	AutoAccept           bool
 	SessionTranscript    SessionTranscriptMode // "oid4vp" (default) or "iso"
+	PreferredFormat      string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
 	Credentials          []StoredCredential
 	StatusEntries        map[string]StatusEntry // credential ID → status entry
 	StatusListCounter    int                    // next available status list index
@@ -52,6 +59,7 @@ type Wallet struct {
 	Requests             map[string]*ConsentRequest
 	Log                  []LogEntry
 	mu                   sync.RWMutex
+	nextError            *NextErrorOverride
 	subscribers          map[int64]chan *ConsentRequest
 	subID                int64
 	errSubscribers       map[int64]chan WalletError
@@ -527,6 +535,22 @@ func (w *Wallet) PopLastError() *WalletError {
 	err := w.lastError
 	w.lastError = nil
 	return err
+}
+
+// SetNextError sets a one-shot error override for the next presentation request.
+func (w *Wallet) SetNextError(e *NextErrorOverride) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.nextError = e
+}
+
+// ConsumeNextError returns and clears the next error override, if any.
+func (w *Wallet) ConsumeNextError() *NextErrorOverride {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	e := w.nextError
+	w.nextError = nil
+	return e
 }
 
 // Rehydrate re-populates non-serializable fields (Disclosures, NameSpaces) from Raw.

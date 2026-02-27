@@ -92,6 +92,9 @@ oid4vc-dev wallet serve --register --port 9000
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
+| `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt` or `mso_mdoc` |
+| `--status-list`         | `false`  | Embed status list references in generated credentials |
+| `--base-url`            | —        | Base URL for status list endpoint (default: `http://localhost:<port>`) |
 
 ## `wallet accept <uri>`
 
@@ -157,6 +160,139 @@ oid4vc-dev wallet unregister             # Remove URL handlers
 | Flag     | Default | Description                                                    |
 |----------|---------|----------------------------------------------------------------|
 | `--port` | `8085`  | Listener port for handler script to try before falling back to CLI |
+
+## Testing API
+
+The wallet server exposes API endpoints for automated testing scenarios. These let you control wallet behavior programmatically — useful for E2E test suites that need to simulate errors or select specific credential formats.
+
+### One-shot error override
+
+Pre-program the wallet to return an error for the next presentation request, even in auto-accept mode. The override is consumed after one use.
+
+**Set override:**
+
+```bash
+curl -X POST http://localhost:8085/api/next-error \
+  -H 'Content-Type: application/json' \
+  -d '{"error": "access_denied", "error_description": "User denied consent"}'
+```
+
+The next OID4VP authorization request will return the configured error instead of processing normally:
+
+```json
+{
+  "status": "error",
+  "error": "access_denied",
+  "error_description": "User denied consent"
+}
+```
+
+After that single request, the wallet resumes normal behavior.
+
+**Clear override without consuming:**
+
+```bash
+curl -X DELETE http://localhost:8085/api/next-error
+```
+
+| Method   | Path              | Body                                                        | Description                |
+|----------|-------------------|-------------------------------------------------------------|----------------------------|
+| `POST`   | `/api/next-error` | `{"error": "...", "error_description": "..."}`              | Set one-shot error override |
+| `DELETE` | `/api/next-error` | —                                                           | Clear override              |
+
+### Preferred credential format
+
+When a DCQL query matches both SD-JWT and mDoc credentials (e.g. both PID formats), the wallet normally picks whichever option appears first. The preferred format setting lets you control which format wins.
+
+**Set preference:**
+
+```bash
+curl -X PUT http://localhost:8085/api/config/preferred-format \
+  -H 'Content-Type: application/json' \
+  -d '{"format": "dc+sd-jwt"}'
+```
+
+**Clear preference:**
+
+```bash
+curl -X PUT http://localhost:8085/api/config/preferred-format \
+  -H 'Content-Type: application/json' \
+  -d '{"format": ""}'
+```
+
+| Method | Path                           | Body                    | Description                    |
+|--------|--------------------------------|-------------------------|--------------------------------|
+| `PUT`  | `/api/config/preferred-format` | `{"format": "dc+sd-jwt"}` | Prefer SD-JWT when both match |
+| `PUT`  | `/api/config/preferred-format` | `{"format": "mso_mdoc"}`  | Prefer mDoc when both match   |
+| `PUT`  | `/api/config/preferred-format` | `{"format": ""}`           | Clear preference (default)    |
+
+The preference can also be set at startup via `--preferred-format`:
+
+```bash
+oid4vc-dev wallet serve --auto-accept --pid --preferred-format dc+sd-jwt
+```
+
+### Credential import
+
+Credentials can be imported at runtime via `POST /api/credentials`. The body is the raw credential string (SD-JWT or mDoc):
+
+```bash
+curl -X POST http://localhost:8085/api/credentials \
+  -d 'eyJhbGciOiJFUzI1NiJ9.eyJ2Y3QiOiJ...'
+```
+
+### Status list
+
+When `--status-list` is enabled, generated credentials include status list references. The status of individual credentials can be changed at runtime:
+
+```bash
+# Revoke a credential (status=1)
+curl -X POST http://localhost:8085/api/credentials/<id>/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status": 1}'
+
+# Un-revoke (status=0)
+curl -X POST http://localhost:8085/api/credentials/<id>/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status": 0}'
+```
+
+The status list JWT is served at `GET /api/statuslist`.
+
+### Example: E2E test flow
+
+```bash
+# 1. Start wallet in headless mode with both PID formats
+oid4vc-dev wallet serve --auto-accept --pid --preferred-format dc+sd-jwt &
+
+# 2. Import an additional credential
+curl -X POST http://localhost:8085/api/credentials -d @credential.txt
+
+# 3. Run normal presentation (succeeds, uses SD-JWT)
+curl -X POST http://localhost:8085/api/presentations \
+  -H 'Content-Type: application/json' \
+  -d '{"uri": "openid4vp://authorize?..."}'
+
+# 4. Pre-program an error for the next request
+curl -X POST http://localhost:8085/api/next-error \
+  -H 'Content-Type: application/json' \
+  -d '{"error": "access_denied", "error_description": "Simulated denial"}'
+
+# 5. Next presentation returns the error (consumed after one use)
+curl -X POST http://localhost:8085/api/presentations \
+  -H 'Content-Type: application/json' \
+  -d '{"uri": "openid4vp://authorize?..."}'
+
+# 6. Switch to mDoc preference
+curl -X PUT http://localhost:8085/api/config/preferred-format \
+  -H 'Content-Type: application/json' \
+  -d '{"format": "mso_mdoc"}'
+
+# 7. Next presentation uses mDoc instead of SD-JWT
+curl -X POST http://localhost:8085/api/presentations \
+  -H 'Content-Type: application/json' \
+  -d '{"uri": "openid4vp://authorize?..."}'
+```
 
 ## Shared flag
 

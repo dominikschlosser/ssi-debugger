@@ -65,6 +65,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/statuslist", s.handleStatusList)
 	s.mux.HandleFunc("POST /api/credentials/{id}/status", s.handleSetCredentialStatus)
 
+	// API: testing overrides
+	s.mux.HandleFunc("POST /api/next-error", s.handleSetNextError)
+	s.mux.HandleFunc("DELETE /api/next-error", s.handleClearNextError)
+	s.mux.HandleFunc("PUT /api/config/preferred-format", s.handleSetPreferredFormat)
+
 	// API: log
 	s.mux.HandleFunc("GET /api/log", s.handleLog)
 
@@ -451,8 +456,52 @@ func (s *Server) handleSetCredentialStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, entry)
 }
 
+// handleSetNextError sets a one-shot error override.
+func (s *Server) handleSetNextError(w http.ResponseWriter, r *http.Request) {
+	var body NextErrorOverride
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	s.wallet.SetNextError(&body)
+	writeJSON(w, http.StatusOK, body)
+}
+
+// handleClearNextError clears the error override without consuming.
+func (s *Server) handleClearNextError(w http.ResponseWriter, r *http.Request) {
+	s.wallet.SetNextError(nil)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetPreferredFormat sets the global credential format preference.
+func (s *Server) handleSetPreferredFormat(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Format string `json:"format"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	s.wallet.mu.Lock()
+	s.wallet.PreferredFormat = body.Format
+	s.wallet.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"format": body.Format})
+}
+
 // handleAuthFlow is the core OID4VP flow handler.
 func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationRequestParams) {
+	// Check one-shot error override
+	if override := s.wallet.ConsumeNextError(); override != nil {
+		s.log("  Next-error override consumed: %s", override.Error)
+		s.wallet.AddLog("presentation", fmt.Sprintf("Returned error override: %s", override.Error), false)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":            "error",
+			"error":             override.Error,
+			"error_description": override.ErrorDescription,
+		})
+		return
+	}
+
 	// Check client_id against x5c SAN
 	if warning := VerifyClientID(authReq.ClientID, authReq.RequestObject); warning != "" {
 		s.log("  WARNING: %s", warning)

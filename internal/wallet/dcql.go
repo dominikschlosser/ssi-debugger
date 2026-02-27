@@ -1,6 +1,9 @@
 package wallet
 
-import "log"
+import (
+	"log"
+	"sort"
+)
 
 // EvaluateDCQL matches stored credentials against a DCQL query (OID4VP 1.0 Section 6).
 // It returns matched credentials grouped by query credential ID.
@@ -55,10 +58,20 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 		}
 	}
 
+	// Sort matches so preferred format appears first per query ID
+	if w.PreferredFormat != "" {
+		sort.SliceStable(matches, func(i, j int) bool {
+			if matches[i].QueryID == matches[j].QueryID {
+				return matches[i].Format == w.PreferredFormat
+			}
+			return false
+		})
+	}
+
 	// Apply credential_sets constraints
 	if credSets, ok := query["credential_sets"].([]any); ok {
 		log.Printf("[DCQL] Applying credential_sets constraints: %d sets, %d matches before", len(credSets), len(matches))
-		matches = applyCredentialSets(matches, credSets)
+		matches = applyCredentialSets(matches, credSets, w.PreferredFormat)
 		if matches == nil {
 			log.Printf("[DCQL] credential_sets: unsatisfiable required set")
 		} else {
@@ -310,11 +323,20 @@ func filterClaims(claims map[string]any, selectedKeys []string) map[string]any {
 }
 
 // applyCredentialSets filters matches to satisfy credential_sets constraints.
-func applyCredentialSets(matches []CredentialMatch, credSets []any) []CredentialMatch {
+// When preferredFormat is set, options containing credentials of that format are tried first.
+func applyCredentialSets(matches []CredentialMatch, credSets []any, preferredFormat string) []CredentialMatch {
 	// Group matches by query ID
 	byQuery := make(map[string][]CredentialMatch)
 	for _, m := range matches {
 		byQuery[m.QueryID] = append(byQuery[m.QueryID], m)
+	}
+
+	// Build a map of query ID → format for preference sorting
+	queryFormat := make(map[string]string)
+	for qid, ms := range byQuery {
+		if len(ms) > 0 {
+			queryFormat[qid] = ms[0].Format
+		}
 	}
 
 	// Track which query IDs are needed
@@ -336,9 +358,20 @@ func applyCredentialSets(matches []CredentialMatch, credSets []any) []Credential
 			continue
 		}
 
+		// Reorder options to prefer the preferred format
+		orderedOptions := options
+		if preferredFormat != "" {
+			orderedOptions = make([]any, len(options))
+			copy(orderedOptions, options)
+			sort.SliceStable(orderedOptions, func(i, j int) bool {
+				return optionMatchesFormat(orderedOptions[i], queryFormat, preferredFormat) &&
+					!optionMatchesFormat(orderedOptions[j], queryFormat, preferredFormat)
+			})
+		}
+
 		// Try each option (array of credential query IDs)
 		satisfied := false
-		for _, opt := range options {
+		for _, opt := range orderedOptions {
 			optArr, ok := opt.([]any)
 			if !ok {
 				continue
@@ -388,4 +421,23 @@ func applyCredentialSets(matches []CredentialMatch, credSets []any) []Credential
 		}
 	}
 	return result
+}
+
+// optionMatchesFormat checks if a credential_sets option contains query IDs
+// whose matches are all of the given format.
+func optionMatchesFormat(opt any, queryFormat map[string]string, format string) bool {
+	optArr, ok := opt.([]any)
+	if !ok {
+		return false
+	}
+	for _, qid := range optArr {
+		qidStr, ok := qid.(string)
+		if !ok {
+			return false
+		}
+		if queryFormat[qidStr] == format {
+			return true
+		}
+	}
+	return false
 }

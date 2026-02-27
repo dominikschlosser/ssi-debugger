@@ -52,7 +52,8 @@ type TrafficEntry struct {
 	Class           TrafficClass   `json:"class"`
 	ClassLabel      string         `json:"classLabel"`
 	Decoded         map[string]any `json:"decoded,omitempty"`
-	Credentials     []string       `json:"credentials,omitempty"` // raw credential strings found in this entry
+	Credentials      []string       `json:"credentials,omitempty"`      // raw credential strings found in this entry
+	CredentialLabels []string       `json:"credentialLabels,omitempty"` // human-readable label per credential (parallel to Credentials)
 	Duration        time.Duration  `json:"duration"`
 	DurationMS      int64          `json:"durationMs"`
 	FlowID          string         `json:"flowId,omitempty"`

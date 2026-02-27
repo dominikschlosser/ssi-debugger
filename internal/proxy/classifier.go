@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -14,7 +15,7 @@ func Classify(entry *TrafficEntry) {
 	entry.Class = classifyEntry(entry)
 	entry.ClassLabel = entry.Class.Label()
 	entry.Decoded = decodeEntry(entry)
-	entry.Credentials = extractCredentials(entry)
+	entry.Credentials, entry.CredentialLabels = extractCredentials(entry)
 }
 
 func classifyEntry(e *TrafficEntry) TrafficClass {
@@ -403,24 +404,29 @@ func truncate(s string, maxLen int) string {
 }
 
 // extractCredentials pulls raw credential strings from the entry so the
-// dashboard can offer "View in Decoder" links.
-func extractCredentials(e *TrafficEntry) []string {
+// dashboard can offer "View in Decoder" links. Returns parallel slices of
+// credential values and human-readable labels.
+func extractCredentials(e *TrafficEntry) ([]string, []string) {
 	var creds []string
+	var labels []string
 
 	switch e.Class {
 	case ClassVPAuthResponse:
 		fields := parseFormOrJSON(e.RequestBody)
 		if vp, ok := fields["vp_token"]; ok && vp != "" {
 			creds = append(creds, vp)
+			labels = append(labels, "vp_token")
 		}
 		if id, ok := fields["id_token"]; ok && id != "" {
 			creds = append(creds, id)
+			labels = append(labels, "id_token")
 		}
 
 	case ClassVPRequestObject:
 		body := strings.TrimSpace(e.ResponseBody)
 		if isJWTBody(body) {
 			creds = append(creds, body)
+			labels = append(labels, "Request Object")
 		}
 
 	case ClassVCICredentialRequest:
@@ -429,20 +435,35 @@ func extractCredentials(e *TrafficEntry) []string {
 			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
 				if cred, ok := resp["credential"].(string); ok && cred != "" {
 					creds = append(creds, cred)
+					labels = append(labels, "credential")
 				}
 				// batch response: credentials array
 				if arr, ok := resp["credentials"].([]any); ok {
-					for _, item := range arr {
+					for i, item := range arr {
 						if obj, ok := item.(map[string]any); ok {
 							if cred, ok := obj["credential"].(string); ok && cred != "" {
 								creds = append(creds, cred)
+								labels = append(labels, fmt.Sprintf("credential[%d]", i))
 							}
 						}
 					}
 				}
 			}
 		}
+
+	case ClassVCITokenRequest:
+		if e.ResponseBody != "" {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
+				for _, key := range []string{"access_token", "refresh_token", "id_token"} {
+					if tok, ok := resp[key].(string); ok && tok != "" && isJWTBody(tok) {
+						creds = append(creds, tok)
+						labels = append(labels, key)
+					}
+				}
+			}
+		}
 	}
 
-	return creds
+	return creds, labels
 }

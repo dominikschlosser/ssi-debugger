@@ -510,6 +510,73 @@ func TestExtractCredentialsVCIBatchResponse(t *testing.T) {
 	}
 }
 
+func TestExtractCredentialsVCITokenResponse(t *testing.T) {
+	accessToken := makeJWS(map[string]any{"alg": "ES256"}, map[string]any{"iss": "https://issuer.example", "sub": "user1"})
+	refreshToken := makeJWS(map[string]any{"alg": "ES256"}, map[string]any{"sid": "session1"})
+	e := &TrafficEntry{
+		Method:       "POST",
+		URL:          "http://issuer.example/token",
+		RequestBody:  "grant_type=authorization_code&code=abc",
+		StatusCode:   200,
+		ResponseBody: `{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","token_type":"Bearer","c_nonce":"opaque-nonce","expires_in":3600}`,
+	}
+	Classify(e)
+
+	if len(e.Credentials) != 2 {
+		t.Fatalf("expected 2 credentials (JWT tokens only), got %d", len(e.Credentials))
+	}
+	if e.Credentials[0] != accessToken {
+		t.Errorf("cred[0]: expected access_token JWT")
+	}
+	if e.Credentials[1] != refreshToken {
+		t.Errorf("cred[1]: expected refresh_token JWT")
+	}
+	if len(e.CredentialLabels) != 2 {
+		t.Fatalf("expected 2 labels, got %d", len(e.CredentialLabels))
+	}
+	if e.CredentialLabels[0] != "access_token" {
+		t.Errorf("label[0]: got %q", e.CredentialLabels[0])
+	}
+	if e.CredentialLabels[1] != "refresh_token" {
+		t.Errorf("label[1]: got %q", e.CredentialLabels[1])
+	}
+}
+
+func TestExtractCredentialsVCITokenResponseOpaqueTokens(t *testing.T) {
+	e := &TrafficEntry{
+		Method:       "POST",
+		URL:          "http://issuer.example/token",
+		RequestBody:  "grant_type=authorization_code&code=abc",
+		StatusCode:   200,
+		ResponseBody: `{"access_token":"opaque-token-string","token_type":"Bearer"}`,
+	}
+	Classify(e)
+
+	if len(e.Credentials) != 0 {
+		t.Errorf("expected 0 credentials for opaque tokens, got %d", len(e.Credentials))
+	}
+}
+
+func TestExtractCredentialsLabels(t *testing.T) {
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: "vp_token=credential1&id_token=credential2&state=s1",
+		StatusCode:  200,
+	}
+	Classify(e)
+
+	if len(e.CredentialLabels) != 2 {
+		t.Fatalf("expected 2 labels, got %d", len(e.CredentialLabels))
+	}
+	if e.CredentialLabels[0] != "vp_token" {
+		t.Errorf("label[0]: got %q", e.CredentialLabels[0])
+	}
+	if e.CredentialLabels[1] != "id_token" {
+		t.Errorf("label[1]: got %q", e.CredentialLabels[1])
+	}
+}
+
 func TestExtractCredentialsUnknown(t *testing.T) {
 	e := &TrafficEntry{
 		Method:     "GET",

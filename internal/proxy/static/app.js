@@ -148,11 +148,18 @@
     return lines.join("\n");
   }
 
-  function renderCredentialLinks(credentials) {
+  function renderCredentialLinks(credentials, credentialLabels) {
     if (!credentials || credentials.length === 0) return "";
     var html = '<div class="detail-section"><h3>Credentials</h3><div class="credential-links">';
     for (var i = 0; i < credentials.length; i++) {
-      var label = credentials.length === 1 ? "View in Decoder" : "View Credential " + (i + 1) + " in Decoder";
+      var label;
+      if (credentialLabels && credentialLabels[i]) {
+        label = "View " + credentialLabels[i] + " in Decoder";
+      } else if (credentials.length === 1) {
+        label = "View in Decoder";
+      } else {
+        label = "View Credential " + (i + 1) + " in Decoder";
+      }
       var href = "/decode/?credential=" + encodeURIComponent(credentials[i]);
       html += '<a class="btn credential-link" href="' + escapeHtml(href) + '" target="_blank">' + label + '</a>';
     }
@@ -178,7 +185,7 @@
       '</div>' +
       '<div class="entry-details">' +
         '<div class="detail-actions"><button class="btn btn-copy-curl">Copy cURL</button></div>' +
-        renderCredentialLinks(entry.credentials) +
+        renderCredentialLinks(entry.credentials, entry.credentialLabels) +
         (entry.decoded ? '<div class="detail-section"><h3>Decoded</h3>' + renderDecoded(entry.decoded) + '</div>' : '') +
         '<div class="detail-section"><h3>Request Headers</h3><pre>' + renderHeaders(entry.requestHeaders) + '</pre></div>' +
         (entry.requestBody ? '<div class="detail-section"><h3>Request Body</h3><pre>' + escapeHtml(entry.requestBody) + '</pre></div>' : '') +

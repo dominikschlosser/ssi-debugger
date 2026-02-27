@@ -49,7 +49,7 @@ func Parse(raw string) (*Token, error) {
 	// Parse disclosures (everything between first and last ~)
 	sdAlg := "sha-256"
 	if alg, ok := token.Payload["_sd_alg"].(string); ok {
-		sdAlg = alg
+		sdAlg = strings.ToLower(alg)
 	}
 
 	for i := 1; i < len(parts); i++ {

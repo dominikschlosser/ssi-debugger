@@ -101,7 +101,7 @@ func TestGenerateMDOC_PIDClaims(t *testing.T) {
 	cfg := MDOCConfig{
 		DocType:   "eu.europa.ec.eudi.pid.1",
 		Namespace: "eu.europa.ec.eudi.pid.1",
-		Claims:    PIDClaims,
+		Claims:    MDOCPIDClaims,
 		Key:       key,
 	}
 
@@ -116,8 +116,8 @@ func TestGenerateMDOC_PIDClaims(t *testing.T) {
 	}
 
 	ns := doc.NameSpaces["eu.europa.ec.eudi.pid.1"]
-	if len(ns) != len(PIDClaims) {
-		t.Errorf("expected %d claims, got %d", len(PIDClaims), len(ns))
+	if len(ns) != len(MDOCPIDClaims) {
+		t.Errorf("expected %d claims, got %d", len(MDOCPIDClaims), len(ns))
 	}
 
 	verifyResult := mdoc.Verify(doc, &key.PublicKey)

@@ -39,6 +39,10 @@ var decodeCmd = &cobra.Command{
 	Short: "Auto-detect and decode credentials and OpenID4VCI/VP requests",
 	Long: `Decode and inspect SSI credentials (JWT, SD-JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
+This is a read-only inspection tool — it parses and displays the content but does
+not verify signatures, check expiry, or validate revocation status. Use 'validate'
+for active verification.
+
 Accepts:
   - Credential strings: SD-JWT, JWT, mDOC (hex or base64url)
   - URI schemes: openid-credential-offer://, openid4vp://, haip://, eudi-openid4vp://

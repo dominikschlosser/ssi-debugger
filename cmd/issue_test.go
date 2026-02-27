@@ -27,30 +27,30 @@ import (
 // --- omitClaims unit tests ---
 
 func TestOmitClaims_RemovesSpecifiedClaims(t *testing.T) {
-	result := omitClaims(mock.PIDClaims, []string{"birth_place", "resident_address", "administrative_number"})
+	result := omitClaims(mock.SDJWTPIDClaims, []string{"birth_place", "address", "nationalities"})
 
-	for _, name := range []string{"birth_place", "resident_address", "administrative_number"} {
+	for _, name := range []string{"birth_place", "address", "nationalities"} {
 		if _, ok := result[name]; ok {
 			t.Errorf("%s should have been omitted", name)
 		}
 	}
 
-	for _, name := range []string{"family_name", "given_name", "birth_date"} {
+	for _, name := range []string{"family_name", "given_name", "birthdate"} {
 		if _, ok := result[name]; !ok {
 			t.Errorf("%s should still be present", name)
 		}
 	}
 
-	expectedCount := len(mock.PIDClaims) - 3
+	expectedCount := len(mock.SDJWTPIDClaims) - 3
 	if len(result) != expectedCount {
 		t.Errorf("expected %d claims, got %d", expectedCount, len(result))
 	}
 }
 
 func TestOmitClaims_EmptyOmitReturnsOriginal(t *testing.T) {
-	result := omitClaims(mock.PIDClaims, nil)
-	if len(result) != len(mock.PIDClaims) {
-		t.Errorf("expected %d claims, got %d", len(mock.PIDClaims), len(result))
+	result := omitClaims(mock.SDJWTPIDClaims, nil)
+	if len(result) != len(mock.SDJWTPIDClaims) {
+		t.Errorf("expected %d claims, got %d", len(mock.SDJWTPIDClaims), len(result))
 	}
 }
 
@@ -62,13 +62,13 @@ func TestOmitClaims_OmitNonexistentClaimIsNoOp(t *testing.T) {
 }
 
 func TestOmitClaims_TrimsWhitespace(t *testing.T) {
-	result := omitClaims(mock.PIDClaims, []string{" birth_place ", " resident_address"})
+	result := omitClaims(mock.SDJWTPIDClaims, []string{" birth_place ", " address"})
 
 	if _, ok := result["birth_place"]; ok {
 		t.Error("birth_place should have been omitted (with whitespace trimming)")
 	}
-	if _, ok := result["resident_address"]; ok {
-		t.Error("resident_address should have been omitted (with whitespace trimming)")
+	if _, ok := result["address"]; ok {
+		t.Error("address should have been omitted (with whitespace trimming)")
 	}
 }
 
@@ -92,33 +92,47 @@ func TestOmitClaims_OmitAllClaims(t *testing.T) {
 	}
 }
 
-// --- resolveIssueClaims tests ---
+// --- resolveIssueClaimsForFormat tests ---
 
 func TestResolveIssueClaims_DefaultWhenEmpty(t *testing.T) {
 	issuePID = false
 	issueClaims = ""
 	issueOmit = nil
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
 	if len(claims) != len(mock.DefaultClaims) {
 		t.Errorf("expected %d default claims, got %d", len(mock.DefaultClaims), len(claims))
 	}
 }
 
-func TestResolveIssueClaims_PIDWhenFlagged(t *testing.T) {
+func TestResolveIssueClaims_PIDWhenFlagged_SDJWT(t *testing.T) {
 	issuePID = true
 	issueClaims = ""
 	issueOmit = nil
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
-	if len(claims) != len(mock.PIDClaims) {
-		t.Errorf("expected %d PID claims, got %d", len(mock.PIDClaims), len(claims))
+	if len(claims) != len(mock.SDJWTPIDClaims) {
+		t.Errorf("expected %d SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims), len(claims))
+	}
+}
+
+func TestResolveIssueClaims_PIDWhenFlagged_MDOC(t *testing.T) {
+	issuePID = true
+	issueClaims = ""
+	issueOmit = nil
+
+	claims, err := resolveIssueClaimsForFormat("mdoc")
+	if err != nil {
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
+	}
+	if len(claims) != len(mock.MDOCPIDClaims) {
+		t.Errorf("expected %d mDoc PID claims, got %d", len(mock.MDOCPIDClaims), len(claims))
 	}
 }
 
@@ -127,12 +141,12 @@ func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	issueClaims = ""
 	issueOmit = []string{"birth_place", "gender"}
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
 
-	expected := len(mock.PIDClaims) - 2
+	expected := len(mock.SDJWTPIDClaims) - 2
 	if len(claims) != expected {
 		t.Errorf("expected %d claims, got %d", expected, len(claims))
 	}
@@ -149,9 +163,9 @@ func TestResolveIssueClaims_JSONString(t *testing.T) {
 	issueClaims = `{"name":"Test","active":true}`
 	issueOmit = nil
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
 	if claims["name"] != "Test" {
 		t.Errorf("expected name=Test, got %v", claims["name"])
@@ -166,9 +180,9 @@ func TestResolveIssueClaims_JSONStringWithOmit(t *testing.T) {
 	issueClaims = `{"a":1,"b":2,"c":3}`
 	issueOmit = []string{"b"}
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
 	if len(claims) != 2 {
 		t.Errorf("expected 2 claims, got %d", len(claims))
@@ -189,9 +203,9 @@ func TestResolveIssueClaims_FileReference(t *testing.T) {
 	issueClaims = "@" + claimsFile
 	issueOmit = nil
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
-		t.Fatalf("resolveIssueClaims: %v", err)
+		t.Fatalf("resolveIssueClaimsForFormat: %v", err)
 	}
 	if claims["file_claim"] != "works" {
 		t.Errorf("expected file_claim=works, got %v", claims["file_claim"])
@@ -203,7 +217,7 @@ func TestResolveIssueClaims_InvalidJSON(t *testing.T) {
 	issueClaims = `{not json}`
 	issueOmit = nil
 
-	_, err := resolveIssueClaims()
+	_, err := resolveIssueClaimsForFormat("sdjwt")
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
@@ -214,7 +228,7 @@ func TestResolveIssueClaims_MissingFile(t *testing.T) {
 	issueClaims = "@/nonexistent/path/claims.json"
 	issueOmit = nil
 
-	_, err := resolveIssueClaims()
+	_, err := resolveIssueClaimsForFormat("sdjwt")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -426,7 +440,7 @@ func TestIssueMDOC_InvalidKeyFile(t *testing.T) {
 // --- claims data tests ---
 
 func TestDefaultClaims_HasExpectedFields(t *testing.T) {
-	required := []string{"given_name", "family_name", "birth_date"}
+	required := []string{"given_name", "family_name", "birthdate"}
 	for _, name := range required {
 		if _, ok := mock.DefaultClaims[name]; !ok {
 			t.Errorf("DefaultClaims missing %q", name)
@@ -434,7 +448,58 @@ func TestDefaultClaims_HasExpectedFields(t *testing.T) {
 	}
 }
 
-func TestPIDClaims_HasExpectedFields(t *testing.T) {
+func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
+	required := []string{
+		"family_name", "given_name", "birthdate",
+		"age_over_18", "age_in_years", "age_birth_year",
+		"family_name_birth", "given_name_birth",
+		"birth_place", "birth_country", "birth_state", "birth_city",
+		"address",
+		"gender", "nationalities",
+		"issuance_date", "expiry_date",
+		"issuing_authority",
+		"issuing_country", "issuing_jurisdiction",
+	}
+	for _, name := range required {
+		if _, ok := mock.SDJWTPIDClaims[name]; !ok {
+			t.Errorf("SDJWTPIDClaims missing %q", name)
+		}
+	}
+
+	if len(mock.SDJWTPIDClaims) != 20 {
+		t.Errorf("expected 20 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
+	}
+
+	// address should be a nested object
+	addr, ok := mock.SDJWTPIDClaims["address"].(map[string]any)
+	if !ok {
+		t.Fatal("address should be a map")
+	}
+	for _, field := range []string{"street_address", "locality", "postal_code", "country", "region"} {
+		if _, ok := addr[field]; !ok {
+			t.Errorf("address missing subclaim %q", field)
+		}
+	}
+
+	// nationalities should be an array
+	nats, ok := mock.SDJWTPIDClaims["nationalities"].([]any)
+	if !ok {
+		t.Fatal("nationalities should be an array")
+	}
+	if len(nats) == 0 {
+		t.Error("nationalities should not be empty")
+	}
+
+	// document_number and administrative_number should not be present
+	if _, ok := mock.SDJWTPIDClaims["document_number"]; ok {
+		t.Error("document_number should not be present in SD-JWT PID claims")
+	}
+	if _, ok := mock.SDJWTPIDClaims["administrative_number"]; ok {
+		t.Error("administrative_number should not be present in SD-JWT PID claims")
+	}
+}
+
+func TestMDOCPIDClaims_HasExpectedFields(t *testing.T) {
 	required := []string{
 		"family_name", "given_name", "birth_date",
 		"age_over_18", "age_in_years", "age_birth_year",
@@ -444,31 +509,39 @@ func TestPIDClaims_HasExpectedFields(t *testing.T) {
 		"resident_postal_code", "resident_street",
 		"gender", "nationality",
 		"issuance_date", "expiry_date",
-		"issuing_authority", "document_number", "administrative_number",
+		"issuing_authority",
 		"issuing_country", "issuing_jurisdiction",
 	}
 	for _, name := range required {
-		if _, ok := mock.PIDClaims[name]; !ok {
-			t.Errorf("PIDClaims missing %q", name)
+		if _, ok := mock.MDOCPIDClaims[name]; !ok {
+			t.Errorf("MDOCPIDClaims missing %q", name)
 		}
 	}
 
-	if len(mock.PIDClaims) != 27 {
-		t.Errorf("expected 27 PID claims, got %d", len(mock.PIDClaims))
+	if len(mock.MDOCPIDClaims) != 25 {
+		t.Errorf("expected 25 mDoc PID claims, got %d", len(mock.MDOCPIDClaims))
+	}
+
+	// document_number and administrative_number should not be present
+	if _, ok := mock.MDOCPIDClaims["document_number"]; ok {
+		t.Error("document_number should not be present in mDoc PID claims")
+	}
+	if _, ok := mock.MDOCPIDClaims["administrative_number"]; ok {
+		t.Error("administrative_number should not be present in mDoc PID claims")
 	}
 }
 
 func TestPIDClaims_TypesAreCorrect(t *testing.T) {
 	// Boolean
-	if v, ok := mock.PIDClaims["age_over_18"].(bool); !ok || !v {
+	if v, ok := mock.SDJWTPIDClaims["age_over_18"].(bool); !ok || !v {
 		t.Error("age_over_18 should be bool true")
 	}
 	// Integer
-	if v, ok := mock.PIDClaims["gender"].(int); !ok || v != 1 {
-		t.Errorf("gender should be int 1, got %T %v", mock.PIDClaims["gender"], mock.PIDClaims["gender"])
+	if v, ok := mock.SDJWTPIDClaims["gender"].(int); !ok || v != 1 {
+		t.Errorf("gender should be int 1, got %T %v", mock.SDJWTPIDClaims["gender"], mock.SDJWTPIDClaims["gender"])
 	}
 	// String
-	if v, ok := mock.PIDClaims["family_name"].(string); !ok || !strings.Contains(v, "MUSTERMANN") {
+	if v, ok := mock.SDJWTPIDClaims["family_name"].(string); !ok || !strings.Contains(v, "MUSTERMANN") {
 		t.Errorf("family_name should be string containing MUSTERMANN, got %v", v)
 	}
 }

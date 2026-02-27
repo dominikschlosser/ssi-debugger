@@ -1,0 +1,391 @@
+package wallet
+
+import "log"
+
+// EvaluateDCQL matches stored credentials against a DCQL query (OID4VP 1.0 Section 6).
+// It returns matched credentials grouped by query credential ID.
+func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
+	credentials := w.GetCredentials()
+	credQueries, _ := query["credentials"].([]any)
+
+	log.Printf("[DCQL] Evaluating query: %d credential queries against %d stored credentials", len(credQueries), len(credentials))
+
+	var matches []CredentialMatch
+
+	for _, cq := range credQueries {
+		cqMap, ok := cq.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		queryID, _ := cqMap["id"].(string)
+		queryFormat, _ := cqMap["format"].(string)
+
+		for _, cred := range credentials {
+			typeLabel := cred.VCT
+			if typeLabel == "" {
+				typeLabel = cred.DocType
+			}
+
+			if !matchesFormat(cred, queryFormat) {
+				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
+				continue
+			}
+			if !matchesMeta(cred, cqMap) {
+				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
+				continue
+			}
+
+			selectedKeys := selectClaims(cred, cqMap)
+			if selectedKeys == nil {
+				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found", queryID, typeLabel, cred.Format)
+				continue
+			}
+
+			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selectedKeys)
+			matches = append(matches, CredentialMatch{
+				QueryID:      queryID,
+				CredentialID: cred.ID,
+				Format:       cred.Format,
+				VCT:          cred.VCT,
+				DocType:      cred.DocType,
+				Claims:       filterClaims(cred.Claims, selectedKeys),
+				SelectedKeys: selectedKeys,
+			})
+		}
+	}
+
+	// Apply credential_sets constraints
+	if credSets, ok := query["credential_sets"].([]any); ok {
+		log.Printf("[DCQL] Applying credential_sets constraints: %d sets, %d matches before", len(credSets), len(matches))
+		matches = applyCredentialSets(matches, credSets)
+		if matches == nil {
+			log.Printf("[DCQL] credential_sets: unsatisfiable required set")
+		} else {
+			log.Printf("[DCQL] credential_sets: %d matches after filtering", len(matches))
+		}
+	}
+
+	log.Printf("[DCQL] Result: %d matches", len(matches))
+	return matches
+}
+
+// matchesFormat checks if a credential matches the requested format.
+func matchesFormat(cred StoredCredential, queryFormat string) bool {
+	if queryFormat == "" {
+		return true
+	}
+	return cred.Format == queryFormat
+}
+
+// matchesMeta checks format-specific metadata (vct_values, doctype_value).
+func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
+	meta, ok := cqMap["meta"].(map[string]any)
+	if !ok {
+		return true
+	}
+
+	// SD-JWT: check vct_values
+	if vctValues, ok := meta["vct_values"].([]any); ok {
+		if cred.VCT == "" {
+			return false
+		}
+		found := false
+		for _, v := range vctValues {
+			if s, ok := v.(string); ok && s == cred.VCT {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// mDoc: check doctype_value
+	if docType, ok := meta["doctype_value"].(string); ok {
+		if cred.DocType != docType {
+			return false
+		}
+	}
+
+	return true
+}
+
+// selectClaims determines which claims to disclose based on the query.
+// Returns claim keys to disclose, or nil if the credential can't satisfy the query.
+func selectClaims(cred StoredCredential, cqMap map[string]any) []string {
+	claimsQuery, ok := cqMap["claims"].([]any)
+	if !ok || len(claimsQuery) == 0 {
+		// No specific claims requested, include all
+		all := make([]string, 0, len(cred.Claims))
+		for k := range cred.Claims {
+			all = append(all, k)
+		}
+		return all
+	}
+
+	// Check claim_sets first (preference ordering)
+	if claimSets, ok := cqMap["claim_sets"].([]any); ok && len(claimSets) > 0 {
+		return selectFromClaimSets(cred, claimsQuery, claimSets)
+	}
+
+	// No claim_sets: include all requested claims that exist
+	return selectAllRequestedClaims(cred, claimsQuery)
+}
+
+// selectFromClaimSets picks the first satisfiable claim_set (preference order).
+func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []any) []string {
+	// Build index: claim query index → claim path
+	claimPaths := buildClaimPaths(claimsQuery)
+
+	for _, cs := range claimSets {
+		csArr, ok := cs.([]any)
+		if !ok {
+			continue
+		}
+
+		var selected []string
+		satisfiable := true
+
+		for _, idx := range csArr {
+			var index int
+			switch v := idx.(type) {
+			case float64:
+				index = int(v)
+			case int:
+				index = v
+			default:
+				satisfiable = false
+				break
+			}
+
+			if index < 0 || index >= len(claimPaths) {
+				satisfiable = false
+				break
+			}
+
+			path := claimPaths[index]
+			key := claimKeyFromPath(cred, path)
+			if key == "" {
+				satisfiable = false
+				break
+			}
+			selected = append(selected, key)
+		}
+
+		if satisfiable && len(selected) > 0 {
+			return selected
+		}
+	}
+
+	return nil
+}
+
+// selectAllRequestedClaims returns all requested claims that exist in the credential.
+func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string {
+	var selected []string
+	for _, cq := range claimsQuery {
+		cqMap, ok := cq.(map[string]any)
+		if !ok {
+			continue
+		}
+		path, ok := cqMap["path"].([]any)
+		if !ok {
+			continue
+		}
+		key := claimKeyFromPath(cred, path)
+		if key != "" {
+			selected = append(selected, key)
+		}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected
+}
+
+// buildClaimPaths extracts path arrays from claims query entries.
+func buildClaimPaths(claimsQuery []any) [][]any {
+	var paths [][]any
+	for _, cq := range claimsQuery {
+		cqMap, ok := cq.(map[string]any)
+		if !ok {
+			paths = append(paths, nil)
+			continue
+		}
+		path, ok := cqMap["path"].([]any)
+		if !ok {
+			paths = append(paths, nil)
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+// claimKeyFromPath resolves a DCQL claim path to a credential claim key.
+// For SD-JWT: path is like ["given_name"] → key "given_name"
+//
+//	nested object: ["address", "street_address"] → validates subclaim exists, returns "address"
+//	array wildcard: ["nationalities", null] → validates value is array, returns "nationalities"
+//	array index:    ["nationalities", 0] → validates array has enough elements, returns "nationalities"
+//
+// For mDoc: path is like ["eu.europa.ec.eudi.pid.1", "given_name"] → key "eu.europa.ec.eudi.pid.1:given_name"
+func claimKeyFromPath(cred StoredCredential, path []any) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	if cred.Format == "mso_mdoc" && len(path) >= 2 {
+		ns, ok1 := path[0].(string)
+		elem, ok2 := path[1].(string)
+		if ok1 && ok2 {
+			key := ns + ":" + elem
+			if _, exists := cred.Claims[key]; exists {
+				return key
+			}
+		}
+		return ""
+	}
+
+	// SD-JWT
+	key, ok := path[0].(string)
+	if !ok {
+		return ""
+	}
+	val, exists := cred.Claims[key]
+	if !exists {
+		return ""
+	}
+
+	// Single-segment path: just check existence
+	if len(path) == 1 {
+		return key
+	}
+
+	// Multi-segment: validate nested structure
+	switch second := path[1].(type) {
+	case string:
+		// Nested object path like ["address", "street_address"]
+		obj, ok := val.(map[string]any)
+		if !ok {
+			return ""
+		}
+		if _, exists := obj[second]; !exists {
+			return ""
+		}
+		return key
+	case float64:
+		// Array index like ["nationalities", 0]
+		arr, ok := val.([]any)
+		if !ok {
+			return ""
+		}
+		idx := int(second)
+		if idx < 0 || idx >= len(arr) {
+			return ""
+		}
+		return key
+	case nil:
+		// Array wildcard like ["nationalities", null]
+		if _, ok := val.([]any); !ok {
+			return ""
+		}
+		return key
+	default:
+		return ""
+	}
+}
+
+// filterClaims returns only the claims with the given keys.
+func filterClaims(claims map[string]any, selectedKeys []string) map[string]any {
+	filtered := make(map[string]any, len(selectedKeys))
+	for _, k := range selectedKeys {
+		if v, ok := claims[k]; ok {
+			filtered[k] = v
+		}
+	}
+	return filtered
+}
+
+// applyCredentialSets filters matches to satisfy credential_sets constraints.
+func applyCredentialSets(matches []CredentialMatch, credSets []any) []CredentialMatch {
+	// Group matches by query ID
+	byQuery := make(map[string][]CredentialMatch)
+	for _, m := range matches {
+		byQuery[m.QueryID] = append(byQuery[m.QueryID], m)
+	}
+
+	// Track which query IDs are needed
+	needed := make(map[string]bool)
+
+	for _, cs := range credSets {
+		csMap, ok := cs.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		required := true
+		if r, ok := csMap["required"].(bool); ok {
+			required = r
+		}
+
+		options, ok := csMap["options"].([]any)
+		if !ok {
+			continue
+		}
+
+		// Try each option (array of credential query IDs)
+		satisfied := false
+		for _, opt := range options {
+			optArr, ok := opt.([]any)
+			if !ok {
+				continue
+			}
+
+			allAvailable := true
+			for _, qid := range optArr {
+				qidStr, ok := qid.(string)
+				if !ok {
+					allAvailable = false
+					break
+				}
+				if _, has := byQuery[qidStr]; !has {
+					allAvailable = false
+					break
+				}
+			}
+
+			if allAvailable {
+				for _, qid := range optArr {
+					if qidStr, ok := qid.(string); ok {
+						needed[qidStr] = true
+					}
+				}
+				satisfied = true
+				break
+			}
+		}
+
+		if required && !satisfied {
+			return nil // required credential_set not satisfiable
+		}
+	}
+
+	// If no credential_sets were defined or all optional, include everything
+	if len(needed) == 0 {
+		return matches
+	}
+
+	// Filter to only needed matches (first match per query ID)
+	var result []CredentialMatch
+	used := make(map[string]bool)
+	for _, m := range matches {
+		if needed[m.QueryID] && !used[m.QueryID] {
+			result = append(result, m)
+			used[m.QueryID] = true
+		}
+	}
+	return result
+}

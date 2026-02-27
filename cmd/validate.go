@@ -17,6 +17,7 @@ package cmd
 import (
 	"crypto"
 	"fmt"
+	"time"
 
 	"github.com/dominikschlosser/ssi-debugger/internal/format"
 	"github.com/dominikschlosser/ssi-debugger/internal/keys"
@@ -38,10 +39,19 @@ var (
 
 var validateCmd = &cobra.Command{
 	Use:   "validate [input]",
-	Short: "Decode and verify a credential's signature",
-	Long:  "Decodes and validates a credential. Verifies signatures with --key (PEM or JWK file) or --trust-list. Optionally checks revocation status.",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runValidate,
+	Short: "Validate a credential (signature, expiry, revocation)",
+	Long: `Decode and validate a credential. Unlike 'decode' (which only parses and displays),
+'validate' actively checks correctness:
+
+  - Signature verification (requires --key or --trust-list)
+  - Expiry check (use --allow-expired to skip)
+  - Revocation status (with --status-list, makes a network call)
+
+If neither --key nor --trust-list is provided, signature verification is skipped
+and only expiry/status checks are performed. This is useful for quick revocation
+checks without needing the issuer's key.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runValidate,
 }
 
 func init() {
@@ -96,9 +106,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(pubKeys) == 0 {
-		return fmt.Errorf("provide --key or --trust-list for signature verification")
-	}
+	verifySig := len(pubKeys) > 0
 
 	detected := format.Detect(raw)
 
@@ -110,29 +118,48 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 		output.PrintSDJWT(token, opts)
 
-		// If the token has an x5c header and we have a trust list, extract the
-		// leaf certificate's public key and validate the chain against the trust list.
-		var bestResult *sdjwt.VerifyResult
-		if x5cKey, err := validate.ExtractAndValidateX5C(token.Header, tlCerts); err == nil && x5cKey != nil {
-			bestResult = sdjwt.Verify(token, x5cKey)
-		} else {
-			// Fall back to trying each key directly
-			for _, key := range pubKeys {
-				result := sdjwt.Verify(token, key)
-				if result.SignatureValid {
+		if verifySig {
+			// If the token has an x5c header and we have a trust list, extract the
+			// leaf certificate's public key and validate the chain against the trust list.
+			var bestResult *sdjwt.VerifyResult
+			if x5cKey, err := validate.ExtractAndValidateX5C(token.Header, tlCerts); err == nil && x5cKey != nil {
+				bestResult = sdjwt.Verify(token, x5cKey)
+			} else {
+				// Fall back to trying each key directly
+				for _, key := range pubKeys {
+					result := sdjwt.Verify(token, key)
+					if result.SignatureValid {
+						bestResult = result
+						break
+					}
 					bestResult = result
-					break
 				}
-				bestResult = result
 			}
-		}
-		output.PrintVerifyResultSDJWT(bestResult, opts)
+			output.PrintVerifyResultSDJWT(bestResult, opts)
 
-		if !bestResult.SignatureValid {
-			return fmt.Errorf("signature verification failed")
-		}
-		if bestResult.Expired && !allowExpired {
-			return fmt.Errorf("credential expired")
+			if !bestResult.SignatureValid {
+				return fmt.Errorf("signature verification failed")
+			}
+			if bestResult.Expired && !allowExpired {
+				return fmt.Errorf("credential expired")
+			}
+		} else {
+			if !opts.JSON {
+				fmt.Println("\n  Signature verification skipped (no --key or --trust-list provided)")
+			}
+			// Still check expiry from parsed claims
+			if exp, ok := token.ResolvedClaims["exp"]; ok {
+				if expFloat, ok := exp.(float64); ok {
+					if time.Unix(int64(expFloat), 0).Before(time.Now()) {
+						if !opts.JSON {
+							fmt.Println("  ✗ Credential expired")
+						}
+						if !allowExpired {
+							return fmt.Errorf("credential expired")
+						}
+					}
+				}
+			}
 		}
 
 		// Status list check
@@ -147,26 +174,43 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 		output.PrintMDOC(doc, opts)
 
-		var bestResult *mdoc.VerifyResult
-		if x5cKey, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts); err == nil && x5cKey != nil {
-			bestResult = mdoc.Verify(doc, x5cKey)
-		} else {
-			for _, key := range pubKeys {
-				result := mdoc.Verify(doc, key)
-				if result.SignatureValid {
+		if verifySig {
+			var bestResult *mdoc.VerifyResult
+			if x5cKey, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts); err == nil && x5cKey != nil {
+				bestResult = mdoc.Verify(doc, x5cKey)
+			} else {
+				for _, key := range pubKeys {
+					result := mdoc.Verify(doc, key)
+					if result.SignatureValid {
+						bestResult = result
+						break
+					}
 					bestResult = result
-					break
 				}
-				bestResult = result
 			}
-		}
-		output.PrintVerifyResultMDOC(bestResult, opts)
+			output.PrintVerifyResultMDOC(bestResult, opts)
 
-		if !bestResult.SignatureValid {
-			return fmt.Errorf("signature verification failed")
-		}
-		if bestResult.Expired && !allowExpired {
-			return fmt.Errorf("credential expired")
+			if !bestResult.SignatureValid {
+				return fmt.Errorf("signature verification failed")
+			}
+			if bestResult.Expired && !allowExpired {
+				return fmt.Errorf("credential expired")
+			}
+		} else {
+			if !opts.JSON {
+				fmt.Println("\n  Signature verification skipped (no --key or --trust-list provided)")
+			}
+			// Check expiry from MSO
+			if doc.IssuerAuth != nil && doc.IssuerAuth.MSO != nil && doc.IssuerAuth.MSO.ValidityInfo != nil {
+				if doc.IssuerAuth.MSO.ValidityInfo.ValidUntil != nil && doc.IssuerAuth.MSO.ValidityInfo.ValidUntil.Before(time.Now()) {
+					if !opts.JSON {
+						fmt.Println("  ✗ Credential expired")
+					}
+					if !allowExpired {
+						return fmt.Errorf("credential expired")
+					}
+				}
+			}
 		}
 
 		// Status list check for mDOC — wrap in "status" key since ExtractStatusRef

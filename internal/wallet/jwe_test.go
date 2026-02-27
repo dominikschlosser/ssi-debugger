@@ -1,0 +1,119 @@
+package wallet
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/dominikschlosser/ssi-debugger/internal/format"
+)
+
+func TestEncryptJWE_CompactFormat(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"vp_token":"test","state":"abc123"}`)
+	jwe, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.Split(jwe, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 parts, got %d", len(parts))
+	}
+
+	// Encrypted key must be empty for ECDH-ES
+	if parts[1] != "" {
+		t.Errorf("expected empty encrypted key, got %q", parts[1])
+	}
+
+	// Decode and verify protected header
+	headerJSON, err := format.DecodeBase64URL(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatal(err)
+	}
+
+	if header["alg"] != "ECDH-ES" {
+		t.Errorf("expected alg=ECDH-ES, got %v", header["alg"])
+	}
+	if header["enc"] != "A128GCM" {
+		t.Errorf("expected enc=A128GCM, got %v", header["enc"])
+	}
+	if header["kid"] != "test-kid" {
+		t.Errorf("expected kid=test-kid, got %v", header["kid"])
+	}
+	if _, ok := header["epk"]; !ok {
+		t.Error("expected epk in header")
+	}
+	if _, ok := header["apu"]; ok {
+		t.Error("expected no apu when nil")
+	}
+}
+
+func TestEncryptJWE_WithAPU(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apu := []byte("mdoc-nonce-value")
+	jwe, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid2", "A256GCM", apu)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.Split(jwe, ".")
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+
+	apuVal, ok := header["apu"].(string)
+	if !ok {
+		t.Fatal("expected apu in header")
+	}
+	decoded, err := format.DecodeBase64URL(apuVal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != "mdoc-nonce-value" {
+		t.Errorf("expected apu=mdoc-nonce-value, got %s", decoded)
+	}
+}
+
+func TestEncryptJWE_A256GCM(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"test":"value"}`)
+	jwe, err := EncryptJWE(payload, &key.PublicKey, "kid3", "A256GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.Split(jwe, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 parts, got %d", len(parts))
+	}
+
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+
+	if header["enc"] != "A256GCM" {
+		t.Errorf("expected enc=A256GCM, got %v", header["enc"])
+	}
+}

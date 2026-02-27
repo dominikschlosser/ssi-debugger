@@ -14,40 +14,80 @@
 
 package mock
 
+// DefaultPIDVCT is the default Verifiable Credential Type for German EUDI PIDs.
+const DefaultPIDVCT = "urn:eudi:pid:de:1"
+
 // DefaultClaims returns a minimal set of PID-like claims.
 var DefaultClaims = map[string]any{
 	"given_name":  "ERIKA",
 	"family_name": "MUSTERMANN",
-	"birth_date":  "1984-08-12",
+	"birthdate":   "1984-08-12",
 }
 
-// PIDClaims returns claims following the EUDI PID Rulebook (ARF Annex 3).
-var PIDClaims = map[string]any{
-	"family_name":            "MUSTERMANN",
-	"given_name":             "ERIKA",
-	"birth_date":             "1984-08-12",
-	"age_over_18":            true,
-	"age_in_years":           41,
-	"age_birth_year":         1984,
-	"family_name_birth":      "GABLER",
-	"given_name_birth":       "ERIKA",
-	"birth_place":            "BERLIN",
-	"birth_country":          "DE",
-	"birth_state":            "BE",
-	"birth_city":             "BERLIN",
-	"resident_address":       "HEIDESTRAẞE 17, 51147 KÖLN",
-	"resident_country":       "DE",
-	"resident_state":         "NW",
-	"resident_city":          "KÖLN",
-	"resident_postal_code":   "51147",
-	"resident_street":        "HEIDESTRAẞE 17",
-	"gender":                 1,
-	"nationality":            "DE",
-	"issuance_date":          "2024-01-15",
-	"expiry_date":            "2029-01-15",
-	"issuing_authority":      "DE",
-	"document_number":        "T22000129",
-	"administrative_number":  "123456789",
-	"issuing_country":        "DE",
-	"issuing_jurisdiction":   "DE-NW",
+// SDJWTPIDClaims returns claims following the EUDI PID Rulebook for SD-JWT format.
+// address is a nested object with individually disclosable subclaims.
+// nationalities is an array with individually disclosable elements.
+// document_number and administrative_number are omitted (not present in German PIDs).
+var SDJWTPIDClaims = map[string]any{
+	"family_name":       "MUSTERMANN",
+	"given_name":        "ERIKA",
+	"birthdate":         "1984-08-12",
+	"age_over_18":       true,
+	"age_in_years":      41,
+	"age_birth_year":    1984,
+	"family_name_birth": "GABLER",
+	"given_name_birth":  "ERIKA",
+	"birth_place":       "BERLIN",
+	"birth_country":     "DE",
+	"birth_state":       "BE",
+	"birth_city":        "BERLIN",
+	"address": map[string]any{
+		"street_address": "HEIDESTRAẞE 17",
+		"locality":       "KÖLN",
+		"postal_code":    "51147",
+		"country":        "DE",
+		"region":         "NW",
+	},
+	"gender":        1,
+	"nationalities": []any{"DE"},
+	"issuance_date":       "2024-01-15",
+	"expiry_date":         "2029-01-15",
+	"issuing_authority":   "DE",
+	"issuing_country":     "DE",
+	"issuing_jurisdiction": "DE-NW",
 }
+
+// MDOCPIDClaims returns claims following the EUDI PID Rulebook for mDoc format.
+// Uses flat data elements per ISO 18013-5 / eu.europa.ec.eudi.pid.1 namespace.
+// document_number and administrative_number are omitted (not present in German PIDs).
+var MDOCPIDClaims = map[string]any{
+	"family_name":         "MUSTERMANN",
+	"given_name":          "ERIKA",
+	"birth_date":          "1984-08-12",
+	"age_over_18":         true,
+	"age_in_years":        41,
+	"age_birth_year":      1984,
+	"family_name_birth":   "GABLER",
+	"given_name_birth":    "ERIKA",
+	"birth_place":         "BERLIN",
+	"birth_country":       "DE",
+	"birth_state":         "BE",
+	"birth_city":          "BERLIN",
+	"resident_address":    "HEIDESTRAẞE 17, 51147 KÖLN",
+	"resident_country":    "DE",
+	"resident_state":      "NW",
+	"resident_city":       "KÖLN",
+	"resident_postal_code": "51147",
+	"resident_street":     "HEIDESTRAẞE 17",
+	"gender":              1,
+	"nationality":         "DE",
+	"issuance_date":       "2024-01-15",
+	"expiry_date":         "2029-01-15",
+	"issuing_authority":   "DE",
+	"issuing_country":     "DE",
+	"issuing_jurisdiction": "DE-NW",
+}
+
+// PIDClaims is an alias for SDJWTPIDClaims for backward compatibility.
+// Deprecated: Use SDJWTPIDClaims or MDOCPIDClaims depending on the credential format.
+var PIDClaims = SDJWTPIDClaims

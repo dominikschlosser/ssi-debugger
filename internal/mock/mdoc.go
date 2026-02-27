@@ -32,6 +32,7 @@ type MDOCConfig struct {
 	Namespace string
 	Claims    map[string]any
 	Key       *ecdsa.PrivateKey
+	HolderKey *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
 }
 
 // GenerateMDOC creates a mock mDOC (IssuerSigned) credential.
@@ -94,6 +95,32 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 			"validFrom":  cbor.Tag{Number: 0, Content: now.Format(time.RFC3339)},
 			"validUntil": cbor.Tag{Number: 0, Content: validUntil.Format(time.RFC3339)},
 		},
+	}
+
+	// Add deviceKeyInfo with holder's COSE_Key
+	if cfg.HolderKey != nil {
+		keySize := (cfg.HolderKey.Curve.Params().BitSize + 7) / 8
+		xBytes := cfg.HolderKey.X.Bytes()
+		yBytes := cfg.HolderKey.Y.Bytes()
+		for len(xBytes) < keySize {
+			xBytes = append([]byte{0}, xBytes...)
+		}
+		for len(yBytes) < keySize {
+			yBytes = append([]byte{0}, yBytes...)
+		}
+
+		// COSE_Key: kty=2 (EC2), crv=1 (P-256), x, y
+		// Using COSE key labels: 1=kty, -1=crv, -2=x, -3=y
+		coseKey := map[any]any{
+			int64(1):  int64(2), // kty: EC2
+			int64(-1): int64(1), // crv: P-256
+			int64(-2): xBytes,   // x coordinate
+			int64(-3): yBytes,   // y coordinate
+		}
+
+		mso["deviceKeyInfo"] = map[string]any{
+			"deviceKey": coseKey,
+		}
 	}
 
 	msoBytes, err := cbor.Marshal(mso)

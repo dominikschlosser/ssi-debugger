@@ -30,8 +30,8 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "ssi-debugger",
-	Short: "Locally decode and validate SD-JWT and mDOC credentials",
-	Long:  "A local-first CLI tool for decoding, validating, and inspecting SSI credentials (SD-JWT, mDOC/mso_mdoc).",
+	Short: "Decode, validate, and test SSI credentials (SD-JWT, mDOC)",
+	Long:  "A local-first CLI tool for decoding, validating, and testing SSI credentials. Supports SD-JWT, mDOC/mso_mdoc, OID4VP/OID4VCI flows, ETSI trust lists, and includes a testing wallet.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if noColor {
 			color.NoColor = true

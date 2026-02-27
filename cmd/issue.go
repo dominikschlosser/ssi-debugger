@@ -24,6 +24,7 @@ import (
 
 	"github.com/dominikschlosser/ssi-debugger/internal/keys"
 	"github.com/dominikschlosser/ssi-debugger/internal/mock"
+	"github.com/dominikschlosser/ssi-debugger/internal/wallet"
 	"github.com/spf13/cobra"
 )
 
@@ -37,6 +38,7 @@ var (
 	issueNamespace string
 	issuePID       bool
 	issueOmit      []string
+	issueToWallet  bool
 )
 
 var issueCmd = &cobra.Command{
@@ -68,10 +70,11 @@ func init() {
 	issueSDJWTCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
 	issueSDJWTCmd.Flags().StringVar(&issueKeyPath, "key", "", "Private key file (PEM or JWK); ephemeral P-256 if omitted")
 	issueSDJWTCmd.Flags().StringVar(&issueIssuer, "iss", "https://issuer.example", "Issuer URL")
-	issueSDJWTCmd.Flags().StringVar(&issueVCT, "vct", "urn:eudi:pid:1", "Verifiable Credential Type")
+	issueSDJWTCmd.Flags().StringVar(&issueVCT, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type")
 	issueSDJWTCmd.Flags().StringVar(&issueExpires, "exp", "24h", "Expiration duration (e.g. 24h, 30m)")
 	issueSDJWTCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueSDJWTCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
+	issueSDJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
 
 	// mDOC flags
 	issueMDOCCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
@@ -80,6 +83,7 @@ func init() {
 	issueMDOCCmd.Flags().StringVar(&issueNamespace, "namespace", "eu.europa.ec.eudi.pid.1", "Namespace")
 	issueMDOCCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueMDOCCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
+	issueMDOCCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
 }
 
 func runIssueSDJWT(cmd *cobra.Command, args []string) error {
@@ -88,7 +92,7 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
 		return err
 	}
@@ -112,6 +116,10 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(result)
+
+	if issueToWallet {
+		return importToWallet(result)
+	}
 	return nil
 }
 
@@ -121,7 +129,7 @@ func runIssueMDOC(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	claims, err := resolveIssueClaims()
+	claims, err := resolveIssueClaimsForFormat("mdoc")
 	if err != nil {
 		return err
 	}
@@ -139,6 +147,10 @@ func runIssueMDOC(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(result)
+
+	if issueToWallet {
+		return importToWallet(result)
+	}
 	return nil
 }
 
@@ -165,9 +177,14 @@ func loadOrGenerateIssueKey() (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-func resolveIssueClaims() (map[string]any, error) {
+func resolveIssueClaimsForFormat(format string) (map[string]any, error) {
 	if issuePID && issueClaims == "" {
-		return omitClaims(mock.PIDClaims, issueOmit), nil
+		switch format {
+		case "mdoc":
+			return omitClaims(mock.MDOCPIDClaims, issueOmit), nil
+		default:
+			return omitClaims(mock.SDJWTPIDClaims, issueOmit), nil
+		}
 	}
 
 	if issueClaims == "" {
@@ -190,6 +207,31 @@ func resolveIssueClaims() (map[string]any, error) {
 		return nil, fmt.Errorf("parsing claims JSON: %w", err)
 	}
 	return omitClaims(claims, issueOmit), nil
+}
+
+func importToWallet(raw string) error {
+	store := wallet.NewWalletStore(walletDir)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		return fmt.Errorf("loading wallet: %w", err)
+	}
+
+	if err := w.ImportCredential(raw); err != nil {
+		return fmt.Errorf("importing to wallet: %w", err)
+	}
+
+	if err := store.Save(w); err != nil {
+		return fmt.Errorf("saving wallet: %w", err)
+	}
+
+	creds := w.GetCredentials()
+	last := creds[len(creds)-1]
+	label := last.VCT
+	if label == "" {
+		label = last.DocType
+	}
+	fmt.Fprintf(os.Stderr, "Imported %s credential (%s) into wallet\n", last.Format, label)
+	return nil
 }
 
 func omitClaims(claims map[string]any, omit []string) map[string]any {

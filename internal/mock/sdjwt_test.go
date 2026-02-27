@@ -102,7 +102,7 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 		Issuer:    "https://issuer.example",
 		VCT:       "urn:eudi:pid:1",
 		ExpiresIn: 24 * time.Hour,
-		Claims:    PIDClaims,
+		Claims:    SDJWTPIDClaims,
 		Key:       key,
 	}
 
@@ -116,8 +116,34 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 		t.Fatalf("sdjwt.Parse: %v", err)
 	}
 
-	if len(token.Disclosures) != len(PIDClaims) {
-		t.Errorf("expected %d disclosures, got %d", len(PIDClaims), len(token.Disclosures))
+	// SD-JWT PID claims: top-level disclosures + address subclaim disclosures (5) + nationalities element disclosures (1)
+	expectedTopLevel := len(SDJWTPIDClaims)
+	expectedAddressSubs := len(SDJWTPIDClaims["address"].(map[string]any))
+	expectedNationalitiesElems := len(SDJWTPIDClaims["nationalities"].([]any))
+	expectedTotal := expectedTopLevel + expectedAddressSubs + expectedNationalitiesElems
+	if len(token.Disclosures) != expectedTotal {
+		t.Errorf("expected %d disclosures (top=%d + address=%d + nationalities=%d), got %d",
+			expectedTotal, expectedTopLevel, expectedAddressSubs, expectedNationalitiesElems, len(token.Disclosures))
+	}
+
+	// Check that resolved claims contain address subclaims
+	addr, ok := token.ResolvedClaims["address"].(map[string]any)
+	if !ok {
+		t.Fatal("expected address to be a map in resolved claims")
+	}
+	for _, field := range []string{"street_address", "locality", "postal_code", "country", "region"} {
+		if _, ok := addr[field]; !ok {
+			t.Errorf("address missing subclaim %q", field)
+		}
+	}
+
+	// Check that nationalities is resolved as array
+	nats, ok := token.ResolvedClaims["nationalities"].([]any)
+	if !ok {
+		t.Fatal("expected nationalities to be an array in resolved claims")
+	}
+	if len(nats) != 1 || nats[0] != "DE" {
+		t.Errorf("expected nationalities=[DE], got %v", nats)
 	}
 
 	// Verify signature
@@ -298,8 +324,30 @@ func TestGenerateSDJWT_NestedClaimValues(t *testing.T) {
 		t.Fatalf("sdjwt.Parse: %v", err)
 	}
 
-	if len(token.Disclosures) != 2 {
-		t.Errorf("expected 2 disclosures, got %d", len(token.Disclosures))
+	// 2 top-level + 2 address subclaims + 2 array elements = 6 disclosures
+	if len(token.Disclosures) != 6 {
+		t.Errorf("expected 6 disclosures, got %d", len(token.Disclosures))
+	}
+
+	// Check address resolved correctly
+	addr, ok := token.ResolvedClaims["address"].(map[string]any)
+	if !ok {
+		t.Fatal("expected address to be a map")
+	}
+	if addr["street"] != "Main St" {
+		t.Errorf("expected street=Main St, got %v", addr["street"])
+	}
+	if addr["city"] != "Berlin" {
+		t.Errorf("expected city=Berlin, got %v", addr["city"])
+	}
+
+	// Check tags resolved correctly
+	tags, ok := token.ResolvedClaims["tags"].([]any)
+	if !ok {
+		t.Fatal("expected tags to be an array")
+	}
+	if len(tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(tags))
 	}
 
 	verifyResult := sdjwt.Verify(token, &key.PublicKey)
@@ -315,7 +363,7 @@ func TestGenerateSDJWT_UniqueDisclosures(t *testing.T) {
 		Issuer:    "https://issuer.example",
 		VCT:       "test",
 		ExpiresIn: time.Hour,
-		Claims:    PIDClaims,
+		Claims:    SDJWTPIDClaims,
 		Key:       key,
 	}
 

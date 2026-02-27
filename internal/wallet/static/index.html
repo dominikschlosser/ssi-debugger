@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSI Debugger Wallet</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>SSI Debugger Wallet</h1>
+    <div class="header-right">
+      <span id="cred-count" class="badge badge-count">0 credentials</span>
+      <button class="btn" id="theme-toggle">Theme</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Actions -->
+    <div>
+      <div class="section-title">Actions</div>
+      <div class="actions-bar">
+        <input type="text" id="offer-input" placeholder="Paste OID4VCI offer URI or OID4VP request URI...">
+        <button class="btn btn-primary" id="process-btn">Process</button>
+        <button class="btn" id="import-btn">Import Credential</button>
+      </div>
+    </div>
+
+    <!-- Credentials -->
+    <div>
+      <div class="section-title">Credentials</div>
+      <div id="credentials" class="credentials">
+        <div class="empty-state" id="cred-empty">No credentials loaded</div>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div>
+      <div class="section-title">Activity</div>
+      <div id="log" class="log-entries">
+        <div class="empty-state" id="log-empty">No activity yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Consent Overlay -->
+  <div class="consent-overlay" id="consent-overlay">
+    <div class="consent-dialog" id="consent-dialog"></div>
+  </div>
+
+  <!-- Import Modal -->
+  <div class="consent-overlay" id="import-overlay">
+    <div class="consent-dialog">
+      <div class="consent-title">Import Credential</div>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">Paste a raw SD-JWT or mDoc credential</p>
+      <textarea id="import-textarea" style="width:100%;height:120px;font-family:var(--font-mono);font-size:11px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;resize:vertical;"></textarea>
+      <div class="consent-buttons">
+        <button class="btn" id="import-cancel">Cancel</button>
+        <button class="btn btn-primary" id="import-submit">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

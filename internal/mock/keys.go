@@ -29,6 +29,27 @@ func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 }
 
+// PublicKeyJWKMap returns the JWK representation of a P-256 public key as a map.
+func PublicKeyJWKMap(key *ecdsa.PublicKey) map[string]string {
+	keySize := (key.Curve.Params().BitSize + 7) / 8
+	xBytes := padToKeySize(key.X.Bytes(), keySize)
+	yBytes := padToKeySize(key.Y.Bytes(), keySize)
+
+	return map[string]string{
+		"kty": "EC",
+		"crv": "P-256",
+		"x":   format.EncodeBase64URL(xBytes),
+		"y":   format.EncodeBase64URL(yBytes),
+	}
+}
+
+func padToKeySize(b []byte, size int) []byte {
+	for len(b) < size {
+		b = append([]byte{0}, b...)
+	}
+	return b
+}
+
 // PublicKeyJWK returns the JSON JWK representation of a P-256 public key.
 func PublicKeyJWK(key *ecdsa.PublicKey) string {
 	keySize := (key.Curve.Params().BitSize + 7) / 8

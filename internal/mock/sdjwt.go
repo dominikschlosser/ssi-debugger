@@ -34,9 +34,12 @@ type SDJWTConfig struct {
 	ExpiresIn time.Duration
 	Claims    map[string]any
 	Key       *ecdsa.PrivateKey
+	HolderKey *ecdsa.PublicKey // optional: adds cnf claim for holder binding
 }
 
 // GenerateSDJWT creates a mock SD-JWT credential with all claims selectively disclosable.
+// Map values produce nested disclosures (subclaims with their own _sd array).
+// Slice values produce array element disclosures ({"...": digest} entries).
 func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	now := time.Now()
 
@@ -45,22 +48,19 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	var digests []string
 
 	for name, value := range cfg.Claims {
-		salt := make([]byte, 16)
-		if _, err := rand.Read(salt); err != nil {
-			return "", fmt.Errorf("generating salt: %w", err)
-		}
-
-		disclosure := []any{format.EncodeBase64URL(salt), name, value}
-		discJSON, err := json.Marshal(disclosure)
+		claimDisclosures, claimValue, err := makeDisclosure(name, value)
 		if err != nil {
-			return "", fmt.Errorf("marshaling disclosure: %w", err)
+			return "", err
 		}
+		disclosures = append(disclosures, claimDisclosures...)
 
-		encoded := format.EncodeBase64URL(discJSON)
-		disclosures = append(disclosures, encoded)
-
-		h := sha256.Sum256([]byte(encoded))
-		digests = append(digests, format.EncodeBase64URL(h[:]))
+		// The top-level disclosure for this claim
+		topDisc, topDigest, err := createDisclosure(name, claimValue)
+		if err != nil {
+			return "", err
+		}
+		disclosures = append(disclosures, topDisc)
+		digests = append(digests, topDigest)
 	}
 
 	// Build payload
@@ -71,6 +71,13 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 		"vct":     cfg.VCT,
 		"_sd_alg": "sha-256",
 		"_sd":     digests,
+	}
+
+	// Add holder binding (cnf claim with JWK)
+	if cfg.HolderKey != nil {
+		payload["cnf"] = map[string]any{
+			"jwk": PublicKeyJWKMap(cfg.HolderKey),
+		}
 	}
 
 	// Build header
@@ -116,6 +123,85 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	result := jwt + "~" + strings.Join(disclosures, "~") + "~"
 
 	return result, nil
+}
+
+// makeDisclosure handles nested structures. It returns any sub-disclosures and
+// the (possibly transformed) value to use in the parent disclosure.
+// For plain values, it returns no sub-disclosures and the value as-is.
+// For map values, it creates sub-disclosures and returns an object with _sd.
+// For slice values, it creates element disclosures and returns an array with {"...": digest}.
+func makeDisclosure(name string, value any) (subDisclosures []string, transformedValue any, err error) {
+	switch v := value.(type) {
+	case map[string]any:
+		// Nested object: create disclosures for each subclaim
+		var subDigests []string
+		for subName, subValue := range v {
+			disc, digest, err := createDisclosure(subName, subValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			subDisclosures = append(subDisclosures, disc)
+			subDigests = append(subDigests, digest)
+		}
+		transformedValue = map[string]any{"_sd": subDigests}
+		return subDisclosures, transformedValue, nil
+
+	case []any:
+		// Array: create element disclosures for each item
+		var elements []any
+		for _, item := range v {
+			disc, digest, err := createArrayElementDisclosure(item)
+			if err != nil {
+				return nil, nil, err
+			}
+			subDisclosures = append(subDisclosures, disc)
+			elements = append(elements, map[string]any{"...": digest})
+		}
+		transformedValue = elements
+		return subDisclosures, transformedValue, nil
+
+	default:
+		// Plain value: no sub-disclosures needed
+		return nil, value, nil
+	}
+}
+
+// createDisclosure creates a named disclosure [salt, name, value] and returns
+// the encoded disclosure string and its digest.
+func createDisclosure(name string, value any) (encoded string, digest string, err error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", "", fmt.Errorf("generating salt: %w", err)
+	}
+
+	disclosure := []any{format.EncodeBase64URL(salt), name, value}
+	discJSON, err := json.Marshal(disclosure)
+	if err != nil {
+		return "", "", fmt.Errorf("marshaling disclosure: %w", err)
+	}
+
+	enc := format.EncodeBase64URL(discJSON)
+	h := sha256.Sum256([]byte(enc))
+	return enc, format.EncodeBase64URL(h[:]), nil
+}
+
+// createArrayElementDisclosure creates an array element disclosure [salt, value]
+// and returns the encoded disclosure string and its digest.
+func createArrayElementDisclosure(value any) (encoded string, digest string, err error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", "", fmt.Errorf("generating salt: %w", err)
+	}
+
+	disclosure := []any{format.EncodeBase64URL(salt), value}
+	discJSON, err := json.Marshal(disclosure)
+	if err != nil {
+		return "", "", fmt.Errorf("marshaling disclosure: %w", err)
+	}
+
+	enc := format.EncodeBase64URL(discJSON)
+	h := sha256.Sum256([]byte(enc))
+	return enc, format.EncodeBase64URL(h[:]), nil
 }
 
 // signECDSA signs a digest and returns the JWS r||s encoded signature.

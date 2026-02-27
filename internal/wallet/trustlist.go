@@ -12,7 +12,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // GenerateTrustListJWT generates an ETSI TS 119 602 trust list JWT

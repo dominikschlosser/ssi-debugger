@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
 )
 
 func TestSubscribeErrors(t *testing.T) {

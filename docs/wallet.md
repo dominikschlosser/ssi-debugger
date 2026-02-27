@@ -1,6 +1,6 @@
 # Wallet
 
-A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.ssi-debugger/wallet/` (configurable via `--wallet-dir`) and persist across invocations.
+A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.oid4vc-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations.
 
 ## Subcommands
 
@@ -21,38 +21,38 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 
 ```bash
 # Generate PID credentials and list them (re-running replaces existing PIDs)
-ssi-debugger wallet generate-pid
-ssi-debugger wallet generate-pid --claims '{"given_name":"MAX","family_name":"POWER"}'
-ssi-debugger wallet list
+oid4vc-dev wallet generate-pid
+oid4vc-dev wallet generate-pid --claims '{"given_name":"MAX","family_name":"POWER"}'
+oid4vc-dev wallet list
 
 # Start the wallet web UI with stored credentials
-ssi-debugger wallet serve
+oid4vc-dev wallet serve
 
 # Start the wallet and register URL scheme handlers
-ssi-debugger wallet serve --register
+oid4vc-dev wallet serve --register
 
 # Process an OID4VP request from the CLI
-ssi-debugger wallet accept 'openid4vp://authorize?client_id=...'
+oid4vc-dev wallet accept 'openid4vp://authorize?client_id=...'
 
 # Accept a credential offer (auto-detected from URI)
-ssi-debugger wallet accept 'openid-credential-offer://...'
+oid4vc-dev wallet accept 'openid-credential-offer://...'
 
 # Scan a QR code from screen and auto-detect the flow
-ssi-debugger wallet scan --screen
+oid4vc-dev wallet scan --screen
 
 # Import a credential from a file
-ssi-debugger wallet import credential.txt
+oid4vc-dev wallet import credential.txt
 
 # Register URL scheme handlers so openid4vp:// links open the wallet
-ssi-debugger wallet register
+oid4vc-dev wallet register
 ```
 
 ## Storage
 
-All wallet state is stored in `~/.ssi-debugger/wallet/` by default:
+All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 
 ```
-~/.ssi-debugger/wallet/
+~/.oid4vc-dev/wallet/
 ├── wallet.json       # Credentials + metadata
 ├── holder.pem        # Holder EC private key (auto-generated on first use)
 └── issuer.pem        # Issuer EC private key (for self-issued credentials)
@@ -74,11 +74,11 @@ The server exposes:
 Use `--register` to also register OS URL scheme handlers so that `openid4vp://` and `openid-credential-offer://` links automatically open the wallet.
 
 ```bash
-ssi-debugger wallet serve
-ssi-debugger wallet serve --port 9000 --auto-accept
-ssi-debugger wallet serve --pid --credential extra.txt
-ssi-debugger wallet serve --register           # also register URL scheme handlers
-ssi-debugger wallet serve --register --port 9000
+oid4vc-dev wallet serve
+oid4vc-dev wallet serve --port 9000 --auto-accept
+oid4vc-dev wallet serve --pid --credential extra.txt
+oid4vc-dev wallet serve --register           # also register URL scheme handlers
+oid4vc-dev wallet serve --register --port 9000
 ```
 
 | Flag                    | Default  | Description                                      |
@@ -103,8 +103,8 @@ Auto-detects the URI type and dispatches to the appropriate flow:
 In interactive mode (default), OID4VP requests start a temporary consent UI server and auto-open it in the browser. With `--auto-accept`, auto-selects and submits the first matching credentials.
 
 ```bash
-ssi-debugger wallet accept 'openid4vp://authorize?...' --auto-accept
-ssi-debugger wallet accept 'openid-credential-offer://...'
+oid4vc-dev wallet accept 'openid4vp://authorize?...' --auto-accept
+oid4vc-dev wallet accept 'openid-credential-offer://...'
 ```
 
 ## `wallet scan`
@@ -116,9 +116,9 @@ Scans a QR code from an image file or screen capture and auto-detects the conten
 - SD-JWT / mDoc raw credential → delegates to `import`
 
 ```bash
-ssi-debugger wallet scan qr-image.png
-ssi-debugger wallet scan --screen              # macOS interactive screen capture
-ssi-debugger wallet scan --screen --auto-accept # auto-approve if it's a presentation
+oid4vc-dev wallet scan qr-image.png
+oid4vc-dev wallet scan --screen              # macOS interactive screen capture
+oid4vc-dev wallet scan --screen --auto-accept # auto-approve if it's a presentation
 ```
 
 ## `wallet trust-list`
@@ -126,11 +126,11 @@ ssi-debugger wallet scan --screen --auto-accept # auto-approve if it's a present
 Generates and prints the ETSI trust list JWT containing the wallet's issuer certificate. The output can be piped to a file or used directly with `--trust-list` in the `validate` command. Use `--url` to print only the URL for a running wallet server instead.
 
 ```bash
-ssi-debugger wallet trust-list                          # Print the trust list JWT
-ssi-debugger wallet trust-list > trustlist.jwt          # Save to file
-ssi-debugger wallet trust-list --url                    # http://localhost:8085/api/trustlist
-ssi-debugger wallet trust-list --url --port 9000        # http://localhost:9000/api/trustlist
-ssi-debugger wallet trust-list --url --docker           # http://host.docker.internal:8085/api/trustlist
+oid4vc-dev wallet trust-list                          # Print the trust list JWT
+oid4vc-dev wallet trust-list > trustlist.jwt          # Save to file
+oid4vc-dev wallet trust-list --url                    # http://localhost:8085/api/trustlist
+oid4vc-dev wallet trust-list --url --port 9000        # http://localhost:9000/api/trustlist
+oid4vc-dev wallet trust-list --url --docker           # http://host.docker.internal:8085/api/trustlist
 ```
 
 | Flag       | Default | Description                                        |
@@ -149,9 +149,9 @@ The handler script first tries to POST to a running `wallet serve` instance. If 
 - **Other platforms**: Not supported — use `wallet accept <uri>` instead
 
 ```bash
-ssi-debugger wallet register               # Register URL handlers (default listener port 8085)
-ssi-debugger wallet register --port 9000   # Use custom listener port
-ssi-debugger wallet unregister             # Remove URL handlers
+oid4vc-dev wallet register               # Register URL handlers (default listener port 8085)
+oid4vc-dev wallet register --port 9000   # Use custom listener port
+oid4vc-dev wallet unregister             # Remove URL handlers
 ```
 
 | Flag     | Default | Description                                                    |
@@ -163,5 +163,5 @@ ssi-debugger wallet unregister             # Remove URL handlers
 All wallet subcommands accept `--wallet-dir` to override the storage directory:
 
 ```bash
-ssi-debugger wallet list --wallet-dir /tmp/test-wallet
+oid4vc-dev wallet list --wallet-dir /tmp/test-wallet
 ```

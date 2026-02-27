@@ -10,11 +10,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/keys"
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
-	"github.com/dominikschlosser/ssi-debugger/internal/qr"
-	"github.com/dominikschlosser/ssi-debugger/internal/wallet"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
+	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -29,7 +29,7 @@ var walletCmd = &cobra.Command{
 }
 
 func init() {
-	walletCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory (default ~/.ssi-debugger/wallet/)")
+	walletCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory (default ~/.oid4vc-dev/wallet/)")
 	walletCmd.AddCommand(walletServeCmd())
 	walletCmd.AddCommand(walletListCmd())
 	walletCmd.AddCommand(walletImportCmd())

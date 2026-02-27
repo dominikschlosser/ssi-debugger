@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/output"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/output"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 // Decode detects the credential format and returns a JSON-serializable map.

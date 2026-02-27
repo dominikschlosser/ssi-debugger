@@ -26,7 +26,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("ssi-debugger %s\n", Version)
+		fmt.Printf("oid4vc-dev %s\n", Version)
 	},
 }
 

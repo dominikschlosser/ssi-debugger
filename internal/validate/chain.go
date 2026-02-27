@@ -19,9 +19,9 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
 
 // ValidateCertChain verifies that the leaf certificate chains up to a trust list certificate.

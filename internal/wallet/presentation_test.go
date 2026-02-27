@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/fxamacker/cbor/v2"
 )
 

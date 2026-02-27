@@ -14,7 +14,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // EncryptJWE encrypts payload as a compact JWE using ECDH-ES with AES-GCM.

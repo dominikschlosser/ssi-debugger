@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // GenerateKey creates an ephemeral P-256 private key.

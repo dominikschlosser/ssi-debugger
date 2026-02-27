@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 )

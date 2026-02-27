@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // Parse decodes an mDOC credential from hex or base64url encoded input.

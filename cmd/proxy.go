@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/proxy"
+	"github.com/dominikschlosser/oid4vc-dev/internal/proxy"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )

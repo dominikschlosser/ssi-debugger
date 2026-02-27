@@ -11,7 +11,7 @@ module.exports = defineConfig({
     headless: true,
   },
   webServer: {
-    command: "go build -o /tmp/ssi-debugger-e2e .. && /tmp/ssi-debugger-e2e serve --port 18923",
+    command: "go build -o /tmp/oid4vc-dev-e2e .. && /tmp/oid4vc-dev-e2e serve --port 18923",
     url: "http://localhost:18923",
     reuseExistingServer: true,
     timeout: 15_000,

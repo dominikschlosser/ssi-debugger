@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // VerifyResult contains the result of signature and validity verification.

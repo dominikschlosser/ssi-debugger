@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
 )

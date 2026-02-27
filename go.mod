@@ -1,4 +1,4 @@
-module github.com/dominikschlosser/ssi-debugger
+module github.com/dominikschlosser/oid4vc-dev
 
 go 1.25.0
 

@@ -29,14 +29,14 @@
 
   // Theme
   function getPreferredTheme() {
-    const stored = localStorage.getItem("ssi-debugger-theme");
+    const stored = localStorage.getItem("oid4vc-dev-theme");
     if (stored) return stored;
     return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
 
   function setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("ssi-debugger-theme", theme);
+    localStorage.setItem("oid4vc-dev-theme", theme);
     themeBtn.textContent = theme === "dark" ? "Light" : "Dark";
   }
 

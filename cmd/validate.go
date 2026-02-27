@@ -19,14 +19,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/keys"
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/output"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
-	"github.com/dominikschlosser/ssi-debugger/internal/statuslist"
-	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
-	"github.com/dominikschlosser/ssi-debugger/internal/validate"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/output"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 	"github.com/spf13/cobra"
 )
 

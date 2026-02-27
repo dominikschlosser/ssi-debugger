@@ -4,9 +4,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -ldflags "-s -w -X github.com/dominikschlosser/ssi-debugger/cmd.Version=${VERSION}" -o ssi-debugger .
+RUN go build -ldflags "-s -w -X github.com/dominikschlosser/oid4vc-dev/cmd.Version=${VERSION}" -o oid4vc-dev .
 
 FROM alpine:latest
-COPY --from=build /app/ssi-debugger /usr/local/bin/
-ENTRYPOINT ["ssi-debugger"]
+COPY --from=build /app/oid4vc-dev /usr/local/bin/
+ENTRYPOINT ["oid4vc-dev"]
 CMD ["wallet", "serve", "--auto-accept", "--pid", "--port", "8085"]

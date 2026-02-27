@@ -37,7 +37,7 @@ func TestHandleHAR(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Errorf("expected application/json, got %s", ct)
 	}
-	if cd := resp.Header.Get("Content-Disposition"); cd != `attachment; filename="ssi-debugger.har"` {
+	if cd := resp.Header.Get("Content-Disposition"); cd != `attachment; filename="oid4vc-dev.har"` {
 		t.Errorf("unexpected Content-Disposition: %s", cd)
 	}
 

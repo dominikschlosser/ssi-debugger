@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/keys"
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/google/uuid"
 )
 

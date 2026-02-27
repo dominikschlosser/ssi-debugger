@@ -20,7 +20,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // Parse detects and parses an OID4VCI credential offer or OID4VP authorization request.

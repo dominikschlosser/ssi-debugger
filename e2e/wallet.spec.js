@@ -13,14 +13,14 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   // Build the binary
-  execSync("go build -o /tmp/ssi-debugger-wallet-e2e ..", {
+  execSync("go build -o /tmp/oid4vc-dev-wallet-e2e ..", {
     cwd: __dirname,
   });
 
   // Start wallet with --pid and --auto-accept for some tests, interactive for others
   const { spawn } = require("child_process");
   walletProcess = spawn(
-    "/tmp/ssi-debugger-wallet-e2e",
+    "/tmp/oid4vc-dev-wallet-e2e",
     ["wallet", "serve", "--pid", "--port", String(WALLET_PORT)],
     { stdio: "pipe" }
   );

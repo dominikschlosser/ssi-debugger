@@ -3,9 +3,9 @@
 Intercept and debug OID4VP/VCI traffic between a wallet and a verifier/issuer. Point your wallet at the proxy instead of the real server — every request and response is captured, classified by protocol step, decoded, and displayed both in the terminal and a live web dashboard.
 
 ```bash
-ssi-debugger proxy --target http://localhost:8080
-ssi-debugger proxy --target http://localhost:8080 --port 9090 --dashboard 9091
-ssi-debugger proxy --target http://localhost:8080 --no-dashboard
+oid4vc-dev proxy --target http://localhost:8080
+oid4vc-dev proxy --target http://localhost:8080 --port 9090 --dashboard 9091
+oid4vc-dev proxy --target http://localhost:8080 --no-dashboard
 ```
 
 ```

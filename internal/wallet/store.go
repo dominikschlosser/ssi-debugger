@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 // WalletStore handles file-based persistence for the wallet.
@@ -27,9 +27,9 @@ type walletJSON struct {
 func DefaultWalletDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".ssi-debugger/wallet"
+		return ".oid4vc-dev/wallet"
 	}
-	return filepath.Join(home, ".ssi-debugger", "wallet")
+	return filepath.Join(home, ".oid4vc-dev", "wallet")
 }
 
 // NewWalletStore creates a new WalletStore for the given directory.

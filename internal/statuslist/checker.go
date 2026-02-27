@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 var httpClient = &http.Client{

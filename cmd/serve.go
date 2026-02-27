@@ -17,8 +17,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/web"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/web"
 	"github.com/spf13/cobra"
 )
 

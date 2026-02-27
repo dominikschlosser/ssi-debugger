@@ -23,10 +23,10 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
-	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
 
 var (

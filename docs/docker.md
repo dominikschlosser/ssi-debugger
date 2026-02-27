@@ -5,8 +5,8 @@ The primary use case for the Docker image is **automated integration testing of 
 ## Quick start
 
 ```bash
-docker pull ghcr.io/dominikschlosser/ssi-debugger:latest
-docker run -p 8085:8085 ghcr.io/dominikschlosser/ssi-debugger
+docker pull ghcr.io/dominikschlosser/oid4vc-dev:latest
+docker run -p 8085:8085 ghcr.io/dominikschlosser/oid4vc-dev
 ```
 
 The default CMD starts the wallet server with pre-loaded PID credentials in headless mode — ready for automated verifier testing out of the box.
@@ -14,8 +14,8 @@ The default CMD starts the wallet server with pre-loaded PID credentials in head
 You can override the command to use any CLI feature:
 
 ```bash
-echo "eyJhbGci..." | docker run -i ghcr.io/dominikschlosser/ssi-debugger decode
-docker run -i ghcr.io/dominikschlosser/ssi-debugger validate --trust-list https://example.com/trustlist.jwt < credential.txt
+echo "eyJhbGci..." | docker run -i ghcr.io/dominikschlosser/oid4vc-dev decode
+docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://example.com/trustlist.jwt < credential.txt
 ```
 
 ## How it works
@@ -45,7 +45,7 @@ docker run -i ghcr.io/dominikschlosser/ssi-debugger validate --trust-list https:
 ```yaml
 services:
   wallet:
-    image: ghcr.io/dominikschlosser/ssi-debugger:latest
+    image: ghcr.io/dominikschlosser/oid4vc-dev:latest
     ports:
       - "8085:8085"
   verifier:
@@ -59,7 +59,7 @@ services:
 ## Testcontainers (Java)
 
 ```java
-GenericContainer<?> wallet = new GenericContainer<>("ghcr.io/dominikschlosser/ssi-debugger:latest")
+GenericContainer<?> wallet = new GenericContainer<>("ghcr.io/dominikschlosser/oid4vc-dev:latest")
     .withExposedPorts(8085)
     .waitingFor(Wait.forHttp("/api/trustlist").forStatusCode(200));
 wallet.start();
@@ -89,7 +89,7 @@ String trustListUrl = walletUrl + "/api/trustlist";
 ctx := context.Background()
 wallet, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
     ContainerRequest: testcontainers.ContainerRequest{
-        Image:        "ghcr.io/dominikschlosser/ssi-debugger:latest",
+        Image:        "ghcr.io/dominikschlosser/oid4vc-dev:latest",
         ExposedPorts: []string{"8085/tcp"},
         WaitingFor:   wait.ForHTTP("/api/trustlist").WithPort("8085"),
     },
@@ -108,10 +108,10 @@ The default CMD starts the wallet with two EUDI PID credentials (SD-JWT + mDoc) 
 
 ```bash
 # Generate custom PIDs into a local directory, then start the wallet with them
-docker run --rm -v wallet-data:/root/.ssi-debugger/wallet ghcr.io/dominikschlosser/ssi-debugger \
+docker run --rm -v wallet-data:/root/.oid4vc-dev/wallet ghcr.io/dominikschlosser/oid4vc-dev \
   wallet generate-pid --claims '{"given_name":"MAX","family_name":"POWER"}'
 
-docker run -p 8085:8085 -v wallet-data:/root/.ssi-debugger/wallet ghcr.io/dominikschlosser/ssi-debugger \
+docker run -p 8085:8085 -v wallet-data:/root/.oid4vc-dev/wallet ghcr.io/dominikschlosser/oid4vc-dev \
   wallet serve --auto-accept --port 8085
 ```
 

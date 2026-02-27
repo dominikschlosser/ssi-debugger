@@ -18,8 +18,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 // FromSDJWT generates a DCQL query from an SD-JWT credential.

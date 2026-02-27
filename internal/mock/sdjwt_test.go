@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 func TestGenerateSDJWT_DefaultClaims(t *testing.T) {

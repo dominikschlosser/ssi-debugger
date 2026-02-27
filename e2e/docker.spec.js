@@ -3,8 +3,8 @@ const { test, expect } = require("@playwright/test");
 const { execSync } = require("child_process");
 const http = require("http");
 
-const DOCKER_IMAGE = "ssi-debugger-e2e";
-const CONTAINER_NAME = "ssi-debugger-e2e-test";
+const DOCKER_IMAGE = "oid4vc-dev-e2e";
+const CONTAINER_NAME = "oid4vc-dev-e2e-test";
 const HOST_PORT = 18925;
 const WALLET_URL = `http://localhost:${HOST_PORT}`;
 

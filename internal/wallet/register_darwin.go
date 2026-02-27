@@ -19,7 +19,7 @@ func appBundlePath() string {
 
 func handlerScriptPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ssi-debugger", "url-handler.sh")
+	return filepath.Join(home, ".oid4vc-dev", "url-handler.sh")
 }
 
 // RegisterURLSchemes creates a macOS .app bundle via osacompile and registers URL scheme handlers.
@@ -51,13 +51,13 @@ case "$URI" in
     curl -sf -X POST "$LISTENER/api/offers" \
       -H "Content-Type: application/json" \
       -d "{\"uri\":\"$URI\"}" 2>/dev/null \
-      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/ssi-debugger-wallet.log
+      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
     ;;
   *)
     curl -sf -X POST "$LISTENER/api/presentations" \
       -H "Content-Type: application/json" \
       -d "{\"uri\":\"$URI\"}" 2>/dev/null \
-      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/ssi-debugger-wallet.log
+      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
     ;;
 esac
 `, "{{BINARY_PATH}}", binaryPath), "{{PORT}}", fmt.Sprintf("%d", listenerPort))
@@ -75,11 +75,11 @@ esac
 
 	// Write AppleScript source — "on open location" receives the URL from macOS Apple Events
 	appleScript := fmt.Sprintf(`on open location theURL
-	do shell script quoted form of "%s" & " " & quoted form of theURL & " >> /tmp/ssi-debugger-wallet.log 2>&1 &"
+	do shell script quoted form of "%s" & " " & quoted form of theURL & " >> /tmp/oid4vc-dev-wallet.log 2>&1 &"
 end open location
 `, handlerPath)
 
-	tmpScript, err := os.CreateTemp("", "ssi-debugger-*.applescript")
+	tmpScript, err := os.CreateTemp("", "oid4vc-dev-*.applescript")
 	if err != nil {
 		return fmt.Errorf("creating temp AppleScript: %w", err)
 	}
@@ -102,7 +102,7 @@ end open location
 	plistBuddy := "/usr/libexec/PlistBuddy"
 
 	plistCmds := [][]string{
-		{"-c", "Add :CFBundleIdentifier string com.ssi-debugger.wallet", plistPath},
+		{"-c", "Add :CFBundleIdentifier string com.oid4vc-dev.wallet", plistPath},
 		{"-c", "Add :LSUIElement bool true", plistPath},
 		{"-c", "Add :CFBundleURLTypes array", plistPath},
 		// OID4VP schemes

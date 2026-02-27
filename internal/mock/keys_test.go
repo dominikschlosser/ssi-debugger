@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/keys"
+	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 )
 
 func TestGenerateKey_ReturnsP256(t *testing.T) {

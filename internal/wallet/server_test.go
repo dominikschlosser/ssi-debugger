@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
-	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
 
 func newTestServer(t *testing.T, autoAccept bool) *Server {

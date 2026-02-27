@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func generateTestWallet(t *testing.T) *Wallet {

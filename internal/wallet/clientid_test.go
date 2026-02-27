@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
 )
 
 func testCert(dnsNames []string, uris []*url.URL) string {

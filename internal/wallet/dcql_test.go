@@ -3,7 +3,7 @@ package wallet
 import (
 	"testing"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func TestEvaluateDCQL_MatchesSDJWTByVCT(t *testing.T) {

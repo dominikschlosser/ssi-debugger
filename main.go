@@ -17,7 +17,7 @@ package main
 import (
 	"os"
 
-	"github.com/dominikschlosser/ssi-debugger/cmd"
+	"github.com/dominikschlosser/oid4vc-dev/cmd"
 )
 
 func main() {

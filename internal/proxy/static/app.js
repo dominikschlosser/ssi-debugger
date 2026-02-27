@@ -53,7 +53,7 @@
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");
         a.href = url;
-        a.download = "ssi-debugger.har";
+        a.download = "oid4vc-dev.har";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

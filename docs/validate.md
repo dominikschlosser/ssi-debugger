@@ -6,14 +6,14 @@ If neither `--key` nor `--trust-list` is provided, signature verification is ski
 
 ```bash
 # Full validation with signature verification
-ssi-debugger validate --key issuer-key.pem credential.txt
-ssi-debugger validate --trust-list trust-list.jwt credential.txt
-ssi-debugger validate --key key.pem --status-list credential.txt
-ssi-debugger validate --key key.pem --allow-expired credential.txt
+oid4vc-dev validate --key issuer-key.pem credential.txt
+oid4vc-dev validate --trust-list trust-list.jwt credential.txt
+oid4vc-dev validate --key key.pem --status-list credential.txt
+oid4vc-dev validate --key key.pem --allow-expired credential.txt
 
 # Expiry + revocation check without signature verification
-ssi-debugger validate --status-list credential.txt
-ssi-debugger validate credential.txt
+oid4vc-dev validate --status-list credential.txt
+oid4vc-dev validate credential.txt
 ```
 
 ## Flags

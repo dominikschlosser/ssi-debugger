@@ -26,7 +26,7 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // LoadPublicKey loads a public key from a PEM file or JWK JSON file.

@@ -1,7 +1,7 @@
-# ssi-debugger
+# oid4vc-dev
 
-[![CI](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/dominikschlosser/ssi-debugger)](https://github.com/dominikschlosser/ssi-debugger/releases/latest)
+[![CI](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/dominikschlosser/oid4vc-dev)](https://github.com/dominikschlosser/oid4vc-dev/releases/latest)
 
 A local-first CLI tool for decoding, validating, and inspecting SSI credentials and OpenID4VCI/VP requests.
 
@@ -21,27 +21,27 @@ No network calls by default. Decode and verify credentials entirely offline.
 
 ### From GitHub Releases
 
-Download the latest binary for your platform from [Releases](https://github.com/dominikschlosser/ssi-debugger/releases).
+Download the latest binary for your platform from [Releases](https://github.com/dominikschlosser/oid4vc-dev/releases).
 
 ### From source
 
 ```bash
-go install github.com/dominikschlosser/ssi-debugger@latest
+go install github.com/dominikschlosser/oid4vc-dev@latest
 ```
 
 ### Build locally
 
 ```bash
-git clone https://github.com/dominikschlosser/ssi-debugger.git
-cd ssi-debugger
-go build -o ssi-debugger .
+git clone https://github.com/dominikschlosser/oid4vc-dev.git
+cd oid4vc-dev
+go build -o oid4vc-dev .
 ```
 
 ### Docker
 
 ```bash
-docker pull ghcr.io/dominikschlosser/ssi-debugger:latest
-docker run -p 8085:8085 ghcr.io/dominikschlosser/ssi-debugger
+docker pull ghcr.io/dominikschlosser/oid4vc-dev:latest
+docker run -p 8085:8085 ghcr.io/dominikschlosser/oid4vc-dev
 ```
 
 The default CMD starts the wallet server with pre-loaded PID credentials in headless mode — ready for automated verifier testing out of the box.
@@ -51,7 +51,7 @@ The default CMD starts the wallet server with pre-loaded PID credentials in head
 ## Usage
 
 ```
-ssi-debugger [--json] [--no-color] [-v] <command> [flags] [input]
+oid4vc-dev [--json] [--no-color] [-v] <command> [flags] [input]
 ```
 
 Input can be a **file path**, **URL**, **raw credential string**, or piped via **stdin**.
@@ -76,10 +76,10 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration.
 
 ```bash
-ssi-debugger wallet generate-pid          # Generate PID credentials
-ssi-debugger wallet serve                 # Start web UI + OID4VP endpoints
-ssi-debugger wallet accept 'openid4vp://authorize?...'
-ssi-debugger wallet scan --screen         # QR scan → auto-dispatch
+oid4vc-dev wallet generate-pid          # Generate PID credentials
+oid4vc-dev wallet serve                 # Start web UI + OID4VP endpoints
+oid4vc-dev wallet accept 'openid4vp://authorize?...'
+oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 ```
 
 ![Wallet UI](docs/wallet-ui.png)
@@ -93,9 +93,9 @@ ssi-debugger wallet scan --screen         # QR scan → auto-dispatch
 Generate test SD-JWT or mDOC credentials for development and testing.
 
 ```bash
-ssi-debugger issue sdjwt --pid
-ssi-debugger issue mdoc --claims '{"name":"Test"}' --doc-type com.example.test
-ssi-debugger issue sdjwt | ssi-debugger decode
+oid4vc-dev issue sdjwt --pid
+oid4vc-dev issue mdoc --claims '{"name":"Test"}' --doc-type com.example.test
+oid4vc-dev issue sdjwt | oid4vc-dev decode
 ```
 
 → [Full documentation](docs/issue.md) — all flags, round-trip examples
@@ -107,7 +107,7 @@ ssi-debugger issue sdjwt | ssi-debugger decode
 Intercept and debug OID4VP/VCI traffic between a wallet and a verifier/issuer with a live web dashboard.
 
 ```bash
-ssi-debugger proxy --target http://localhost:8080
+oid4vc-dev proxy --target http://localhost:8080
 ```
 
 ```
@@ -125,9 +125,9 @@ Wallet  <-->  Proxy (:9090)  <-->  Verifier/Issuer (:8080)
 Start a local web UI for decoding and validating credentials in the browser.
 
 ```bash
-ssi-debugger serve
-ssi-debugger serve --port 3000
-ssi-debugger serve credential.txt
+oid4vc-dev serve
+oid4vc-dev serve --port 3000
+oid4vc-dev serve credential.txt
 ```
 
 Opens a split-pane interface at `http://localhost:8080` (default) with auto-decode on paste, format detection, collapsible sections, signature verification, and dark/light theme. Pass a credential as an argument to pre-fill the input on load.
@@ -143,9 +143,9 @@ Opens a split-pane interface at `http://localhost:8080` (default) with auto-deco
 Auto-detect and decode credentials (SD-JWT, JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 ```bash
-ssi-debugger decode credential.txt
-ssi-debugger decode 'openid4vp://authorize?...'
-ssi-debugger decode --screen                    # QR scan from screen
+oid4vc-dev decode credential.txt
+oid4vc-dev decode 'openid4vp://authorize?...'
+oid4vc-dev decode --screen                    # QR scan from screen
 ```
 
 → [Full documentation](docs/decode.md) — auto-detection order, format override, QR scanning, flags
@@ -157,9 +157,9 @@ ssi-debugger decode --screen                    # QR scan from screen
 Verify signatures, check expiry, and check revocation status.
 
 ```bash
-ssi-debugger validate --key issuer-key.pem credential.txt
-ssi-debugger validate --trust-list trust-list.jwt credential.txt
-ssi-debugger validate --status-list credential.txt
+oid4vc-dev validate --key issuer-key.pem credential.txt
+oid4vc-dev validate --trust-list trust-list.jwt credential.txt
+oid4vc-dev validate --status-list credential.txt
 ```
 
 → [Full documentation](docs/validate.md) — flags, trust list explanation
@@ -171,7 +171,7 @@ ssi-debugger validate --status-list credential.txt
 Generate a DCQL (Digital Credentials Query Language) query from a credential's claims. Always outputs JSON.
 
 ```bash
-ssi-debugger dcql credential.txt
+oid4vc-dev dcql credential.txt
 ```
 
 **Example output (SD-JWT):**

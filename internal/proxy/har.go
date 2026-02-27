@@ -17,7 +17,7 @@ func GenerateHAR(entries []*TrafficEntry) map[string]any {
 		"log": map[string]any{
 			"version": "1.2",
 			"creator": map[string]any{
-				"name":    "ssi-debugger",
+				"name":    "oid4vc-dev",
 				"version": "1.0.0",
 			},
 			"entries": harEntries,

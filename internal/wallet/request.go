@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
 )
 
 // ParseAuthorizationRequest parses an OID4VP authorization request from a URI or query params.

@@ -24,7 +24,7 @@ jobs:
       - name: Build binaries
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          LDFLAGS="-s -w -X github.com/dominikschlosser/ssi-debugger/cmd.Version=${VERSION}"
+          LDFLAGS="-s -w -X github.com/dominikschlosser/oid4vc-dev/cmd.Version=${VERSION}"
 
           targets=(
             "linux/amd64"
@@ -38,7 +38,7 @@ jobs:
           for target in "${targets[@]}"; do
             GOOS="${target%/*}"
             GOARCH="${target#*/}"
-            output="ssi-debugger-${VERSION}-${GOOS}-${GOARCH}"
+            output="oid4vc-dev-${VERSION}-${GOOS}-${GOARCH}"
             if [ "$GOOS" = "windows" ]; then
               output="${output}.exe"
             fi
@@ -86,5 +86,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: VERSION=${{ steps.version.outputs.tag }}
           tags: |
-            ghcr.io/dominikschlosser/ssi-debugger:latest
-            ghcr.io/dominikschlosser/ssi-debugger:${{ steps.version.outputs.tag }}
+            ghcr.io/dominikschlosser/oid4vc-dev:latest
+            ghcr.io/dominikschlosser/oid4vc-dev:${{ steps.version.outputs.tag }}

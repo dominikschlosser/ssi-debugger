@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/format"
-	"github.com/dominikschlosser/ssi-debugger/internal/web"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/web"
 )
 
 // Classify determines the OID4VP/VCI traffic class from the request/response.

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 // --- omitClaims unit tests ---

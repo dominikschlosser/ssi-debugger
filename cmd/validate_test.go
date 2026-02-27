@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
-	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
-	"github.com/dominikschlosser/ssi-debugger/internal/validate"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
 
 // generateCACert creates a self-signed CA certificate and key.

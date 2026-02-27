@@ -4,26 +4,26 @@ Auto-detect and decode credentials (SD-JWT, JWT, mDOC), OpenID4VCI/VP requests, 
 
 ```bash
 # Credentials
-ssi-debugger decode credential.txt
-ssi-debugger decode "eyJhbGci..."
-ssi-debugger decode --json credential.txt
-ssi-debugger decode -v credential.txt
-cat credential.txt | ssi-debugger decode
+oid4vc-dev decode credential.txt
+oid4vc-dev decode "eyJhbGci..."
+oid4vc-dev decode --json credential.txt
+oid4vc-dev decode -v credential.txt
+cat credential.txt | oid4vc-dev decode
 
 # OpenID4VCI credential offers
-ssi-debugger decode 'openid-credential-offer://?credential_offer_uri=...'
-ssi-debugger decode 'https://issuer.example/offer?credential_offer=...'
+oid4vc-dev decode 'openid-credential-offer://?credential_offer_uri=...'
+oid4vc-dev decode 'https://issuer.example/offer?credential_offer=...'
 
 # OpenID4VP authorization requests
-ssi-debugger decode 'openid4vp://authorize?...'
-ssi-debugger decode 'haip://authorize?...'
-ssi-debugger decode 'eudi-openid4vp://authorize?...'
-ssi-debugger decode request.jwt
-cat offer.json | ssi-debugger decode
+oid4vc-dev decode 'openid4vp://authorize?...'
+oid4vc-dev decode 'haip://authorize?...'
+oid4vc-dev decode 'eudi-openid4vp://authorize?...'
+oid4vc-dev decode request.jwt
+cat offer.json | oid4vc-dev decode
 
 # ETSI trust lists
-ssi-debugger decode trust-list.jwt
-ssi-debugger decode -f trustlist https://example.com/trust-list.jwt
+oid4vc-dev decode trust-list.jwt
+oid4vc-dev decode -f trustlist https://example.com/trust-list.jwt
 ```
 
 ## Auto-detection order
@@ -40,11 +40,11 @@ ssi-debugger decode -f trustlist https://example.com/trust-list.jwt
 Use `--format` / `-f` to skip auto-detection when it gets it wrong (e.g. a credential JWT whose payload happens to contain `credential_issuer`):
 
 ```bash
-ssi-debugger decode -f jwt "eyJhbGci..."
-ssi-debugger decode -f sdjwt credential.txt
-ssi-debugger decode -f mdoc credential.hex
-ssi-debugger decode -f vci 'openid-credential-offer://...'
-ssi-debugger decode -f vp request.jwt
+oid4vc-dev decode -f jwt "eyJhbGci..."
+oid4vc-dev decode -f sdjwt credential.txt
+oid4vc-dev decode -f mdoc credential.hex
+oid4vc-dev decode -f vci 'openid-credential-offer://...'
+oid4vc-dev decode -f vp request.jwt
 ```
 
 Accepted values: `sdjwt` (or `sd-jwt`), `jwt`, `mdoc` (or `mso_mdoc`), `vci` (or `oid4vci`), `vp` (or `oid4vp`), `trustlist` (or `trust`).
@@ -54,13 +54,13 @@ Accepted values: `sdjwt` (or `sd-jwt`), `jwt`, `mdoc` (or `mso_mdoc`), `vci` (or
 Scan a QR code directly from an image file or a screen capture:
 
 ```bash
-ssi-debugger decode --qr screenshot.png
-ssi-debugger decode --screen
+oid4vc-dev decode --qr screenshot.png
+oid4vc-dev decode --screen
 ```
 
 `--screen` uses the native macOS `screencapture` tool in interactive selection mode — a crosshair appears to let you select the region containing the QR code. On other platforms, take a screenshot and use `--qr screenshot.png` instead.
 
-> **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `ssi-debugger` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
+> **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `oid4vc-dev` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
 
 ## Flags
 

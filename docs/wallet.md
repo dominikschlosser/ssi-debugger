@@ -58,7 +58,7 @@ All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 └── issuer.pem        # Issuer EC private key (for self-issued credentials)
 ```
 
-Keys are P-256 EC keys, auto-generated on first use and reused across invocations.
+Keys are P-256 EC keys, auto-generated on first use and reused across invocations. The issuer key is shared across all signing operations — it signs generated credentials (SD-JWT, JWT, mDoc), status list JWTs (`/api/statuslist`), and the trust list JWT (`/api/trustlist`).
 
 ![Wallet UI](./wallet-ui.png)
 

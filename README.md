@@ -59,7 +59,7 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | Command    | Purpose                                                    |
 |------------|------------------------------------------------------------|
 | `wallet`   | Stateful testing wallet with CLI-driven OID4VP/VCI flows   |
-| `issue`    | Generate test SD-JWT or mDOC credentials for development   |
+| `issue`    | Generate test SD-JWT, JWT, or mDOC credentials for development |
 | `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
 | `serve`    | Web UI for decoding and validating credentials in the browser |
 | `decode`   | Auto-detect & decode credentials, OpenID4VCI/VP, and trust lists (read-only, no verification) |
@@ -92,10 +92,11 @@ Use `--preferred-format dc+sd-jwt` or `--preferred-format mso_mdoc` to control w
 
 ### Issue
 
-Generate test SD-JWT or mDOC credentials for development and testing.
+Generate test SD-JWT, JWT, or mDOC credentials for development and testing.
 
 ```bash
 oid4vc-dev issue sdjwt --pid
+oid4vc-dev issue jwt --claims '{"name":"Test","age":30}'
 oid4vc-dev issue mdoc --claims '{"name":"Test"}' --doc-type com.example.test
 oid4vc-dev issue sdjwt | oid4vc-dev decode
 ```

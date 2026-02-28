@@ -108,7 +108,17 @@ In interactive mode (default), OID4VP requests start a temporary consent UI serv
 ```bash
 oid4vc-dev wallet accept 'openid4vp://authorize?...' --auto-accept
 oid4vc-dev wallet accept 'openid-credential-offer://...'
+oid4vc-dev wallet accept 'openid-credential-offer://...' --tx-code 123456
 ```
+
+| Flag                    | Default  | Description                                      |
+|-------------------------|----------|--------------------------------------------------|
+| `--port`                | `8085`   | Server port for OID4VP                           |
+| `--auto-accept`         | `false`  | Auto-approve OID4VP presentations                |
+| `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
+| `--tx-code`             | —        | Transaction code for OID4VCI pre-authorized code flow |
+
+Note: only the pre-authorized code grant type is supported. Offers that only contain an `authorization_code` grant will be rejected with a clear error message.
 
 ## `wallet scan`
 

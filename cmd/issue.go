@@ -226,7 +226,8 @@ func importToWallet(raw string) error {
 		return fmt.Errorf("loading wallet: %w", err)
 	}
 
-	if err := w.ImportCredential(raw); err != nil {
+	imported, err := w.ImportCredential(raw)
+	if err != nil {
 		return fmt.Errorf("importing to wallet: %w", err)
 	}
 
@@ -234,13 +235,11 @@ func importToWallet(raw string) error {
 		return fmt.Errorf("saving wallet: %w", err)
 	}
 
-	creds := w.GetCredentials()
-	last := creds[len(creds)-1]
-	label := last.VCT
+	label := imported.VCT
 	if label == "" {
-		label = last.DocType
+		label = imported.DocType
 	}
-	fmt.Fprintf(os.Stderr, "Imported %s credential (%s) into wallet\n", last.Format, label)
+	fmt.Fprintf(os.Stderr, "Imported %s credential (%s) into wallet\n", imported.Format, label)
 	return nil
 }
 

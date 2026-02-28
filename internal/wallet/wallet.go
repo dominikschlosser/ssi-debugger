@@ -202,13 +202,13 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	if err != nil {
 		return fmt.Errorf("generating SD-JWT PID: %w", err)
 	}
-	if err := w.ImportCredential(sdResult); err != nil {
+	sdCred, err := w.ImportCredential(sdResult)
+	if err != nil {
 		return fmt.Errorf("importing SD-JWT PID: %w", err)
 	}
 
 	// Register status entry for SD-JWT credential
 	if w.BaseURL != "" {
-		sdCred := w.Credentials[len(w.Credentials)-1]
 		w.registerStatusEntry(sdCred.ID, sdStatusIdx)
 	}
 
@@ -231,13 +231,13 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	if err != nil {
 		return fmt.Errorf("generating mDoc PID: %w", err)
 	}
-	if err := w.ImportCredential(mdocResult); err != nil {
+	mdocCred, err := w.ImportCredential(mdocResult)
+	if err != nil {
 		return fmt.Errorf("importing mDoc PID: %w", err)
 	}
 
 	// Register status entry for mDoc credential
 	if w.BaseURL != "" {
-		mdocCred := w.Credentials[len(w.Credentials)-1]
 		w.registerStatusEntry(mdocCred.ID, mdocStatusIdx)
 	}
 
@@ -278,47 +278,57 @@ func (w *Wallet) removeByType(format, vct, docType string) {
 }
 
 // ImportCredential auto-detects and imports a credential string.
-func (w *Wallet) ImportCredential(raw string) error {
+// It returns a pointer to a copy of the newly imported credential, safe to
+// use even after further mutations to w.Credentials.
+func (w *Wallet) ImportCredential(raw string) (*StoredCredential, error) {
 	raw = strings.TrimSpace(raw)
 
 	// Try SD-JWT first (contains ~)
 	if strings.Contains(raw, "~") {
-		if err := w.importSDJWT(raw); err != nil {
-			return err
+		cred, err := w.importSDJWT(raw)
+		if err != nil {
+			return nil, err
 		}
-		cred := w.Credentials[len(w.Credentials)-1]
 		log.Printf("[Wallet] Imported SD-JWT credential: vct=%s claims=%d disclosures=%d", cred.VCT, len(cred.Claims), len(cred.Disclosures))
-		return nil
+		return cred, nil
 	}
 
 	// Try mDoc (base64url or hex encoded CBOR)
 	detected := format.Detect(raw)
 	if detected == format.FormatMDOC {
-		if err := w.importMDoc(raw); err != nil {
-			return err
+		cred, err := w.importMDoc(raw)
+		if err != nil {
+			return nil, err
 		}
-		cred := w.Credentials[len(w.Credentials)-1]
 		log.Printf("[Wallet] Imported mDoc credential: docType=%s claims=%d", cred.DocType, len(cred.Claims))
-		return nil
+		return cred, nil
 	}
 
 	// Try as plain JWT VC (3-part JWT without ~)
 	if strings.Count(raw, ".") == 2 {
-		if err := w.importPlainJWT(raw); err != nil {
-			return err
+		cred, err := w.importPlainJWT(raw)
+		if err != nil {
+			return nil, err
 		}
-		cred := w.Credentials[len(w.Credentials)-1]
 		log.Printf("[Wallet] Imported plain JWT credential: vct=%s claims=%d", cred.VCT, len(cred.Claims))
-		return nil
+		return cred, nil
 	}
 
-	return fmt.Errorf("unable to detect credential format (expected SD-JWT or mDoc)")
+	return nil, fmt.Errorf("unable to detect credential format (expected SD-JWT or mDoc)")
 }
 
-func (w *Wallet) importSDJWT(raw string) error {
+// appendCredential adds a credential to the wallet and returns a copy.
+func (w *Wallet) appendCredential(cred StoredCredential) *StoredCredential {
+	w.mu.Lock()
+	w.Credentials = append(w.Credentials, cred)
+	w.mu.Unlock()
+	return &cred
+}
+
+func (w *Wallet) importSDJWT(raw string) (*StoredCredential, error) {
 	token, err := sdjwt.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("parsing SD-JWT: %w", err)
+		return nil, fmt.Errorf("parsing SD-JWT: %w", err)
 	}
 
 	cred := StoredCredential{
@@ -333,16 +343,13 @@ func (w *Wallet) importSDJWT(raw string) error {
 		cred.VCT = vct
 	}
 
-	w.mu.Lock()
-	w.Credentials = append(w.Credentials, cred)
-	w.mu.Unlock()
-	return nil
+	return w.appendCredential(cred), nil
 }
 
-func (w *Wallet) importPlainJWT(raw string) error {
+func (w *Wallet) importPlainJWT(raw string) (*StoredCredential, error) {
 	_, payload, _, err := format.ParseJWTParts(raw)
 	if err != nil {
-		return fmt.Errorf("parsing JWT: %w", err)
+		return nil, fmt.Errorf("parsing JWT: %w", err)
 	}
 
 	cred := StoredCredential{
@@ -356,16 +363,13 @@ func (w *Wallet) importPlainJWT(raw string) error {
 		cred.VCT = vct
 	}
 
-	w.mu.Lock()
-	w.Credentials = append(w.Credentials, cred)
-	w.mu.Unlock()
-	return nil
+	return w.appendCredential(cred), nil
 }
 
-func (w *Wallet) importMDoc(raw string) error {
+func (w *Wallet) importMDoc(raw string) (*StoredCredential, error) {
 	doc, err := mdoc.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("parsing mDoc: %w", err)
+		return nil, fmt.Errorf("parsing mDoc: %w", err)
 	}
 
 	claims := make(map[string]any)
@@ -384,10 +388,7 @@ func (w *Wallet) importMDoc(raw string) error {
 		NameSpaces: doc.NameSpaces,
 	}
 
-	w.mu.Lock()
-	w.Credentials = append(w.Credentials, cred)
-	w.mu.Unlock()
-	return nil
+	return w.appendCredential(cred), nil
 }
 
 // RemoveCredential removes a credential by ID.
@@ -469,6 +470,20 @@ func (w *Wallet) GetRequest(id string) (*ConsentRequest, bool) {
 	defer w.mu.RUnlock()
 	req, ok := w.Requests[id]
 	return req, ok
+}
+
+// ResolveRequest atomically transitions a consent request from "pending" to
+// the given status. It returns false if the request was not found or was
+// already resolved.
+func (w *Wallet) ResolveRequest(id, status string) (*ConsentRequest, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	req, ok := w.Requests[id]
+	if !ok || req.Status != "pending" {
+		return req, false
+	}
+	req.Status = status
+	return req, true
 }
 
 // GetPendingRequests returns all pending consent requests.
@@ -679,7 +694,8 @@ func (w *Wallet) ImportCredentialFromFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("reading credential file: %w", err)
 	}
-	return w.ImportCredential(raw)
+	_, err = w.ImportCredential(raw)
+	return err
 }
 
 // SetCredentialStatus sets the status value for a credential.

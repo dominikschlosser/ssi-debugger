@@ -139,7 +139,7 @@ func TestGenerateDefaultCredentials_OverwritePreservesOtherCreds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generating test SD-JWT: %v", err)
 	}
-	if err := w.ImportCredential(sdjwtRaw); err != nil {
+	if _, err := w.ImportCredential(sdjwtRaw); err != nil {
 		t.Fatalf("importing test credential: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestImportSDJWT(t *testing.T) {
 		t.Fatalf("generating SD-JWT: %v", err)
 	}
 
-	if err := w.ImportCredential(sdjwt); err != nil {
+	if _, err := w.ImportCredential(sdjwt); err != nil {
 		t.Fatalf("importing SD-JWT: %v", err)
 	}
 
@@ -224,7 +224,7 @@ func TestImportMDoc(t *testing.T) {
 		t.Fatalf("generating mDoc: %v", err)
 	}
 
-	if err := w.ImportCredential(mdocRaw); err != nil {
+	if _, err := w.ImportCredential(mdocRaw); err != nil {
 		t.Fatalf("importing mDoc: %v", err)
 	}
 
@@ -252,7 +252,7 @@ func TestImportPlainJWT(t *testing.T) {
 		t.Fatalf("creating test JWT: %v", err)
 	}
 
-	if err := w.ImportCredential(jwt); err != nil {
+	if _, err := w.ImportCredential(jwt); err != nil {
 		t.Fatalf("importing plain JWT: %v", err)
 	}
 
@@ -278,7 +278,7 @@ func TestImportPlainJWT(t *testing.T) {
 
 func TestImportInvalidCredential(t *testing.T) {
 	w := generateTestWallet(t)
-	err := w.ImportCredential("not-a-credential")
+	_, err := w.ImportCredential("not-a-credential")
 	if err == nil {
 		t.Fatal("expected error importing invalid credential")
 	}

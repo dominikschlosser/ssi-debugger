@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"testing"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
@@ -66,9 +67,9 @@ func TestTruncate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := truncate(tt.input, tt.max)
+		got := format.Truncate(tt.input, tt.max)
 		if got != tt.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
+			t.Errorf("Truncate(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 		}
 	}
 }

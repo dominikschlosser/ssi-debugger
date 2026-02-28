@@ -58,7 +58,7 @@ func TestWalletStore_SaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generating SD-JWT: %v", err)
 	}
-	if err := w.ImportCredential(sdjwt); err != nil {
+	if _, err := w.ImportCredential(sdjwt); err != nil {
 		t.Fatalf("importing: %v", err)
 	}
 

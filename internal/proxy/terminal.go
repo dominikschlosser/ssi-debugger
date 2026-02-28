@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/fatih/color"
 )
 
@@ -72,7 +73,7 @@ func printDecodedField(key string, val any, depth int) {
 	case string:
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)
-		valueColor.Println(truncate(v, 120))
+		valueColor.Println(format.Truncate(v, 120))
 	default:
 		// Marshal slices, nested maps, etc. as indented JSON
 		labelColor.Printf("%s┌ ", prefix)

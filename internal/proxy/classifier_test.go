@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // --- classifyEntry tests ---
@@ -282,13 +284,13 @@ func TestParseFormOrJSONEmpty(t *testing.T) {
 // --- truncate tests ---
 
 func TestTruncate(t *testing.T) {
-	if got := truncate("short", 10); got != "short" {
+	if got := format.Truncate("short", 10); got != "short" {
 		t.Errorf("expected 'short', got %q", got)
 	}
-	if got := truncate("a very long string", 5); got != "a ver..." {
+	if got := format.Truncate("a very long string", 5); got != "a ver..." {
 		t.Errorf("expected 'a ver...', got %q", got)
 	}
-	if got := truncate("exact", 5); got != "exact" {
+	if got := format.Truncate("exact", 5); got != "exact" {
 		t.Errorf("expected 'exact', got %q", got)
 	}
 }

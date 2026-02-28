@@ -335,7 +335,8 @@ func walletImportCmd() *cobra.Command {
 				return fmt.Errorf("reading input: %w", err)
 			}
 
-			if err := w.ImportCredential(raw); err != nil {
+			imported, err := w.ImportCredential(raw)
+			if err != nil {
 				return fmt.Errorf("importing credential: %w", err)
 			}
 
@@ -343,9 +344,7 @@ func walletImportCmd() *cobra.Command {
 				return fmt.Errorf("saving wallet: %w", err)
 			}
 
-			creds := w.GetCredentials()
-			last := creds[len(creds)-1]
-			fmt.Printf("Imported %s credential (%s) with %d claims\n", last.Format, credLabel(last), len(last.Claims))
+			fmt.Printf("Imported %s credential (%s) with %d claims\n", imported.Format, credLabel(*imported), len(imported.Claims))
 			return nil
 		},
 	}
@@ -654,7 +653,7 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 		return processCredentialOffer(uri)
 
 	default:
-		return fmt.Errorf("unable to detect URI type (expected openid4vp://, openid-credential-offer://, or similar): %s", truncate(uri, 80))
+		return fmt.Errorf("unable to detect URI type (expected openid4vp://, openid-credential-offer://, or similar): %s", format.Truncate(uri, 80))
 	}
 }
 
@@ -763,15 +762,14 @@ func walletScanCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := w.ImportCredential(content); err != nil {
+				imported, err := w.ImportCredential(content)
+				if err != nil {
 					return fmt.Errorf("importing credential: %w", err)
 				}
 				if err := store.Save(w); err != nil {
 					return fmt.Errorf("saving wallet: %w", err)
 				}
-				creds := w.GetCredentials()
-				last := creds[len(creds)-1]
-				fmt.Printf("Imported %s credential (%s)\n", last.Format, credLabel(last))
+				fmt.Printf("Imported %s credential (%s)\n", imported.Format, credLabel(*imported))
 				return nil
 			}
 
@@ -894,13 +892,6 @@ func parseClaimsOverrides(flag string) (map[string]any, error) {
 		return nil, fmt.Errorf("parsing --claims JSON: %w", err)
 	}
 	return overrides, nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }
 
 func applySessionTranscriptMode(w *wallet.Wallet, mode string) error {

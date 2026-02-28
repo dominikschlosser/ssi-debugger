@@ -15,6 +15,15 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
+// HTTPClient is the interface used for HTTP requests during issuance flows.
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// httpClient is the HTTP client used by the issuance functions. Override in
+// tests to inject mock servers.
+var httpClient HTTPClient = http.DefaultClient
+
 // IssuanceResult captures the result of an OID4VCI flow.
 type IssuanceResult struct {
 	CredentialID string `json:"credential_id"`
@@ -117,16 +126,15 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 			if credential == "" {
 				return nil, fmt.Errorf("no credential in response")
 			}
-			if err := w.ImportCredential(credential); err != nil {
+			imported, err := w.ImportCredential(credential)
+			if err != nil {
 				return nil, fmt.Errorf("importing received credential: %w", err)
 			}
-			creds := w.GetCredentials()
-			lastCred := creds[len(creds)-1]
 			if credFormat == "" {
-				credFormat = lastCred.Format
+				credFormat = imported.Format
 			}
 			return &IssuanceResult{
-				CredentialID: lastCred.ID,
+				CredentialID: imported.ID,
 				Format:       credFormat,
 				Issuer:       offer.CredentialIssuer,
 			}, nil
@@ -148,19 +156,17 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	}
 
 	// Import the received credential
-	if err := w.ImportCredential(credential); err != nil {
+	imported, err := w.ImportCredential(credential)
+	if err != nil {
 		return nil, fmt.Errorf("importing received credential: %w", err)
 	}
 
-	creds := w.GetCredentials()
-	lastCred := creds[len(creds)-1]
-
 	if credFormat == "" {
-		credFormat = lastCred.Format
+		credFormat = imported.Format
 	}
 
 	return &IssuanceResult{
-		CredentialID: lastCred.ID,
+		CredentialID: imported.ID,
 		Format:       credFormat,
 		Issuer:       offer.CredentialIssuer,
 	}, nil
@@ -170,7 +176,11 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 func fetchIssuerMetadata(issuer string) (map[string]any, error) {
 	metadataURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-credential-issuer"
 
-	resp, err := http.Get(metadataURL)
+	req, err := http.NewRequest("GET", metadataURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating metadata request: %w", err)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching metadata: %w", err)
 	}
@@ -227,18 +237,27 @@ func fetchOAuthMetadata(authServer string) (map[string]any, error) {
 	}
 
 	for _, u := range urls {
-		resp, err := http.Get(u)
+		req, err := http.NewRequest("GET", u, nil)
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			continue
+		}
 
 		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			continue
 		}
 
 		var meta map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		err = json.NewDecoder(resp.Body).Decode(&meta)
+		resp.Body.Close()
+		if err != nil {
 			continue
 		}
 		return meta, nil
@@ -273,7 +292,13 @@ func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer) (map[str
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 	form.Set("pre-authorized_code", offer.Grants.PreAuthorizedCode)
 
-	resp, err := http.PostForm(tokenEndpoint, form)
+	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
@@ -379,7 +404,14 @@ func fetchNonce(metadata map[string]any, issuer string) string {
 		return ""
 	}
 
-	resp, err := http.Post(ep, "application/x-www-form-urlencoded", nil)
+	req, err := http.NewRequest("POST", ep, nil)
+	if err != nil {
+		log.Printf("[VCI] Nonce endpoint request creation failed: %v", err)
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		log.Printf("[VCI] Nonce endpoint request failed: %v", err)
 		return ""
@@ -427,7 +459,7 @@ func requestCredential(credentialEndpoint, accessToken, proofJWT string, credent
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("credential request: %w", err)
 	}

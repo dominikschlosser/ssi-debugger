@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
 	"github.com/fatih/color"
@@ -157,10 +159,7 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 
 	s.log("Received authorization request")
 	// Truncate URI for display
-	uriDisplay := body.URI
-	if len(uriDisplay) > 120 {
-		uriDisplay = uriDisplay[:120] + "..."
-	}
+	uriDisplay := format.Truncate(body.URI, 120)
 	s.log("  URI: %s", uriDisplay)
 
 	parsed, err := ParseAuthorizationRequest(body.URI)
@@ -216,10 +215,7 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log("Received credential offer")
-	uriDisplay := body.URI
-	if len(uriDisplay) > 120 {
-		uriDisplay = uriDisplay[:120] + "..."
-	}
+	uriDisplay := format.Truncate(body.URI, 120)
 	s.log("  URI: %s", uriDisplay)
 
 	result, err := s.wallet.ProcessCredentialOffer(body.URI)
@@ -261,15 +257,14 @@ func (s *Server) handleImportCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := s.wallet.ImportCredential(raw); err != nil {
+	imported, err := s.wallet.ImportCredential(raw)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	s.triggerSave()
-	creds := s.wallet.GetCredentials()
-	last := creds[len(creds)-1]
-	writeJSON(w, http.StatusCreated, CredentialSummary(last))
+	writeJSON(w, http.StatusCreated, CredentialSummary(*imported))
 }
 
 // handleDeleteCredential removes a credential by ID.
@@ -337,13 +332,13 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 // handleApproveRequest approves a consent request and waits for the submission result.
 func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	req, ok := s.wallet.GetRequest(id)
+	req, ok := s.wallet.ResolveRequest(id, "approved")
 	if !ok {
-		http.Error(w, "request not found", http.StatusNotFound)
-		return
-	}
-	if req.Status != "pending" {
-		http.Error(w, "request already resolved", http.StatusConflict)
+		if req == nil {
+			http.Error(w, "request not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "request already resolved", http.StatusConflict)
+		}
 		return
 	}
 
@@ -354,7 +349,6 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&body)
 	}
 
-	req.Status = "approved"
 	req.ResultCh <- ConsentResult{
 		Approved:       true,
 		SelectedClaims: body.SelectedClaims,
@@ -380,17 +374,16 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 // handleDenyRequest denies a consent request.
 func (s *Server) handleDenyRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	req, ok := s.wallet.GetRequest(id)
+	req, ok := s.wallet.ResolveRequest(id, "denied")
 	if !ok {
-		http.Error(w, "request not found", http.StatusNotFound)
-		return
-	}
-	if req.Status != "pending" {
-		http.Error(w, "request already resolved", http.StatusConflict)
+		if req == nil {
+			http.Error(w, "request not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "request already resolved", http.StatusConflict)
+		}
 		return
 	}
 
-	req.Status = "denied"
 	req.ResultCh <- ConsentResult{Approved: false}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "denied"})
@@ -741,7 +734,9 @@ func parseAuthParams(values map[string][]string) (*AuthorizationRequestParams, e
 	// If request_uri is present, fetch and parse it
 	if requestURI := get("request_uri"); requestURI != "" {
 		parsed, err := ParseAuthorizationRequest(requestURI)
-		if err == nil {
+		if err != nil {
+			log.Printf("[Wallet] Failed to parse request_uri %q: %v", requestURI, err)
+		} else {
 			if params.ClientID == "" {
 				params.ClientID = parsed.ClientID
 			}
@@ -772,7 +767,9 @@ func parseAuthParams(values map[string][]string) (*AuthorizationRequestParams, e
 	// If request (JWT) is present, parse it
 	if requestJWT := get("request"); requestJWT != "" {
 		parsed, err := ParseAuthorizationRequest(requestJWT)
-		if err == nil {
+		if err != nil {
+			log.Printf("[Wallet] Failed to parse request JWT: %v", err)
+		} else {
 			if params.ClientID == "" {
 				params.ClientID = parsed.ClientID
 			}

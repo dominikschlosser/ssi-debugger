@@ -45,6 +45,19 @@ func EncodeBase64URL(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// Truncate returns s truncated to max runes with "..." appended if it was
+// longer. If max is negative it is treated as 0.
+func Truncate(s string, max int) string {
+	if max < 0 {
+		max = 0
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
+}
+
 // DecodeHexOrBase64URL tries hex first, then base64url.
 func DecodeHexOrBase64URL(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)

@@ -131,18 +131,18 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 
 		// direct_post.jwt: encrypted/signed JARM response in "response" field
 		if jarm, ok := fields["response"]; ok && jarm != "" {
-			decoded["response_preview"] = truncate(jarm, 100)
+			decoded["response_preview"] = format.Truncate(jarm, 100)
 			decodeJARMResponse(jarm, decoded)
 		}
 
 		if vpToken, ok := fields["vp_token"]; ok {
-			decoded["vp_token_preview"] = truncate(vpToken, 100)
+			decoded["vp_token_preview"] = format.Truncate(vpToken, 100)
 			if cred, err := web.Decode(vpToken); err == nil {
 				decoded["vp_token_decoded"] = cred
 			}
 		}
 		if idToken, ok := fields["id_token"]; ok {
-			decoded["id_token_preview"] = truncate(idToken, 100)
+			decoded["id_token_preview"] = format.Truncate(idToken, 100)
 			if header, payload, _, err := format.ParseJWTParts(idToken); err == nil {
 				decoded["id_token_header"] = header
 				decoded["id_token_payload"] = payload
@@ -396,12 +396,6 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 	return ""
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
 
 // extractCredentials pulls raw credential strings from the entry so the
 // dashboard can offer "View in Decoder" links. Returns parallel slices of

@@ -80,6 +80,10 @@ oid4vc-dev wallet accept 'openid4vp://authorize?...'
 oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 ```
 
+> **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
+
+Use `--preferred-format dc+sd-jwt` or `--preferred-format mso_mdoc` to control which credential format is selected when multiple match a DCQL query.
+
 ![Wallet UI](docs/wallet-ui.png)
 
 → [Full documentation](docs/wallet.md) — subcommands, flags, storage, URL scheme registration
@@ -171,6 +175,8 @@ Generate a DCQL (Digital Credentials Query Language) query from a credential's c
 ```bash
 oid4vc-dev dcql credential.txt
 ```
+
+The wallet evaluates `credential_sets` constraints when processing DCQL queries, selecting the best matching option from each set.
 
 **Example output (SD-JWT):**
 

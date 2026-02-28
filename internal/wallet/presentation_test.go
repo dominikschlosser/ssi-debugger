@@ -142,7 +142,7 @@ func TestCreateVPToken_PlainJWT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating test JWT: %v", err)
 	}
-	if err := w.ImportCredential(jwt); err != nil {
+	if _, err := w.ImportCredential(jwt); err != nil {
 		t.Fatalf("importing plain JWT: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
 	}
 
 	// Import it
-	if err := w.ImportCredential(rawSDJWT); err != nil {
+	if _, err := w.ImportCredential(rawSDJWT); err != nil {
 		t.Fatalf("importing SD-JWT: %v", err)
 	}
 

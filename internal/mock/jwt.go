@@ -1,0 +1,96 @@
+// Copyright 2025 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package mock
+
+import (
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+)
+
+// JWTConfig holds options for generating a mock JWT VC credential.
+type JWTConfig struct {
+	Issuer        string
+	VCT           string
+	ExpiresIn     time.Duration
+	Claims        map[string]any
+	Key           *ecdsa.PrivateKey
+	StatusListURI string // optional: status list URI for revocation
+	StatusListIdx int    // optional: index in the status list
+}
+
+// GenerateJWT creates a mock JWT VC credential with all claims directly in the payload.
+// Unlike SD-JWT, there are no disclosures, no _sd, and no _sd_alg.
+func GenerateJWT(cfg JWTConfig) (string, error) {
+	now := time.Now()
+
+	// Build payload with claims directly embedded
+	payload := map[string]any{
+		"iss": cfg.Issuer,
+		"iat": now.Unix(),
+		"exp": now.Add(cfg.ExpiresIn).Unix(),
+		"vct": cfg.VCT,
+	}
+
+	for name, value := range cfg.Claims {
+		payload[name] = value
+	}
+
+	// Add status list reference
+	if cfg.StatusListURI != "" {
+		payload["status"] = map[string]any{
+			"status_list": map[string]any{
+				"uri": cfg.StatusListURI,
+				"idx": cfg.StatusListIdx,
+			},
+		}
+	}
+
+	// Build header
+	header := map[string]any{
+		"alg": "ES256",
+		"typ": "vc+jwt",
+	}
+
+	// Encode header and payload
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return "", fmt.Errorf("marshaling header: %w", err)
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshaling payload: %w", err)
+	}
+
+	headerB64 := format.EncodeBase64URL(headerJSON)
+	payloadB64 := format.EncodeBase64URL(payloadJSON)
+
+	// Sign with ECDSA (JWS r||s format)
+	sigInput := headerB64 + "." + payloadB64
+	h := sha256.Sum256([]byte(sigInput))
+
+	sig, err := signECDSA(cfg.Key, h[:])
+	if err != nil {
+		return "", fmt.Errorf("signing: %w", err)
+	}
+
+	sigB64 := format.EncodeBase64URL(sig)
+
+	return headerB64 + "." + payloadB64 + "." + sigB64, nil
+}

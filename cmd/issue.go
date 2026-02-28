@@ -45,7 +45,7 @@ var (
 
 var issueCmd = &cobra.Command{
 	Use:   "issue",
-	Short: "Generate test SD-JWT or mDOC credentials",
+	Short: "Generate test SD-JWT, JWT, or mDOC credentials",
 	Long:  "Generate test credentials for development and testing. Produces valid, signed credentials using ephemeral keys by default.",
 }
 
@@ -54,6 +54,13 @@ var issueSDJWTCmd = &cobra.Command{
 	Short: "Generate a test SD-JWT credential",
 	Long:  "Generate a signed SD-JWT credential with selectively disclosable claims. Uses an ephemeral P-256 key by default.",
 	RunE:  runIssueSDJWT,
+}
+
+var issueJWTCmd = &cobra.Command{
+	Use:   "jwt",
+	Short: "Generate a test JWT VC credential",
+	Long:  "Generate a signed JWT VC credential with claims directly in the payload (no selective disclosure). Uses an ephemeral P-256 key by default.",
+	RunE:  runIssueJWT,
 }
 
 var issueMDOCCmd = &cobra.Command{
@@ -66,6 +73,7 @@ var issueMDOCCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(issueCmd)
 	issueCmd.AddCommand(issueSDJWTCmd)
+	issueCmd.AddCommand(issueJWTCmd)
 	issueCmd.AddCommand(issueMDOCCmd)
 
 	// SD-JWT flags
@@ -79,6 +87,18 @@ func init() {
 	issueSDJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
 	issueSDJWTCmd.Flags().StringVar(&issueStatusListURI, "status-list-uri", "", "Status list URI to embed in credential")
 	issueSDJWTCmd.Flags().IntVar(&issueStatusListIdx, "status-list-idx", 0, "Status list index to embed in credential")
+
+	// JWT flags
+	issueJWTCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
+	issueJWTCmd.Flags().StringVar(&issueKeyPath, "key", "", "Private key file (PEM or JWK); ephemeral P-256 if omitted")
+	issueJWTCmd.Flags().StringVar(&issueIssuer, "iss", "https://issuer.example", "Issuer URL")
+	issueJWTCmd.Flags().StringVar(&issueVCT, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type")
+	issueJWTCmd.Flags().StringVar(&issueExpires, "exp", "24h", "Expiration duration (e.g. 24h, 30m)")
+	issueJWTCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
+	issueJWTCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
+	issueJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
+	issueJWTCmd.Flags().StringVar(&issueStatusListURI, "status-list-uri", "", "Status list URI to embed in credential")
+	issueJWTCmd.Flags().IntVar(&issueStatusListIdx, "status-list-idx", 0, "Status list index to embed in credential")
 
 	// mDOC flags
 	issueMDOCCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
@@ -121,6 +141,45 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 	result, err := mock.GenerateSDJWT(cfg)
 	if err != nil {
 		return fmt.Errorf("generating SD-JWT: %w", err)
+	}
+
+	fmt.Println(result)
+
+	if issueToWallet {
+		return importToWallet(result)
+	}
+	return nil
+}
+
+func runIssueJWT(cmd *cobra.Command, args []string) error {
+	key, err := loadOrGenerateIssueKey()
+	if err != nil {
+		return err
+	}
+
+	claims, err := resolveIssueClaimsForFormat("sdjwt")
+	if err != nil {
+		return err
+	}
+
+	expDuration, err := time.ParseDuration(issueExpires)
+	if err != nil {
+		return fmt.Errorf("invalid --exp duration: %w", err)
+	}
+
+	cfg := mock.JWTConfig{
+		Issuer:        issueIssuer,
+		VCT:           issueVCT,
+		ExpiresIn:     expDuration,
+		Claims:        claims,
+		Key:           key,
+		StatusListURI: issueStatusListURI,
+		StatusListIdx: issueStatusListIdx,
+	}
+
+	result, err := mock.GenerateJWT(cfg)
+	if err != nil {
+		return fmt.Errorf("generating JWT: %w", err)
 	}
 
 	fmt.Println(result)

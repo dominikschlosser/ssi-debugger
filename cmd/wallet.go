@@ -462,8 +462,7 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	}
 
 	if len(matches) == 0 {
-		fmt.Println("No matching credentials found.")
-		return nil
+		return fmt.Errorf("no matching credentials found for the DCQL query")
 	}
 
 	responseURI := parsed.ResponseURI

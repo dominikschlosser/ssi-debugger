@@ -220,7 +220,9 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	s.log("  URI: %s", uriDisplay)
 
 	if body.TxCode != "" {
+		s.wallet.mu.Lock()
 		s.wallet.TxCode = body.TxCode
+		s.wallet.mu.Unlock()
 	}
 
 	result, err := s.wallet.ProcessCredentialOffer(body.URI)

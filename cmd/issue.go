@@ -157,7 +157,7 @@ func runIssueJWT(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	claims, err := resolveIssueClaimsForFormat("sdjwt")
+	claims, err := resolveIssueClaimsForFormat("jwt")
 	if err != nil {
 		return err
 	}

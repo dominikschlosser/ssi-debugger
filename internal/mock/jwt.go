@@ -38,6 +38,10 @@ type JWTConfig struct {
 // GenerateJWT creates a mock JWT VC credential with all claims directly in the payload.
 // Unlike SD-JWT, there are no disclosures, no _sd, and no _sd_alg.
 func GenerateJWT(cfg JWTConfig) (string, error) {
+	if cfg.Key == nil {
+		return "", fmt.Errorf("signing key is required")
+	}
+
 	now := time.Now()
 
 	// Build payload with claims directly embedded

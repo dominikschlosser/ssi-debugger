@@ -82,7 +82,7 @@ oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 
 > **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
 
-Use `--preferred-format dc+sd-jwt` or `--preferred-format mso_mdoc` to control which credential format is selected when multiple match a DCQL query.
+Use `--preferred-format dc+sd-jwt`, `--preferred-format mso_mdoc`, or `--preferred-format jwt_vc_json` to control which credential format is selected when multiple match a DCQL query.
 
 ![Wallet UI](docs/wallet-ui.png)
 

@@ -64,8 +64,10 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	credentialEndpoint := getCredentialEndpoint(metadata, offer.CredentialIssuer)
 
 	// Token exchange (pre-authorized code flow)
+	w.mu.Lock()
 	txCode := w.TxCode
 	w.TxCode = "" // clear after use
+	w.mu.Unlock()
 	tokenResp, err := exchangeToken(tokenEndpoint, offer, txCode)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)

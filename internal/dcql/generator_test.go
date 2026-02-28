@@ -147,6 +147,52 @@ func TestFromSDJWT_NoVCT(t *testing.T) {
 	}
 }
 
+func TestFromJWT(t *testing.T) {
+	token := &sdjwt.Token{
+		ResolvedClaims: map[string]any{
+			"iss":         "https://issuer.example",
+			"vct":         "urn:eudi:pid:1",
+			"exp":         float64(999999999),
+			"iat":         float64(100000000),
+			"given_name":  "Erika",
+			"family_name": "Mustermann",
+		},
+	}
+
+	q := FromJWT(token)
+
+	if len(q.Credentials) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(q.Credentials))
+	}
+
+	cq := q.Credentials[0]
+	if cq.Format != "jwt_vc_json" {
+		t.Errorf("format = %q, want jwt_vc_json", cq.Format)
+	}
+	if cq.Meta == nil || len(cq.Meta.VCTValues) != 1 || cq.Meta.VCTValues[0] != "urn:eudi:pid:1" {
+		t.Errorf("meta.vct_values = %v, want [urn:eudi:pid:1]", cq.Meta)
+	}
+
+	claimNames := make(map[string]bool)
+	for _, c := range cq.Claims {
+		name, _ := c.Path[0].(string)
+		claimNames[name] = true
+	}
+	for _, expected := range []string{"given_name", "family_name"} {
+		if !claimNames[expected] {
+			t.Errorf("expected claim %q in DCQL query", expected)
+		}
+	}
+
+	// Should not include standard claims
+	for _, c := range cq.Claims {
+		name, _ := c.Path[0].(string)
+		if skipClaims[name] {
+			t.Errorf("DCQL query should not include standard claim %q", name)
+		}
+	}
+}
+
 func TestFromMDOC(t *testing.T) {
 	doc := &mdoc.Document{
 		DocType: "org.iso.18013.5.1.mDL",

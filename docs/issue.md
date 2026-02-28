@@ -41,6 +41,8 @@ oid4vc-dev issue mdoc  | oid4vc-dev decode
 | `--pid`    | `false`                   | Use full EUDI PID Rulebook claims              |
 | `--omit`   | —                         | Comma-separated claim names to exclude         |
 | `--wallet` | `false`                   | Import the issued credential into the wallet   |
+| `--status-list-uri` | —              | Status list URI to embed in credential         |
+| `--status-list-idx` | `0`            | Status list index to embed in credential       |
 
 ### `issue jwt`
 
@@ -54,6 +56,8 @@ oid4vc-dev issue mdoc  | oid4vc-dev decode
 | `--pid`    | `false`                   | Use full EUDI PID Rulebook claims              |
 | `--omit`   | —                         | Comma-separated claim names to exclude         |
 | `--wallet` | `false`                   | Import the issued credential into the wallet   |
+| `--status-list-uri` | —              | Status list URI to embed in credential         |
+| `--status-list-idx` | `0`            | Status list index to embed in credential       |
 
 Unlike SD-JWT, the JWT subcommand produces a standard JWT with all claims directly in the payload — no selective disclosure, no `_sd` or `_sd_alg` fields.
 
@@ -68,5 +72,7 @@ Unlike SD-JWT, the JWT subcommand produces a standard JWT with all claims direct
 | `--pid`       | `false`                        | Use full EUDI PID Rulebook claims              |
 | `--omit`      | —                              | Comma-separated claim names to exclude         |
 | `--wallet`    | `false`                        | Import the issued credential into the wallet   |
+| `--status-list-uri` | —                       | Status list URI to embed in credential         |
+| `--status-list-idx` | `0`                     | Status list index to embed in credential       |
 
 When no `--claims` are provided, a minimal set of PID-like claims is used (given_name, family_name, birth_date). With `--pid`, the full EUDI PID Rulebook claim set is generated (27 claims including address, nationality, age attributes, document metadata, etc.).

@@ -65,7 +65,7 @@ func runDCQL(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("parsing JWT: %w", err)
 		}
-		query = dcql.FromSDJWT(token)
+		query = dcql.FromJWT(token)
 
 	case format.FormatMDOC:
 		doc, err := mdoc.Parse(raw)

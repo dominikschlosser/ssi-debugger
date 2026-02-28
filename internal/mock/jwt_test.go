@@ -106,6 +106,24 @@ func TestGenerateJWT_DefaultClaims(t *testing.T) {
 	}
 }
 
+func TestGenerateJWT_NilKey(t *testing.T) {
+	cfg := JWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       "test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"name": "Test"},
+		Key:       nil,
+	}
+
+	_, err := GenerateJWT(cfg)
+	if err == nil {
+		t.Fatal("expected error for nil key")
+	}
+	if !strings.Contains(err.Error(), "signing key is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestGenerateJWT_WrongKeyFailsVerify(t *testing.T) {
 	key1, _ := GenerateKey()
 	key2, _ := GenerateKey()

@@ -24,6 +24,15 @@ import (
 
 // FromSDJWT generates a DCQL query from an SD-JWT credential.
 func FromSDJWT(token *sdjwt.Token) *Query {
+	return fromJWTToken(token, "dc+sd-jwt")
+}
+
+// FromJWT generates a DCQL query from a plain JWT VC credential.
+func FromJWT(token *sdjwt.Token) *Query {
+	return fromJWTToken(token, "jwt_vc_json")
+}
+
+func fromJWTToken(token *sdjwt.Token, credFormat string) *Query {
 	vct := ""
 	if v, ok := token.ResolvedClaims["vct"].(string); ok {
 		vct = v
@@ -39,7 +48,7 @@ func FromSDJWT(token *sdjwt.Token) *Query {
 
 	cq := CredentialQuery{
 		ID:     id,
-		Format: "dc+sd-jwt",
+		Format: credFormat,
 		Claims: claims,
 	}
 

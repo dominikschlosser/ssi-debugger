@@ -607,12 +607,14 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 		return "", nil, fmt.Errorf("extracting encryption key: %w", err)
 	}
 
-	// Determine enc algorithm from client_metadata
+	// Determine enc algorithm from client_metadata (OID4VP 1.0: encrypted_response_enc_values_supported)
 	enc := "A128GCM"
 	if params.RequestObject != nil && params.RequestObject.Payload != nil {
 		if clientMeta, ok := params.RequestObject.Payload["client_metadata"].(map[string]any); ok {
-			if supported, ok := clientMeta["authorization_encrypted_response_enc"].(string); ok && supported != "" {
-				enc = supported
+			if arr, ok := clientMeta["encrypted_response_enc_values_supported"].([]any); ok && len(arr) > 0 {
+				if v, ok := arr[0].(string); ok && v != "" {
+					enc = v
+				}
 			}
 		}
 	}

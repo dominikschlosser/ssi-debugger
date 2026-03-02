@@ -896,6 +896,117 @@ func TestDecodeJARMResponseJWEWithoutCEK(t *testing.T) {
 
 // --- Classify with DebugJWEKey ---
 
+// --- extractJARMCredentials tests ---
+
+func TestExtractJARMCredentialsStringVPToken(t *testing.T) {
+	payload := map[string]any{
+		"vp_token": "credential-string",
+		"state":    "s1",
+	}
+	creds, labels := extractJARMCredentials(payload)
+	if len(creds) != 1 || creds[0] != "credential-string" {
+		t.Errorf("expected 1 credential, got %v", creds)
+	}
+	if labels[0] != "vp_token (JARM)" {
+		t.Errorf("label: got %q", labels[0])
+	}
+}
+
+func TestExtractJARMCredentialsMapVPToken(t *testing.T) {
+	payload := map[string]any{
+		"vp_token": map[string]any{
+			"pid":    []any{"cred-pid"},
+			"mdl":    []any{"cred-mdl-0", "cred-mdl-1"},
+			"single": "cred-single",
+		},
+	}
+	creds, labels := extractJARMCredentials(payload)
+	if len(creds) != 4 {
+		t.Fatalf("expected 4 credentials, got %d: %v", len(creds), labels)
+	}
+	// Check all credentials are present (order may vary due to map iteration)
+	credSet := make(map[string]bool)
+	for _, c := range creds {
+		credSet[c] = true
+	}
+	for _, expected := range []string{"cred-pid", "cred-mdl-0", "cred-mdl-1", "cred-single"} {
+		if !credSet[expected] {
+			t.Errorf("missing credential %q", expected)
+		}
+	}
+}
+
+func TestExtractJARMCredentialsWithIDToken(t *testing.T) {
+	payload := map[string]any{
+		"vp_token": "vp-cred",
+		"id_token": "id-cred",
+	}
+	creds, labels := extractJARMCredentials(payload)
+	if len(creds) != 2 {
+		t.Fatalf("expected 2 credentials, got %d", len(creds))
+	}
+	labelSet := make(map[string]bool)
+	for _, l := range labels {
+		labelSet[l] = true
+	}
+	if !labelSet["vp_token (JARM)"] {
+		t.Error("expected vp_token (JARM) label")
+	}
+	if !labelSet["id_token (JARM)"] {
+		t.Error("expected id_token (JARM) label")
+	}
+}
+
+func TestExtractJARMCredentialsEmpty(t *testing.T) {
+	payload := map[string]any{"state": "s1"}
+	creds, _ := extractJARMCredentials(payload)
+	if len(creds) != 0 {
+		t.Errorf("expected 0 credentials, got %d", len(creds))
+	}
+}
+
+func TestExtractCredentialsFromDecryptedJARM(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := map[string]any{
+		"vp_token": map[string]any{
+			"pid": []any{"eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig"},
+		},
+		"state": "s1",
+	}
+	payloadJSON, _ := json.Marshal(payload)
+
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cekB64 := base64.RawURLEncoding.EncodeToString(cek)
+
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: "response=" + jwe,
+		StatusCode:  200,
+		DebugJWEKey: cekB64,
+	}
+	Classify(e)
+
+	// Should have credentials extracted from the decrypted JARM payload
+	found := false
+	for _, c := range e.Credentials {
+		if c == "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected JARM credential in entry.Credentials, got %v (labels: %v)", e.Credentials, e.CredentialLabels)
+	}
+}
+
 func TestClassifyVPAuthResponseWithDebugKey(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

@@ -16,11 +16,14 @@ package wallet
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/fxamacker/cbor/v2"
 )
@@ -454,6 +457,100 @@ func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
 	// Resolved claims should contain user_id
 	if parsed.ResolvedClaims["user_id"] != "abc123" {
 		t.Errorf("expected user_id in resolved claims, got %v", parsed.ResolvedClaims["user_id"])
+	}
+}
+
+func TestEncryptResponse_UsesEncryptedResponseEncValuesSupported(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+				"encrypted_response_enc_values_supported": []any{"A256GCM", "A128GCM"},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	// Parse JWE header to verify enc algorithm
+	parts := strings.Split(jweStr, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 JWE parts, got %d", len(parts))
+	}
+	headerJSON, err := format.DecodeBase64URL(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header map[string]any
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatal(err)
+	}
+	if header["enc"] != "A256GCM" {
+		t.Errorf("expected enc=A256GCM (first supported value), got %v", header["enc"])
+	}
+}
+
+func TestEncryptResponse_DefaultsToA128GCMWhenNoEncValues(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	parts := strings.Split(jweStr, ".")
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+	if header["enc"] != "A128GCM" {
+		t.Errorf("expected default enc=A128GCM, got %v", header["enc"])
 	}
 }
 

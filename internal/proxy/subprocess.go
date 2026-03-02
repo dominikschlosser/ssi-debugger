@@ -20,7 +20,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"syscall"
 
 	"github.com/fatih/color"
 )
@@ -43,8 +42,7 @@ func StartSubprocess(args []string, scanner *OutputScanner) (*Subprocess, error)
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = os.Environ()
-	// Set process group so we can signal the whole tree
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcAttr(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -98,18 +96,4 @@ func (s *Subprocess) Wait() error {
 // Done returns a channel that receives the exit error when the process ends.
 func (s *Subprocess) Done() <-chan error {
 	return s.done
-}
-
-// Stop sends SIGTERM to the subprocess process group.
-func (s *Subprocess) Stop() {
-	if s.cmd.Process == nil {
-		return
-	}
-	// Signal the entire process group
-	pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
-	if err == nil {
-		syscall.Kill(-pgid, syscall.SIGTERM)
-	} else {
-		s.cmd.Process.Signal(syscall.SIGTERM)
-	}
 }

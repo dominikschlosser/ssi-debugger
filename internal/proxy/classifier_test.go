@@ -626,7 +626,7 @@ func TestDecodeJARMResponseJWS(t *testing.T) {
 	)
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jws, "", decoded)
+	decodeJARMResponse(jws, "", "", decoded)
 
 	if decoded["response_type"] != "JWS (signed)" {
 		t.Errorf("response_type: got %v", decoded["response_type"])
@@ -652,7 +652,7 @@ func TestDecodeJARMResponseJWE(t *testing.T) {
 	jwe := base64.RawURLEncoding.EncodeToString(h) + ".enckey.iv.cipher.tag"
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jwe, "", decoded)
+	decodeJARMResponse(jwe, "", "", decoded)
 
 	if !strings.Contains(decoded["response_type"].(string), "JWE") {
 		t.Errorf("expected JWE response type, got %v", decoded["response_type"])
@@ -854,7 +854,7 @@ func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {
 	cekB64 := base64.RawURLEncoding.EncodeToString(cek)
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jwe, cekB64, decoded)
+	decodeJARMResponse(jwe, cekB64, "", decoded)
 
 	if decoded["response_type"] != "JWE (decrypted via debug key)" {
 		t.Errorf("expected decrypted response_type, got %v", decoded["response_type"])
@@ -884,13 +884,55 @@ func TestDecodeJARMResponseJWEWithoutCEK(t *testing.T) {
 	jwe := base64.RawURLEncoding.EncodeToString(h) + ".enckey.iv.cipher.tag"
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jwe, "", decoded)
+	decodeJARMResponse(jwe, "", "", decoded)
 
 	if !strings.Contains(decoded["response_type"].(string), "not readable") {
 		t.Errorf("expected 'not readable' in response_type without CEK, got %v", decoded["response_type"])
 	}
 	if decoded["response_payload"] != nil {
 		t.Error("expected no response_payload without CEK")
+	}
+}
+
+func TestDecodeJARMResponseJWEWithJWK(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := map[string]any{"vp_token": "jwk-cred", "state": "s2"}
+	payloadJSON, _ := json.Marshal(payload)
+
+	jwe, _, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "ECDH-ES", "A256GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build JWK JSON from private key
+	b64 := func(b []byte) string {
+		padded := make([]byte, 32)
+		copy(padded[32-len(b):], b)
+		return base64.RawURLEncoding.EncodeToString(padded)
+	}
+	jwkJSON, _ := json.Marshal(map[string]string{
+		"kty": "EC", "crv": "P-256",
+		"x": b64(key.PublicKey.X.Bytes()),
+		"y": b64(key.PublicKey.Y.Bytes()),
+		"d": b64(key.D.Bytes()),
+	})
+
+	decoded := make(map[string]any)
+	decodeJARMResponse(jwe, "", string(jwkJSON), decoded)
+
+	if decoded["response_type"] != "JWE (decrypted via scanned verifier key)" {
+		t.Errorf("expected JWK-decrypted response_type, got %v", decoded["response_type"])
+	}
+	responsePayload, ok := decoded["response_payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected response_payload as map, got %T", decoded["response_payload"])
+	}
+	if responsePayload["vp_token"] != "jwk-cred" {
+		t.Errorf("expected vp_token=jwk-cred, got %v", responsePayload["vp_token"])
 	}
 }
 

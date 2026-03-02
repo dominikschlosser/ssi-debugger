@@ -177,7 +177,12 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 
 		bodyBytes, err := io.ReadAll(reader)
 		reader.Close()
-		if err == nil {
+		if err != nil {
+			// Body was consumed/closed — provide an empty replacement so the
+			// ReverseProxy does not try to copy from the closed original.
+			resp.Body = io.NopCloser(strings.NewReader(""))
+			resp.ContentLength = 0
+		} else {
 			respBody = string(bodyBytes)
 
 			// Rewrite URLs in response
@@ -204,6 +209,12 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		debugJWEKey = s.scanner.LastCEK()
 	}
 
+	// Fall back to scanner-detected JWK private key for ECDH-ES decryption
+	var debugJWK string
+	if s.scanner != nil {
+		debugJWK = s.scanner.LastJWK()
+	}
+
 	entry := &TrafficEntry{
 		Timestamp:       start,
 		Method:          resp.Request.Method,
@@ -216,6 +227,7 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		Duration:        duration,
 		DurationMS:      duration.Milliseconds(),
 		DebugJWEKey:     debugJWEKey,
+		DebugJWK:        debugJWK,
 	}
 
 	Classify(entry)

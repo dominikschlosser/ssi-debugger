@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -104,4 +105,119 @@ func TestDecryptJWEWithCEK_WrongKey(t *testing.T) {
 	if err == nil {
 		t.Error("expected error with wrong key")
 	}
+}
+
+func TestDecryptJWEWithJWK(t *testing.T) {
+	// Generate recipient key pair (the verifier's ephemeral key)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := map[string]any{"vp_token": "test-cred", "state": "s1"}
+	payloadJSON, _ := json.Marshal(payload)
+
+	jwe, _, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Construct JWK JSON from the private key (as a verifier would log it)
+	jwkJSON := ecPrivateKeyToJWK(t, key)
+
+	plaintext, err := DecryptJWEWithJWK(jwe, jwkJSON)
+	if err != nil {
+		t.Fatalf("decryption failed: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(plaintext, &result); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if result["vp_token"] != "test-cred" {
+		t.Errorf("expected vp_token=test-cred, got %v", result["vp_token"])
+	}
+}
+
+func TestDecryptJWEWithJWK_A256GCM(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"test":"value256"}`)
+	jwe, _, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A256GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jwkJSON := ecPrivateKeyToJWK(t, key)
+	plaintext, err := DecryptJWEWithJWK(jwe, jwkJSON)
+	if err != nil {
+		t.Fatalf("decryption failed: %v", err)
+	}
+	if string(plaintext) != `{"test":"value256"}` {
+		t.Errorf("unexpected plaintext: %s", plaintext)
+	}
+}
+
+func TestDecryptJWEWithJWK_WithAPU(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"test":"apu-test"}`)
+	apu := []byte("mdoc-generated-nonce-123")
+	jwe, _, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", apu)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jwkJSON := ecPrivateKeyToJWK(t, key)
+	plaintext, err := DecryptJWEWithJWK(jwe, jwkJSON)
+	if err != nil {
+		t.Fatalf("decryption with APU failed: %v", err)
+	}
+	if string(plaintext) != `{"test":"apu-test"}` {
+		t.Errorf("unexpected plaintext: %s", plaintext)
+	}
+}
+
+func TestDecryptJWEWithJWK_WrongKey(t *testing.T) {
+	key1, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	payload := []byte(`{"test":"value"}`)
+	jwe, _, _ := wallet.EncryptJWE(payload, &key1.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
+
+	// Use wrong key to decrypt
+	jwkJSON := ecPrivateKeyToJWK(t, key2)
+	_, err := DecryptJWEWithJWK(jwe, jwkJSON)
+	if err == nil {
+		t.Error("expected error with wrong key")
+	}
+}
+
+// ecPrivateKeyToJWK creates a JWK JSON string from an ECDSA private key.
+func ecPrivateKeyToJWK(t *testing.T, key *ecdsa.PrivateKey) string {
+	t.Helper()
+	b64 := func(b []byte) string {
+		// Pad to 32 bytes for P-256
+		padded := make([]byte, 32)
+		copy(padded[32-len(b):], b)
+		return base64.RawURLEncoding.EncodeToString(padded)
+	}
+	jwk := map[string]string{
+		"kty": "EC",
+		"crv": "P-256",
+		"x":   b64(key.PublicKey.X.Bytes()),
+		"y":   b64(key.PublicKey.Y.Bytes()),
+		"d":   b64(key.D.Bytes()),
+	}
+	out, err := json.Marshal(jwk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }

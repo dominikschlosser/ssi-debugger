@@ -17,6 +17,7 @@ package proxy
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 type OutputScanner struct {
 	mu          sync.RWMutex
 	lastCEK     string // most recent base64url-encoded CEK
+	lastJWK     string // most recent JWK private key JSON (with "d" parameter)
 	credentials []ScannedCredential
 }
 
@@ -58,6 +60,7 @@ func (s *OutputScanner) Scan(line string) {
 	s.scanCEK(line)
 	s.scanJWK(line)
 	s.scanCredentials(line)
+	s.scanVPTokenJSON(line)
 }
 
 // scanCEK looks for explicit CEK values in the line.
@@ -112,12 +115,9 @@ func (s *OutputScanner) scanJWK(line string) {
 		if _, hasD := jwk["d"]; !hasD {
 			continue
 		}
-		// Found a JWK private key — try to derive CEK if it has the right structure
-		// For ECDH-ES, the verifier's private key could be used to decrypt.
-		// Store the raw JWK for potential later use.
+		// Found a JWK private key — store it for ECDH-ES decryption of JWE responses.
 		s.mu.Lock()
-		// We don't currently use the JWK directly, but log detection for debugging.
-		_ = jsonStr
+		s.lastJWK = jsonStr
 		s.mu.Unlock()
 		return
 	}
@@ -197,6 +197,13 @@ func (s *OutputScanner) LastCEK() string {
 	return s.lastCEK
 }
 
+// LastJWK returns the most recently detected JWK private key JSON, or "" if none.
+func (s *OutputScanner) LastJWK() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastJWK
+}
+
 // Credentials returns all detected credentials.
 func (s *OutputScanner) Credentials() []ScannedCredential {
 	s.mu.RLock()
@@ -204,6 +211,106 @@ func (s *OutputScanner) Credentials() []ScannedCredential {
 	out := make([]ScannedCredential, len(s.credentials))
 	copy(out, s.credentials)
 	return out
+}
+
+// scanVPTokenJSON detects VP tokens logged as JSON objects containing mDoc/CBOR
+// credentials (e.g. DCQL format: {"cred2":["o2d2ZXJzaW9u..."]}). These are not
+// JWTs and won't be caught by the JWT regex.
+func (s *OutputScanner) scanVPTokenJSON(line string) {
+	lower := strings.ToLower(line)
+	if !strings.Contains(lower, "vp_token") && !strings.Contains(lower, "vp token") {
+		return
+	}
+
+	// Find JSON objects in the line
+	start := strings.Index(line, "{")
+	if start < 0 {
+		return
+	}
+
+	for i := start; i < len(line); i++ {
+		if line[i] != '{' {
+			continue
+		}
+		candidate := line[i:]
+		depth := 0
+		end := -1
+		for j, c := range candidate {
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					end = j + 1
+					break
+				}
+			}
+		}
+		if end < 0 {
+			continue
+		}
+		jsonStr := candidate[:end]
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
+			continue
+		}
+		// Extract string values that look like non-JWT credentials (mDoc CBOR etc.)
+		s.extractNonJWTCredentials(obj, "vp_token")
+		return
+	}
+}
+
+// extractNonJWTCredentials extracts long base64/base64url strings from a JSON
+// object that don't look like JWTs (don't start with "eyJ"). These are typically
+// mDoc CBOR credentials in DCQL VP token format.
+func (s *OutputScanner) extractNonJWTCredentials(obj map[string]any, prefix string) {
+	for key, val := range obj {
+		label := prefix + "." + key
+		switch v := val.(type) {
+		case string:
+			if isNonJWTCredential(v) {
+				s.mu.Lock()
+				s.credentials = append(s.credentials, ScannedCredential{
+					Raw:       v,
+					Label:     label,
+					Timestamp: time.Now(),
+				})
+				s.mu.Unlock()
+			}
+		case []any:
+			for i, item := range v {
+				if str, ok := item.(string); ok && isNonJWTCredential(str) {
+					s.mu.Lock()
+					s.credentials = append(s.credentials, ScannedCredential{
+						Raw:       str,
+						Label:     fmt.Sprintf("%s[%d]", label, i),
+						Timestamp: time.Now(),
+					})
+					s.mu.Unlock()
+				}
+			}
+		}
+	}
+}
+
+// isNonJWTCredential returns true if a string looks like a base64-encoded
+// credential that is not a JWT (e.g. mDoc CBOR).
+func isNonJWTCredential(s string) bool {
+	if len(s) < 100 {
+		return false
+	}
+	// Skip JWTs — they're handled by scanCredentials
+	if strings.HasPrefix(s, "eyJ") {
+		return false
+	}
+	// Check that it looks like base64/base64url (alphanumeric + _-+/=)
+	for _, c := range s[:64] {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '+' || c == '/' || c == '-' || c == '_' || c == '=') {
+			return false
+		}
+	}
+	return true
 }
 
 // DrainCredentials returns and removes all credentials detected since the last drain.

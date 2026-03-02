@@ -146,7 +146,7 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 		// direct_post.jwt: encrypted/signed JARM response in "response" field
 		if jarm, ok := fields["response"]; ok && jarm != "" {
 			decoded["response_preview"] = format.Truncate(jarm, 100)
-			decodeJARMResponse(jarm, e.DebugJWEKey, decoded)
+			decodeJARMResponse(jarm, e.DebugJWEKey, e.DebugJWK, decoded)
 		}
 
 		if vpToken, ok := fields["vp_token"]; ok {
@@ -248,9 +248,9 @@ func isJWE(s string) bool {
 
 // decodeJARMResponse decodes a JARM response (direct_post.jwt).
 // JWE (5 parts): only the protected header is readable unless a debug CEK
-// (content encryption key) is available from the X-Debug-JWE-CEK header.
+// (content encryption key) or a JWK private key is available for decryption.
 // JWS (3 parts): header and payload are readable.
-func decodeJARMResponse(raw string, cekB64 string, decoded map[string]any) {
+func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[string]any) {
 	raw = strings.TrimSpace(raw)
 
 	if isJWE(raw) {
@@ -296,6 +296,18 @@ func decodeJARMResponse(raw string, cekB64 string, decoded map[string]any) {
 						decoded["response_payload"] = payload
 						return
 					}
+				}
+			}
+		}
+
+		// Fall back to JWK private key (scanned from verifier logs) for ECDH-ES decryption
+		if jwkJSON != "" {
+			if plaintext, err := DecryptJWEWithJWK(raw, jwkJSON); err == nil {
+				var payload map[string]any
+				if err := json.Unmarshal(plaintext, &payload); err == nil {
+					decoded["response_type"] = "JWE (decrypted via scanned verifier key)"
+					decoded["response_payload"] = payload
+					return
 				}
 			}
 		}

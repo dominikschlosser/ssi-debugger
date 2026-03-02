@@ -252,7 +252,7 @@ func TestHasEncryptionKey_NoClientMetadata(t *testing.T) {
 	}
 }
 
-func TestHasEncryptionKey_WithKey(t *testing.T) {
+func TestHasEncryptionKey_WithKeyInClientMetadata(t *testing.T) {
 	key, _ := mock.GenerateKey()
 	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
 
@@ -271,6 +271,31 @@ func TestHasEncryptionKey_WithKey(t *testing.T) {
 		},
 	}
 	if !HasEncryptionKey(reqObj) {
-		t.Error("expected true for valid encryption key")
+		t.Error("expected true for valid encryption key in client_metadata")
+	}
+}
+
+func TestHasEncryptionKey_TopLevelJWKSNotUsed(t *testing.T) {
+	key, _ := mock.GenerateKey()
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+
+	// JWK only at top-level jwks (not in client_metadata.jwks) — strict OID4VP 1.0
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"encrypted_response_enc_values_supported": []any{"A128GCM"},
+			},
+			"jwks": map[string]any{
+				"keys": []any{jwk},
+			},
+		},
+	}
+	if HasEncryptionKey(reqObj) {
+		t.Error("expected false — wallet should only accept JWK in client_metadata.jwks per OID4VP 1.0")
 	}
 }

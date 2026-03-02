@@ -457,7 +457,10 @@ func (r *VPTokenMapResult) QueryIDs() []string {
 func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
 	vpToken := vpResult.VPToken()
 
-	if params.ResponseMode == "direct_post.jwt" && HasEncryptionKey(params.RequestObject) {
+	if params.ResponseMode == "direct_post.jwt" {
+		if !HasEncryptionKey(params.RequestObject) {
+			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
+		}
 		jwe, cek, err := w.EncryptResponse(vpToken, state, vpResult.MDocNonce, params)
 		if err != nil {
 			return nil, fmt.Errorf("encrypting response: %w", err)
@@ -467,40 +470,47 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseU
 	return SubmitDirectPost(responseURI, state, vpToken)
 }
 
-// extractJWKThumbprint extracts the encryption JWK from the request object's
-// client_metadata.jwks.keys[0] and computes its RFC 7638 thumbprint (SHA-256).
+// extractJWKThumbprint extracts the encryption JWK from the request object
+// and computes its RFC 7638 thumbprint (SHA-256).
 // Returns nil if no encryption key is found.
 func extractJWKThumbprint(reqObj *oid4vc.RequestObjectJWT) []byte {
-	if reqObj == nil {
+	jwk := findEncryptionJWK(reqObj)
+	if jwk == nil {
+		return nil
+	}
+	return computeJWKThumbprint(jwk)
+}
+
+// findEncryptionJWK locates the first encryption JWK from client_metadata.jwks
+// per OID4VP 1.0. No fallback to other locations — the wallet enforces strict
+// spec compliance so verifiers can detect misconfigurations.
+func findEncryptionJWK(reqObj *oid4vc.RequestObjectJWT) map[string]any {
+	if reqObj == nil || reqObj.Payload == nil {
 		return nil
 	}
 
-	payload := reqObj.Payload
-	if payload == nil {
-		return nil
-	}
-
-	clientMeta, ok := payload["client_metadata"].(map[string]any)
+	clientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any)
 	if !ok {
 		return nil
 	}
+	return firstJWK(clientMeta["jwks"])
+}
 
-	jwks, ok := clientMeta["jwks"].(map[string]any)
+// firstJWK extracts the first key from a JWKS value ({"keys": [...]}).
+func firstJWK(jwksVal any) map[string]any {
+	jwks, ok := jwksVal.(map[string]any)
 	if !ok {
 		return nil
 	}
-
 	keysSlice, ok := jwks["keys"].([]any)
 	if !ok || len(keysSlice) == 0 {
 		return nil
 	}
-
 	jwk, ok := keysSlice[0].(map[string]any)
 	if !ok {
 		return nil
 	}
-
-	return computeJWKThumbprint(jwk)
+	return jwk
 }
 
 // computeJWKThumbprint computes the RFC 7638 JWK Thumbprint using SHA-256.
@@ -540,31 +550,12 @@ func computeJWKThumbprint(jwk map[string]any) []byte {
 	return hash[:]
 }
 
-// extractEncryptionKey extracts the EC public key and kid from the request object's
-// client_metadata.jwks.keys[0].
+// extractEncryptionKey extracts the EC public key and kid from
+// client_metadata.jwks per OID4VP 1.0.
 func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*ecdsa.PublicKey, string, error) {
-	if reqObj == nil || reqObj.Payload == nil {
-		return nil, "", fmt.Errorf("no request object")
-	}
-
-	clientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any)
-	if !ok {
-		return nil, "", fmt.Errorf("no client_metadata")
-	}
-
-	jwks, ok := clientMeta["jwks"].(map[string]any)
-	if !ok {
-		return nil, "", fmt.Errorf("no jwks in client_metadata")
-	}
-
-	keysSlice, ok := jwks["keys"].([]any)
-	if !ok || len(keysSlice) == 0 {
-		return nil, "", fmt.Errorf("no keys in jwks")
-	}
-
-	jwk, ok := keysSlice[0].(map[string]any)
-	if !ok {
-		return nil, "", fmt.Errorf("invalid key format")
+	jwk := findEncryptionJWK(reqObj)
+	if jwk == nil {
+		return nil, "", fmt.Errorf("no encryption JWK found in request object")
 	}
 
 	x, _ := jwk["x"].(string)
@@ -607,16 +598,11 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 		return "", nil, fmt.Errorf("extracting encryption key: %w", err)
 	}
 
-	// Determine enc algorithm from client_metadata (OID4VP 1.0: encrypted_response_enc_values_supported)
+	// Determine enc algorithm from client_metadata or top-level request object fields
+	// OID4VP 1.0: encrypted_response_enc_values_supported (array)
 	enc := "A128GCM"
 	if params.RequestObject != nil && params.RequestObject.Payload != nil {
-		if clientMeta, ok := params.RequestObject.Payload["client_metadata"].(map[string]any); ok {
-			if arr, ok := clientMeta["encrypted_response_enc_values_supported"].([]any); ok && len(arr) > 0 {
-				if v, ok := arr[0].(string); ok && v != "" {
-					enc = v
-				}
-			}
-		}
+		enc = detectEncAlgorithm(params.RequestObject.Payload, enc)
 	}
 
 	// For ISO mode with mdoc_generated_nonce, set apu
@@ -626,6 +612,24 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 	}
 
 	return EncryptJWE(payloadJSON, encKey, kid, enc, apu)
+}
+
+// detectEncAlgorithm finds the content encryption algorithm from
+// client_metadata.encrypted_response_enc_values_supported per OID4VP 1.0.
+// No fallback to legacy field names — strict spec compliance.
+func detectEncAlgorithm(payload map[string]any, fallback string) string {
+	clientMeta, ok := payload["client_metadata"].(map[string]any)
+	if !ok {
+		return fallback
+	}
+
+	if arr, ok := clientMeta["encrypted_response_enc_values_supported"].([]any); ok && len(arr) > 0 {
+		if v, ok := arr[0].(string); ok && v != "" {
+			return v
+		}
+	}
+
+	return fallback
 }
 
 // collectArrayDigests walks a disclosure value and collects digests from

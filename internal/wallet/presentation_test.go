@@ -554,6 +554,88 @@ func TestEncryptResponse_DefaultsToA128GCMWhenNoEncValues(t *testing.T) {
 	}
 }
 
+func TestEncryptResponse_TopLevelJWKSNotUsed(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+
+	// JWK only at top-level jwks (not in client_metadata) — wallet should reject
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"encrypted_response_enc_values_supported": []any{"A256GCM"},
+			},
+			"jwks": map[string]any{
+				"keys": []any{jwk},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err == nil {
+		t.Fatal("expected error when JWK is only in top-level jwks (not client_metadata.jwks)")
+	}
+}
+
+func TestEncryptResponse_LegacyFieldNamesIgnored(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+
+	// Legacy field names only — wallet should ignore them and use default A128GCM
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"authorization_encrypted_response_alg": "ECDH-ES",
+				"authorization_encrypted_response_enc": "A256GCM",
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	parts := strings.Split(jweStr, ".")
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+	// Legacy authorization_encrypted_response_enc should be ignored; default A128GCM used
+	if header["enc"] != "A128GCM" {
+		t.Errorf("expected default enc=A128GCM (legacy fields ignored), got %v", header["enc"])
+	}
+}
+
 func TestCreateVPToken_SDJWT_SurvivesPersistReload(t *testing.T) {
 	// Simulates: import → save to disk (Disclosures lost) → reload + Rehydrate → present
 	w := generateTestWalletWithPID(t)
@@ -630,5 +712,34 @@ func TestCreateVPToken_SDJWT_SurvivesPersistReload(t *testing.T) {
 	// Must have KB-JWT
 	if parsed.KeyBindingJWT == nil {
 		t.Error("expected KB-JWT in VP token after persist/reload round-trip")
+	}
+}
+
+func TestSubmitPresentation_DirectPostJWT_NoEncryptionKey(t *testing.T) {
+	w := generateTestWallet(t)
+
+	vpResult := &VPTokenMapResult{
+		TokenMap: map[string]string{"q1": "dummy-token"},
+	}
+
+	// response_mode=direct_post.jwt but no encryption key in request object
+	params := PresentationParams{
+		Nonce:        "n",
+		ClientID:     "c",
+		ResponseURI:  "https://verifier.example/response",
+		ResponseMode: "direct_post.jwt",
+		RequestObject: &oid4vc.RequestObjectJWT{
+			Payload: map[string]any{
+				"client_metadata": map[string]any{},
+			},
+		},
+	}
+
+	_, err := w.SubmitPresentation(vpResult, "state", params.ResponseURI, params)
+	if err == nil {
+		t.Fatal("expected error when direct_post.jwt is used without encryption key")
+	}
+	if !strings.Contains(err.Error(), "no encryption key") {
+		t.Errorf("expected 'no encryption key' in error, got: %v", err)
 	}
 }

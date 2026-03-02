@@ -1,0 +1,115 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package proxy
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"syscall"
+
+	"github.com/fatih/color"
+)
+
+// Subprocess manages a child process whose stdout/stderr is scanned for
+// encryption keys and credentials.
+type Subprocess struct {
+	cmd     *exec.Cmd
+	scanner *OutputScanner
+	done    chan error
+}
+
+// StartSubprocess launches args[0] with args[1:] as a child process.
+// Stdout and stderr are merged, scanned line-by-line, and forwarded to
+// the terminal with a [service] prefix.
+func StartSubprocess(args []string, scanner *OutputScanner) (*Subprocess, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("no command specified")
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = os.Environ()
+	// Set process group so we can signal the whole tree
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting %s: %w", args[0], err)
+	}
+
+	sub := &Subprocess{
+		cmd:     cmd,
+		scanner: scanner,
+		done:    make(chan error, 1),
+	}
+
+	// Scan both stdout and stderr
+	merged := io.MultiReader(stdout, stderr)
+	go sub.scanOutput(merged)
+
+	go func() {
+		sub.done <- cmd.Wait()
+	}()
+
+	return sub, nil
+}
+
+// scanOutput reads lines from the merged stdout/stderr, scans each line,
+// and prints it to the terminal with a [service] prefix.
+func (s *Subprocess) scanOutput(r io.Reader) {
+	dim := color.New(color.Faint)
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 0, 256*1024), 1024*1024) // allow long lines
+	for scan.Scan() {
+		line := scan.Text()
+		s.scanner.Scan(line)
+		dim.Printf("[service] ")
+		fmt.Println(line)
+	}
+}
+
+// Wait blocks until the subprocess exits and returns its error.
+func (s *Subprocess) Wait() error {
+	return <-s.done
+}
+
+// Done returns a channel that receives the exit error when the process ends.
+func (s *Subprocess) Done() <-chan error {
+	return s.done
+}
+
+// Stop sends SIGTERM to the subprocess process group.
+func (s *Subprocess) Stop() {
+	if s.cmd.Process == nil {
+		return
+	}
+	// Signal the entire process group
+	pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
+	if err == nil {
+		syscall.Kill(-pgid, syscall.SIGTERM)
+	} else {
+		s.cmd.Process.Signal(syscall.SIGTERM)
+	}
+}

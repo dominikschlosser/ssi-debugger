@@ -43,6 +43,7 @@ type Server struct {
 	rewriter *Rewriter
 	proxy    *httputil.ReverseProxy
 	writer   EntryWriter
+	scanner  *OutputScanner // optional: scans subprocess stdout for keys/credentials
 }
 
 // NewServer creates a new debugging reverse proxy server.
@@ -71,6 +72,12 @@ func NewServer(cfg Config, writer EntryWriter) *Server {
 	}
 
 	return s
+}
+
+// SetScanner sets the output scanner for detecting keys/credentials from
+// a proxied service's stdout.
+func (s *Server) SetScanner(scanner *OutputScanner) {
+	s.scanner = scanner
 }
 
 // Store returns the traffic store for use by the dashboard.
@@ -190,6 +197,11 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	displayURL := origURL
 	if displayURL == "" {
 		displayURL = resp.Request.URL.String()
+	}
+
+	// Fall back to scanner-detected CEK if no debug header was present
+	if debugJWEKey == "" && s.scanner != nil {
+		debugJWEKey = s.scanner.LastCEK()
 	}
 
 	entry := &TrafficEntry{

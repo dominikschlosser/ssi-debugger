@@ -89,7 +89,7 @@ func TestPrintEntryIncludesDecodeHints(t *testing.T) {
 		CredentialLabels: []string{"vp_token"},
 	}
 
-	output := captureOutput(t, func() { PrintEntry(entry) })
+	output := captureOutput(t, func() { PrintEntry(entry, 0) })
 
 	if !strings.Contains(output, "oid4vc-dev decode") {
 		t.Error("expected decode hint in output")
@@ -103,7 +103,7 @@ func TestPrintEntryIncludesDecodeHints(t *testing.T) {
 }
 
 func TestPrintDecodeHintWithLabel(t *testing.T) {
-	output := captureOutput(t, func() { printDecodeHint("cred-value", "id_token") })
+	output := captureOutput(t, func() { printDecodeHint("cred-value", "id_token", 0) })
 
 	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
 		t.Errorf("expected decode command with credential, got %q", output)
@@ -114,13 +114,24 @@ func TestPrintDecodeHintWithLabel(t *testing.T) {
 }
 
 func TestPrintDecodeHintWithoutLabel(t *testing.T) {
-	output := captureOutput(t, func() { printDecodeHint("cred-value", "") })
+	output := captureOutput(t, func() { printDecodeHint("cred-value", "", 0) })
 
 	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
 		t.Errorf("expected decode command, got %q", output)
 	}
 	if strings.Contains(output, "(") {
 		t.Errorf("expected no label parens, got %q", output)
+	}
+}
+
+func TestPrintDecodeHintWithDashboardPort(t *testing.T) {
+	output := captureOutput(t, func() { printDecodeHint("cred-value", "vp_token", 9091) })
+
+	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
+		t.Errorf("expected decode command, got %q", output)
+	}
+	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-value") {
+		t.Errorf("expected decode URL, got %q", output)
 	}
 }
 

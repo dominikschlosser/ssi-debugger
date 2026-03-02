@@ -18,6 +18,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/proxy"
 	"github.com/fatih/color"
@@ -25,18 +29,32 @@ import (
 )
 
 var (
-	proxyTarget    string
-	proxyPort      int
-	dashboardPort  int
-	noDashboard    bool
-	allTraffic     bool
+	proxyTarget   string
+	proxyPort     int
+	dashboardPort int
+	noDashboard   bool
+	allTraffic    bool
 )
 
 var proxyCmd = &cobra.Command{
-	Use:   "proxy",
+	Use:   "proxy [-- command args...]",
 	Short: "Start a debugging reverse proxy for OID4VP/VCI flows",
-	Long:  "Starts a reverse proxy that intercepts, classifies, and decodes OID4VP/VCI traffic between a wallet and a verifier/issuer. Point your wallet at the proxy port instead of the target.",
-	RunE:  runProxy,
+	Long: `Starts a reverse proxy that intercepts, classifies, and decodes OID4VP/VCI
+traffic between a wallet and a verifier/issuer. Point your wallet at the proxy
+port instead of the target.
+
+Optionally launch the target service as a subprocess by passing its command
+after '--'. The proxy scans the service's stdout for encryption keys and
+credentials (best-effort), enabling automatic JWE decryption and credential
+decode links even when using third-party wallets.
+
+Examples:
+  oid4vc-dev proxy --target http://localhost:8080
+  oid4vc-dev proxy --target http://localhost:3000 -- mvn spring-boot:run
+  oid4vc-dev proxy --target http://localhost:3000 -- npm start`,
+	RunE:               runProxy,
+	DisableFlagParsing: false,
+	TraverseChildren:   true,
 }
 
 func init() {
@@ -69,14 +87,34 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		AllTraffic:    allTraffic,
 	}
 
+	dashPort := 0
+	if !noDashboard {
+		dashPort = dashboardPort
+	}
+
 	var writer proxy.EntryWriter
 	if jsonOutput {
 		writer = proxy.NewJSONWriter(allTraffic)
 	} else {
-		writer = &proxy.TerminalWriter{AllTraffic: allTraffic}
+		writer = &proxy.TerminalWriter{AllTraffic: allTraffic, DashboardPort: dashPort}
 	}
 
 	srv := proxy.NewServer(cfg, writer)
+
+	// If trailing args are provided, launch the target service as a subprocess
+	// and scan its stdout for encryption keys and credentials.
+	var scanner *proxy.OutputScanner
+	var sub *proxy.Subprocess
+	if len(args) > 0 {
+		scanner = proxy.NewOutputScanner()
+		srv.SetScanner(scanner)
+
+		var subErr error
+		sub, subErr = proxy.StartSubprocess(args, scanner)
+		if subErr != nil {
+			return fmt.Errorf("starting service: %w", subErr)
+		}
+	}
 
 	cyan := color.New(color.FgCyan, color.Bold)
 	dim := color.New(color.Faint)
@@ -88,6 +126,9 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	if !noDashboard {
 		fmt.Printf("  Dashboard: http://localhost:%d\n", dashboardPort)
 	}
+	if len(args) > 0 {
+		fmt.Printf("  Service:   %s\n", strings.Join(args, " "))
+	}
 	dim.Println("───────────────────────────────────────")
 	fmt.Println()
 
@@ -96,6 +137,25 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		go func() {
 			if err := dashboard.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				fmt.Printf("Dashboard error: %v\n", err)
+			}
+		}()
+	}
+
+	// Handle graceful shutdown: stop subprocess on SIGINT/SIGTERM
+	if sub != nil {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			select {
+			case <-sigCh:
+				fmt.Println("\nStopping service...")
+				sub.Stop()
+			case err := <-sub.Done():
+				if err != nil {
+					fmt.Printf("\nService exited: %v\n", err)
+				} else {
+					fmt.Println("\nService exited")
+				}
 			}
 		}()
 	}

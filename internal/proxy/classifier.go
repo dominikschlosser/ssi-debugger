@@ -312,6 +312,48 @@ func decodeJARMResponse(raw string, cekB64 string, decoded map[string]any) {
 	}
 }
 
+// extractJARMCredentials pulls credential strings from a decrypted JARM payload.
+// The payload typically contains vp_token (map or string) and optionally id_token.
+func extractJARMCredentials(payload map[string]any) ([]string, []string) {
+	var creds []string
+	var labels []string
+
+	// vp_token can be a string, a map of query_id → []string, or a map of query_id → string
+	if vpToken, ok := payload["vp_token"]; ok {
+		switch vp := vpToken.(type) {
+		case string:
+			if vp != "" {
+				creds = append(creds, vp)
+				labels = append(labels, "vp_token (JARM)")
+			}
+		case map[string]any:
+			for queryID, val := range vp {
+				switch v := val.(type) {
+				case string:
+					if v != "" {
+						creds = append(creds, v)
+						labels = append(labels, fmt.Sprintf("vp_token.%s (JARM)", queryID))
+					}
+				case []any:
+					for i, item := range v {
+						if s, ok := item.(string); ok && s != "" {
+							creds = append(creds, s)
+							labels = append(labels, fmt.Sprintf("vp_token.%s[%d] (JARM)", queryID, i))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if idToken, ok := payload["id_token"].(string); ok && idToken != "" {
+		creds = append(creds, idToken)
+		labels = append(labels, "id_token (JARM)")
+	}
+
+	return creds, labels
+}
+
 // hasBodyField checks whether a field exists in either URL-encoded form data or JSON body.
 func hasBodyField(body, field string) bool {
 	if values, err := url.ParseQuery(body); err == nil && values.Has(field) {
@@ -444,6 +486,14 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 		if id, ok := fields["id_token"]; ok && id != "" {
 			creds = append(creds, id)
 			labels = append(labels, "id_token")
+		}
+		// Extract credentials from decrypted JARM payload
+		if e.Decoded != nil {
+			if payload, ok := e.Decoded["response_payload"].(map[string]any); ok {
+				jarmCreds, jarmLabels := extractJARMCredentials(payload)
+				creds = append(creds, jarmCreds...)
+				labels = append(labels, jarmLabels...)
+			}
 		}
 
 	case ClassVPRequestObject:

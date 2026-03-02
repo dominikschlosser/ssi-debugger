@@ -14,6 +14,13 @@ Wallet  <-->  Proxy (:9090)  <-->  Verifier/Issuer (:8080)
             Live dashboard (:9091)
 ```
 
+Optionally launch the target service as a subprocess — the proxy scans its stdout for encryption keys and credentials:
+
+```bash
+oid4vc-dev proxy --target http://localhost:3000 -- mvn spring-boot:run
+oid4vc-dev proxy --target http://localhost:3000 -- npm start
+```
+
 ## Traffic classification
 
 Traffic is automatically classified into protocol steps:
@@ -50,6 +57,7 @@ By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, he
 | `--no-dashboard` | `false` | Disable web dashboard                    |
 | `--all-traffic`  | `false` | Show all traffic, not just OID4VP/VCI    |
 | `--json`         | `false` | NDJSON output to stdout (global flag)    |
+| `-- <command>`   | —       | Launch target as subprocess, scan stdout |
 
 ## Example output
 
@@ -84,12 +92,38 @@ oid4vc-dev wallet                          # wallet sends to response_uri
 oid4vc-dev proxy --target http://verifier  # proxy intercepts, decrypts, forwards
 ```
 
-If the debug header is not present (e.g. when using a third-party wallet), the proxy falls back to showing only the JWE header fields (`alg`, `enc`, `kid`, `epk`).
+### Automatic key detection from service stdout
+
+When using a **third-party wallet** (not the built-in one), the debug header won't be present. If you launch the verifier service as a subprocess (with `--`), the proxy scans its stdout for CEK values and uses them to decrypt JWE responses automatically:
+
+```bash
+oid4vc-dev proxy --target http://localhost:3000 -- mvn spring-boot:run
+```
+
+The proxy detects lines matching patterns like:
+- `CEK: <base64url>` or `content encryption key: <base64url>`
+- JWK objects containing a `"d"` (private key) parameter
+
+This is best-effort — if no key is found, the proxy falls back to showing only the JWE header fields (`alg`, `enc`, `kid`, `epk`).
+
+### Credential detection from service stdout
+
+When running as a subprocess, the proxy also scans the service's stdout for JWT/SD-JWT credentials. Detected credentials are added to the activity log with decode links:
+
+```
+  → oid4vc-dev decode 'eyJhbGci...'  (vp_token)
+  → http://localhost:9091/decode?credential=eyJhbGci...
+```
 
 ## Debugging tips
 
 - The wallet logs credentials and encryption keys to stdout for local debugging:
   - `[VP] JWE content encryption key for proxy debugging: <base64url CEK>`
   - `[VP] SD-JWT presentation created: ...`
+- Launch the target service with `--` to auto-detect keys/credentials from its stdout:
+  ```bash
+  oid4vc-dev proxy --target http://localhost:3000 -- mvn spring-boot:run
+  ```
+  Service output appears with a `[service]` prefix; detected credentials get decode links.
 - Use `--all-traffic` to see non-OID4VP/VCI requests (health checks, favicon, etc.)
 - Pipe to `jq` with `--json` for structured analysis: `oid4vc-dev proxy --target ... --json | jq '.credentials'`

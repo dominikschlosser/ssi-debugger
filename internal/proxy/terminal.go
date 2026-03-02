@@ -35,18 +35,20 @@ var (
 
 // TerminalWriter writes traffic entries to the terminal with color formatting.
 type TerminalWriter struct {
-	AllTraffic bool
+	AllTraffic    bool
+	DashboardPort int // if > 0, print /decode links
 }
 
 func (tw *TerminalWriter) WriteEntry(entry *TrafficEntry) {
 	if entry.Class == ClassUnknown && !tw.AllTraffic {
 		return
 	}
-	PrintEntry(entry)
+	PrintEntry(entry, tw.DashboardPort)
 }
 
 // PrintEntry prints a traffic entry to the terminal with color formatting.
-func PrintEntry(entry *TrafficEntry) {
+// If dashboardPort > 0, decode links are printed for each credential.
+func PrintEntry(entry *TrafficEntry, dashboardPort int) {
 	ts := entry.Timestamp.Format("15:04:05")
 
 	// Status color
@@ -78,7 +80,7 @@ func PrintEntry(entry *TrafficEntry) {
 		if i < len(entry.CredentialLabels) {
 			label = entry.CredentialLabels[i]
 		}
-		printDecodeHint(cred, label)
+		printDecodeHint(cred, label, dashboardPort)
 	}
 
 	fmt.Println()
@@ -109,12 +111,15 @@ func printDecodedField(key string, val any, depth int) {
 	}
 }
 
-func printDecodeHint(credential, label string) {
+func printDecodeHint(credential, label string, dashboardPort int) {
 	hint := fmt.Sprintf("  → oid4vc-dev decode '%s'", credential)
 	if label != "" {
 		hint += fmt.Sprintf("  (%s)", label)
 	}
 	dimColor.Println(hint)
+	if dashboardPort > 0 {
+		dimColor.Printf("  → http://localhost:%d/decode?credential=%s\n", dashboardPort, credential)
+	}
 }
 
 func truncateURL(u string, maxLen int) string {

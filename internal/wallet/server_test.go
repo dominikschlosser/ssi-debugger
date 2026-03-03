@@ -831,24 +831,33 @@ func TestTrustListAPI_ParseableByTrustlistParser(t *testing.T) {
 	if tl.Entities[0].Name != "Wallet Issuer" {
 		t.Errorf("expected entity name 'Wallet Issuer', got %q", tl.Entities[0].Name)
 	}
-	if len(tl.Entities[0].Services) != 1 {
-		t.Fatalf("expected 1 service, got %d", len(tl.Entities[0].Services))
-	}
-	svc := tl.Entities[0].Services[0]
-	if svc.ServiceType != "http://uri.etsi.org/19602/SvcType/Issuance" {
-		t.Errorf("unexpected service type: %s", svc.ServiceType)
-	}
-	if len(svc.Certificates) != 1 {
-		t.Fatalf("expected 1 certificate, got %d", len(svc.Certificates))
+	if len(tl.Entities[0].Services) != 2 {
+		t.Fatalf("expected 2 services (issuance + revocation), got %d", len(tl.Entities[0].Services))
 	}
 
-	// The certificate's public key should match the wallet's CA key (trust anchor)
-	certPub, ok := svc.Certificates[0].PublicKey.(*ecdsa.PublicKey)
+	// Verify issuance service
+	issuanceSvc := tl.Entities[0].Services[0]
+	if issuanceSvc.ServiceType != "http://uri.etsi.org/19602/SvcType/PID/Issuance" {
+		t.Errorf("unexpected issuance service type: %s", issuanceSvc.ServiceType)
+	}
+	if len(issuanceSvc.Certificates) != 1 {
+		t.Fatalf("expected 1 certificate in issuance service, got %d", len(issuanceSvc.Certificates))
+	}
+	certPub, ok := issuanceSvc.Certificates[0].PublicKey.(*ecdsa.PublicKey)
 	if !ok {
-		t.Fatal("expected ECDSA public key in certificate")
+		t.Fatal("expected ECDSA public key in issuance certificate")
 	}
 	if !certPub.Equal(&srv.wallet.CAKey.PublicKey) {
-		t.Error("certificate public key does not match wallet CA key")
+		t.Error("issuance certificate public key does not match wallet CA key")
+	}
+
+	// Verify revocation service
+	revocationSvc := tl.Entities[0].Services[1]
+	if revocationSvc.ServiceType != "http://uri.etsi.org/19602/SvcType/PID/Revocation" {
+		t.Errorf("unexpected revocation service type: %s", revocationSvc.ServiceType)
+	}
+	if len(revocationSvc.Certificates) != 1 {
+		t.Fatalf("expected 1 certificate in revocation service, got %d", len(revocationSvc.Certificates))
 	}
 }
 

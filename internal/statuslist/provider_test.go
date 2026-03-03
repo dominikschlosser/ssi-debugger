@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func generateTestKey(t *testing.T) *ecdsa.PrivateKey {
@@ -163,5 +164,70 @@ func TestGenerateStatusListJWT_AllZeros(t *testing.T) {
 
 	if jwt == "" {
 		t.Fatal("expected non-empty JWT")
+	}
+}
+
+func TestGenerateStatusListJWT_WithCertChain(t *testing.T) {
+	key := generateTestKey(t)
+
+	// Generate a CA cert and leaf cert like the wallet does
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCert, err := mock.GenerateLeafCert(caKey, caCert, &key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bitstring := make([]byte, 16)
+	jwt, err := GenerateStatusListJWT(bitstring, key, leafCert, caCert)
+	if err != nil {
+		t.Fatalf("GenerateStatusListJWT with cert chain: %v", err)
+	}
+
+	// Parse header and verify x5c is present
+	parts := strings.SplitN(jwt, ".", 3)
+	headerBytes, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerBytes, &header)
+
+	x5c, ok := header["x5c"].([]any)
+	if !ok {
+		t.Fatal("expected x5c array in header")
+	}
+	if len(x5c) != 2 {
+		t.Fatalf("expected 2 certificates in x5c, got %d", len(x5c))
+	}
+
+	// First cert should be the leaf, second the CA
+	if _, ok := x5c[0].(string); !ok {
+		t.Error("expected string certificate in x5c[0]")
+	}
+	if _, ok := x5c[1].(string); !ok {
+		t.Error("expected string certificate in x5c[1]")
+	}
+}
+
+func TestGenerateStatusListJWT_WithoutCertChain(t *testing.T) {
+	key := generateTestKey(t)
+	bitstring := make([]byte, 16)
+
+	jwt, err := GenerateStatusListJWT(bitstring, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.SplitN(jwt, ".", 3)
+	headerBytes, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerBytes, &header)
+
+	if header["x5c"] != nil {
+		t.Error("expected no x5c when cert chain not provided")
 	}
 }

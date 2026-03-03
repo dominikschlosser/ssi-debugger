@@ -153,7 +153,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 		// Status list check
 		if statusListFlag {
-			checkStatus(token.ResolvedClaims, opts)
+			checkStatus(token.ResolvedClaims, tlCerts, opts)
 		}
 
 	case format.FormatJWT:
@@ -196,7 +196,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 
 		if statusListFlag {
-			checkStatus(token.ResolvedClaims, opts)
+			checkStatus(token.ResolvedClaims, tlCerts, opts)
 		}
 
 	case format.FormatMDOC:
@@ -240,7 +240,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		// Status list check for mDOC — wrap in "status" key since ExtractStatusRef
 		// expects {"status": {"status_list": ...}} but MSO.Status is the inner map.
 		if statusListFlag && doc.IssuerAuth != nil && doc.IssuerAuth.MSO != nil && doc.IssuerAuth.MSO.Status != nil {
-			checkStatus(map[string]any{"status": doc.IssuerAuth.MSO.Status}, opts)
+			checkStatus(map[string]any{"status": doc.IssuerAuth.MSO.Status}, tlCerts, opts)
 		}
 
 	default:
@@ -268,7 +268,7 @@ func verifyWithBestKey[T any](pubKeys []crypto.PublicKey, x5cKey crypto.PublicKe
 	return best
 }
 
-func checkStatus(claims map[string]any, opts output.Options) {
+func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts output.Options) {
 	ref := statuslist.ExtractStatusRef(claims)
 	if ref == nil {
 		if !opts.JSON {
@@ -276,7 +276,16 @@ func checkStatus(claims map[string]any, opts output.Options) {
 		}
 		return
 	}
-	result, err := statuslist.Check(ref)
+
+	// Build check options with trust list certs for signature validation
+	checkOpts := statuslist.CheckOptions{}
+	for _, ci := range tlCerts {
+		if len(ci.Raw) > 0 {
+			checkOpts.TrustListCerts = append(checkOpts.TrustListCerts, statuslist.TrustCert{Raw: ci.Raw})
+		}
+	}
+
+	result, err := statuslist.CheckWithOptions(ref, checkOpts)
 	if err != nil {
 		output.PrintError(fmt.Sprintf("status check: %v", err))
 		return
@@ -288,6 +297,13 @@ func checkStatus(claims map[string]any, opts output.Options) {
 			fmt.Printf("\n  ✓ Status: valid (index %d, status=%d)\n", result.Index, result.Status)
 		} else {
 			fmt.Printf("\n  ✗ Status: revoked (index %d, status=%d)\n", result.Index, result.Status)
+		}
+		if result.SignatureValid != nil {
+			if *result.SignatureValid {
+				fmt.Printf("  ✓ Status list signature: %s\n", result.SignatureInfo)
+			} else {
+				fmt.Printf("  ✗ Status list signature: %s\n", result.SignatureInfo)
+			}
 		}
 	}
 }

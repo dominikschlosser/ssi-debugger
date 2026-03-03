@@ -48,7 +48,17 @@ func GenerateTrustListJWT(signingKey *ecdsa.PrivateKey, caCert *x509.Certificate
 				"TrustedEntityServices": []map[string]any{
 					{
 						"ServiceInformation": map[string]any{
-							"ServiceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/Issuance",
+							"ServiceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/PID/Issuance",
+							"ServiceName":            []map[string]string{{"lang": "en", "value": "PID Issuance Service"}},
+							"ServiceDigitalIdentity": map[string]any{
+								"X509Certificates": []map[string]string{{"val": certB64}},
+							},
+						},
+					},
+					{
+						"ServiceInformation": map[string]any{
+							"ServiceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/PID/Revocation",
+							"ServiceName":            []map[string]string{{"lang": "en", "value": "PID Revocation Service"}},
 							"ServiceDigitalIdentity": map[string]any{
 								"X509Certificates": []map[string]string{{"val": certB64}},
 							},

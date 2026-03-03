@@ -20,6 +20,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -28,7 +30,8 @@ import (
 )
 
 // GenerateStatusListJWT creates a signed status list JWT (RFC 9596) from a bitstring.
-func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey) (string, error) {
+// If certChain is provided, the x5c header is included for certificate chain validation.
+func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, certChain ...*x509.Certificate) (string, error) {
 	// zlib-compress the bitstring
 	var buf bytes.Buffer
 	w, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
@@ -58,6 +61,14 @@ func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey) (stri
 	header := map[string]any{
 		"alg": "ES256",
 		"typ": "statuslist+jwt",
+	}
+
+	if len(certChain) > 0 {
+		var x5c []string
+		for _, cert := range certChain {
+			x5c = append(x5c, base64.StdEncoding.EncodeToString(cert.Raw))
+		}
+		header["x5c"] = x5c
 	}
 
 	headerJSON, err := json.Marshal(header)

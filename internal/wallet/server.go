@@ -459,7 +459,7 @@ func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 // handleStatusList generates and serves a status list JWT.
 func (s *Server) handleStatusList(w http.ResponseWriter, r *http.Request) {
 	bitstring := s.wallet.BuildStatusBitstring()
-	jwt, err := statuslist.GenerateStatusListJWT(bitstring, s.wallet.IssuerKey)
+	jwt, err := statuslist.GenerateStatusListJWT(bitstring, s.wallet.IssuerKey, s.wallet.CertChain...)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("generating status list: %v", err), http.StatusInternalServerError)
 		return

@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func TestExtractStatusRef(t *testing.T) {
@@ -219,6 +221,155 @@ func TestCheck_HTTPError(t *testing.T) {
 	_, err := Check(&StatusRef{URI: server.URL, Idx: 0})
 	if err == nil {
 		t.Error("expected error for HTTP 500")
+	}
+}
+
+func TestCheckWithOptions_SignatureVerification(t *testing.T) {
+	// Generate issuer key and cert chain (like the wallet does)
+	issuerKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCert, err := mock.GenerateLeafCert(caKey, caCert, &issuerKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate a status list JWT with x5c chain
+	bitstring := make([]byte, 16)
+	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, leafCert, caCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Serve it
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/statuslist+jwt")
+		w.Write([]byte(statusJWT))
+	}))
+	defer server.Close()
+
+	// Check with trust list containing the CA cert
+	opts := CheckOptions{
+		TrustListCerts: []TrustCert{{Raw: caCert.Raw}},
+	}
+	result, err := CheckWithOptions(&StatusRef{URI: server.URL, Idx: 0}, opts)
+	if err != nil {
+		t.Fatalf("CheckWithOptions error: %v", err)
+	}
+	if result.SignatureValid == nil {
+		t.Fatal("expected SignatureValid to be set")
+	}
+	if !*result.SignatureValid {
+		t.Errorf("expected valid signature, got info: %s", result.SignatureInfo)
+	}
+	if result.IsValid != true {
+		t.Errorf("expected status valid, got %d", result.Status)
+	}
+}
+
+func TestCheckWithOptions_UntrustedCert(t *testing.T) {
+	// Generate issuer key and cert chain
+	issuerKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCert, err := mock.GenerateLeafCert(caKey, caCert, &issuerKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate a DIFFERENT CA (not in trust list)
+	otherCAKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherCACert, err := mock.GenerateCACert(otherCAKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bitstring := make([]byte, 16)
+	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, leafCert, caCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(statusJWT))
+	}))
+	defer server.Close()
+
+	// Check with a trust list that does NOT contain the signing CA
+	opts := CheckOptions{
+		TrustListCerts: []TrustCert{{Raw: otherCACert.Raw}},
+	}
+	result, err := CheckWithOptions(&StatusRef{URI: server.URL, Idx: 0}, opts)
+	if err != nil {
+		t.Fatalf("CheckWithOptions error: %v", err)
+	}
+	if result.SignatureValid == nil {
+		t.Fatal("expected SignatureValid to be set")
+	}
+	if *result.SignatureValid {
+		t.Error("expected signature validation to fail with untrusted CA")
+	}
+}
+
+func TestCheckWithOptions_NoX5C(t *testing.T) {
+	// Status list JWT without x5c should report signature invalid when trust list provided
+	bitstring := make([]byte, 16)
+	key := generateTestKey(t)
+	statusJWT, err := GenerateStatusListJWT(bitstring, key) // no cert chain
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(statusJWT))
+	}))
+	defer server.Close()
+
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := CheckOptions{
+		TrustListCerts: []TrustCert{{Raw: caCert.Raw}},
+	}
+	result, err := CheckWithOptions(&StatusRef{URI: server.URL, Idx: 0}, opts)
+	if err != nil {
+		t.Fatalf("CheckWithOptions error: %v", err)
+	}
+	if result.SignatureValid == nil {
+		t.Fatal("expected SignatureValid to be set")
+	}
+	if *result.SignatureValid {
+		t.Error("expected signature invalid when no x5c in status list JWT")
+	}
+	if result.SignatureInfo != "no x5c header in status list JWT" {
+		t.Errorf("unexpected info: %s", result.SignatureInfo)
 	}
 }
 

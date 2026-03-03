@@ -23,10 +23,24 @@ type StatusRef struct {
 
 // StatusResult contains the revocation check result.
 type StatusResult struct {
-	URI       string `json:"uri"`
-	Index     int    `json:"index"`
-	Status    int    `json:"status"`
-	IsValid   bool   `json:"isValid"`
-	BitsPerEntry int `json:"bitsPerEntry"`
-	Error     string `json:"error,omitempty"`
+	URI            string `json:"uri"`
+	Index          int    `json:"index"`
+	Status         int    `json:"status"`
+	IsValid        bool   `json:"isValid"`
+	BitsPerEntry   int    `json:"bitsPerEntry"`
+	SignatureValid *bool  `json:"signatureValid,omitempty"`
+	SignatureInfo  string `json:"signatureInfo,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// CheckOptions configures optional validation behavior for status list checks.
+type CheckOptions struct {
+	// TrustListCerts are the trust list CA certificates used to validate the
+	// status list JWT's x5c chain. If empty, signature validation is skipped.
+	TrustListCerts []TrustCert
+}
+
+// TrustCert holds a raw trust list certificate for chain validation.
+type TrustCert struct {
+	Raw []byte
 }

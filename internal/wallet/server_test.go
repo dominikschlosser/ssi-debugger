@@ -842,13 +842,13 @@ func TestTrustListAPI_ParseableByTrustlistParser(t *testing.T) {
 		t.Fatalf("expected 1 certificate, got %d", len(svc.Certificates))
 	}
 
-	// The certificate's public key should match the wallet's issuer key
+	// The certificate's public key should match the wallet's CA key (trust anchor)
 	certPub, ok := svc.Certificates[0].PublicKey.(*ecdsa.PublicKey)
 	if !ok {
 		t.Fatal("expected ECDSA public key in certificate")
 	}
-	if !certPub.Equal(&srv.wallet.IssuerKey.PublicKey) {
-		t.Error("certificate public key does not match wallet issuer key")
+	if !certPub.Equal(&srv.wallet.CAKey.PublicKey) {
+		t.Error("certificate public key does not match wallet CA key")
 	}
 }
 

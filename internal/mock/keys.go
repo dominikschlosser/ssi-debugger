@@ -18,8 +18,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
@@ -73,6 +77,46 @@ func PublicKeyJWK(key *ecdsa.PublicKey) string {
 
 	b, _ := json.MarshalIndent(jwk, "", "  ")
 	return string(b)
+}
+
+// GenerateCACert creates a self-signed CA certificate for the given key.
+func GenerateCACert(caKey *ecdsa.PrivateKey) (*x509.Certificate, error) {
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "OID4VC Dev Wallet CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            1,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &caKey.PublicKey, caKey)
+	if err != nil {
+		return nil, fmt.Errorf("creating CA certificate: %w", err)
+	}
+
+	return x509.ParseCertificate(der)
+}
+
+// GenerateLeafCert creates a leaf certificate signed by the CA.
+func GenerateLeafCert(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, leafPubKey *ecdsa.PublicKey) (*x509.Certificate, error) {
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "OID4VC Dev Wallet Issuer"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, caCert, leafPubKey, caKey)
+	if err != nil {
+		return nil, fmt.Errorf("creating leaf certificate: %w", err)
+	}
+
+	return x509.ParseCertificate(der)
 }
 
 // PrivateKeyJWK returns the JSON JWK representation of a P-256 private key (includes d).

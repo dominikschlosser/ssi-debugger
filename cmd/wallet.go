@@ -882,7 +882,10 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 				return err
 			}
 
-			jwt, err := wallet.GenerateTrustListJWT(w.IssuerKey)
+			if len(w.CertChain) < 2 {
+				return fmt.Errorf("wallet has no CA certificate chain")
+			}
+			jwt, err := wallet.GenerateTrustListJWT(w.IssuerKey, w.CertChain[len(w.CertChain)-1])
 			if err != nil {
 				return fmt.Errorf("generating trust list: %w", err)
 			}

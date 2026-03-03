@@ -58,7 +58,14 @@ All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 └── issuer.pem        # Issuer EC private key (for self-issued credentials)
 ```
 
-Keys are P-256 EC keys, auto-generated on first use and reused across invocations. The issuer key is shared across all signing operations — it signs generated credentials (SD-JWT, JWT, mDoc), status list JWTs (`/api/statuslist`), and the trust list JWT (`/api/trustlist`).
+Keys are P-256 EC keys, auto-generated on first use and reused across invocations. On startup, the wallet generates a **CA key** and builds a certificate chain:
+
+1. **CA certificate** — self-signed, used as trust anchor in the trust list (`/api/trustlist`)
+2. **Leaf certificate** — signed by the CA, wraps the issuer key's public key
+
+Generated credentials (SD-JWT, JWT, mDoc) are signed with the **issuer key** and include the full certificate chain (`[leaf, CA]`) as `x5c` (JWT header) or `x5chain` (COSE label 33). This mirrors real-world EUDI infrastructure where a verifier validates the credential's certificate chain against a trust list CA, rather than matching a bare public key.
+
+The CA key and certificates are ephemeral (regenerated each time the wallet starts). The issuer key is persisted and reused across invocations.
 
 Generated credentials expire in **30 days** by default. Use `--exp` to override (e.g. `--exp 720h` for 30 days, `--exp 24h` for 1 day). Use `--nbf` to set a not-before time (RFC3339 or duration, e.g. `--nbf 2025-01-15T00:00:00Z` or `--nbf -1h`).
 
@@ -139,7 +146,7 @@ oid4vc-dev wallet scan --screen --auto-accept # auto-approve if it's a presentat
 
 ## `wallet trust-list`
 
-Generates and prints the ETSI trust list JWT containing the wallet's issuer certificate. The output can be piped to a file or used directly with `--trust-list` in the `validate` command. Use `--url` to print only the URL for a running wallet server instead.
+Generates and prints the ETSI trust list JWT containing the wallet's CA certificate (trust anchor). The trust list is used by verifiers to validate the x5c/x5chain certificate chain embedded in credentials. The output can be piped to a file or used directly with `--trust-list` in the `validate` command. Use `--url` to print only the URL for a running wallet server instead.
 
 ```bash
 oid4vc-dev wallet trust-list                          # Print the trust list JWT

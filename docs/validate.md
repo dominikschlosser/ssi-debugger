@@ -25,4 +25,21 @@ oid4vc-dev validate credential.txt
 | `--status-list`   | Check revocation via status list (network call)    |
 | `--allow-expired` | Don't fail on expired credentials                  |
 
-When a trust list is provided and the credential contains an x5c (SD-JWT) or x5chain (mDOC) certificate chain, the chain is validated against the trust list before verifying the signature.
+## Certificate chain validation
+
+When a trust list is provided and the credential contains an x5c (SD-JWT/JWT) or x5chain (mDOC) certificate chain, the chain is validated against the trust list before verifying the signature. The validation follows the real-world EUDI flow:
+
+1. The trust list contains **CA certificates** (trust anchors)
+2. The credential's x5c/x5chain contains `[leaf, ...intermediates]`
+3. The leaf certificate is verified to chain up to a trust list CA via any intermediates
+4. The leaf certificate's public key is used to verify the credential signature
+
+This matches the Bundesdruckerei PID provider setup where the trust list contains CA certificates like "PIDP Preprod CA" and credentials carry a leaf certificate signed by that CA.
+
+```bash
+# Validate a wallet-issued credential against the wallet's trust list
+oid4vc-dev validate --trust-list http://localhost:8085/api/trustlist credential.txt
+
+# Validate against the German PID provider trust list
+oid4vc-dev validate --trust-list https://bmi.usercontent.opencode.de/eudi-wallet/test-trust-lists/pid-provider.jwt credential.txt
+```

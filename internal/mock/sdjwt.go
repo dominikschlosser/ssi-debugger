@@ -18,6 +18,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -36,8 +38,9 @@ type SDJWTConfig struct {
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
 	HolderKey     *ecdsa.PublicKey // optional: adds cnf claim for holder binding
-	StatusListURI string          // optional: status list URI for revocation
-	StatusListIdx int             // optional: index in the status list
+	StatusListURI string              // optional: status list URI for revocation
+	StatusListIdx int                 // optional: index in the status list
+	CertChain     []*x509.Certificate // optional: x5c certificate chain [leaf, CA]
 }
 
 // GenerateSDJWT creates a mock SD-JWT credential with all claims selectively disclosable.
@@ -101,6 +104,14 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	header := map[string]any{
 		"alg": "ES256",
 		"typ": "vc+sd-jwt",
+	}
+
+	if len(cfg.CertChain) > 0 {
+		var x5c []string
+		for _, cert := range cfg.CertChain {
+			x5c = append(x5c, base64.StdEncoding.EncodeToString(cert.Raw))
+		}
+		header["x5c"] = x5c
 	}
 
 	// Encode header and payload

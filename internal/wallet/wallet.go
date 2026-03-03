@@ -17,6 +17,7 @@ package wallet
 
 import (
 	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -63,6 +64,8 @@ type NextErrorOverride struct {
 type Wallet struct {
 	HolderKey            *ecdsa.PrivateKey
 	IssuerKey            *ecdsa.PrivateKey
+	CAKey                *ecdsa.PrivateKey
+	CertChain            []*x509.Certificate // [leaf, CA] certificate chain
 	AutoAccept           bool
 	SessionTranscript    SessionTranscriptMode // "oid4vp" (default) or "iso"
 	PreferredFormat      string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
@@ -149,14 +152,39 @@ type LogEntry struct {
 }
 
 // New creates a new wallet with the given options.
+// It generates a CA key and certificate chain (CA → leaf) for realistic x5c chains.
 func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
-	return &Wallet{
+	w := &Wallet{
 		HolderKey:   holderKey,
 		IssuerKey:   issuerKey,
 		AutoAccept:  autoAccept,
 		Requests:    make(map[string]*ConsentRequest),
 		subscribers: make(map[int64]chan *ConsentRequest),
 	}
+
+	// Generate CA key and certificate chain
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		log.Printf("[Wallet] Warning: failed to generate CA key: %v", err)
+		return w
+	}
+
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		log.Printf("[Wallet] Warning: failed to generate CA cert: %v", err)
+		return w
+	}
+
+	leafCert, err := mock.GenerateLeafCert(caKey, caCert, &issuerKey.PublicKey)
+	if err != nil {
+		log.Printf("[Wallet] Warning: failed to generate leaf cert: %v", err)
+		return w
+	}
+
+	w.CAKey = caKey
+	w.CertChain = []*x509.Certificate{leafCert, caCert}
+
+	return w
 }
 
 // GenerateDefaultCredentials generates SD-JWT and mDoc PID credentials.
@@ -203,6 +231,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		Claims:    sdClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
+		CertChain: w.CertChain,
 	}
 
 	// Assign status list indices if enabled
@@ -234,6 +263,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
 		ExpiresIn: 30 * 24 * time.Hour,
+		CertChain: w.CertChain,
 	}
 
 	if w.BaseURL != "" {

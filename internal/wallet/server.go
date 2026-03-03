@@ -431,7 +431,11 @@ func (s *Server) handleLastError(w http.ResponseWriter, r *http.Request) {
 
 // handleTrustList generates and serves an ETSI trust list JWT from the wallet's issuer key.
 func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
-	jwt, err := GenerateTrustListJWT(s.wallet.IssuerKey)
+	if len(s.wallet.CertChain) < 2 {
+		http.Error(w, "wallet has no CA certificate chain", http.StatusInternalServerError)
+		return
+	}
+	jwt, err := GenerateTrustListJWT(s.wallet.IssuerKey, s.wallet.CertChain[len(s.wallet.CertChain)-1])
 	if err != nil {
 		http.Error(w, fmt.Sprintf("generating trust list: %v", err), http.StatusInternalServerError)
 		return

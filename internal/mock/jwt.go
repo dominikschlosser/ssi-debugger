@@ -17,6 +17,8 @@ package mock
 import (
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -32,8 +34,9 @@ type JWTConfig struct {
 	NotBefore     *time.Time // optional: sets nbf claim
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
-	StatusListURI string // optional: status list URI for revocation
-	StatusListIdx int    // optional: index in the status list
+	StatusListURI string              // optional: status list URI for revocation
+	StatusListIdx int                 // optional: index in the status list
+	CertChain     []*x509.Certificate // optional: x5c certificate chain [leaf, CA]
 }
 
 // GenerateJWT creates a mock JWT VC credential with all claims directly in the payload.
@@ -75,6 +78,14 @@ func GenerateJWT(cfg JWTConfig) (string, error) {
 	header := map[string]any{
 		"alg": "ES256",
 		"typ": "vc+jwt",
+	}
+
+	if len(cfg.CertChain) > 0 {
+		var x5c []string
+		for _, cert := range cfg.CertChain {
+			x5c = append(x5c, base64.StdEncoding.EncodeToString(cert.Raw))
+		}
+		header["x5c"] = x5c
 	}
 
 	// Encode header and payload

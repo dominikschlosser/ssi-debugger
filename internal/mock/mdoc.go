@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"time"
@@ -35,8 +36,9 @@ type MDOCConfig struct {
 	HolderKey     *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
 	ExpiresIn     time.Duration   // validity duration; defaults to 30 days if zero
 	ValidFrom     *time.Time      // optional: override validFrom (defaults to now)
-	StatusListURI string          // optional: status list URI for revocation
-	StatusListIdx int             // optional: index in the status list
+	StatusListURI string              // optional: status list URI for revocation
+	StatusListIdx int                 // optional: index in the status list
+	CertChain     []*x509.Certificate // optional: x5chain certificate chain [leaf, CA]
 }
 
 // GenerateMDOC creates a mock mDOC (IssuerSigned) credential.
@@ -159,6 +161,21 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 	msg := cose.NewSign1Message()
 	msg.Headers.Protected.SetAlgorithm(cose.AlgorithmES256)
 	msg.Payload = msoBytes
+
+	// Add x5chain (label 33) to unprotected header
+	if len(cfg.CertChain) > 0 {
+		if len(cfg.CertChain) == 1 {
+			// Single cert: encode as bstr
+			msg.Headers.Unprotected[int64(33)] = cfg.CertChain[0].Raw
+		} else {
+			// Multiple certs: encode as array of bstr
+			var certDERs [][]byte
+			for _, cert := range cfg.CertChain {
+				certDERs = append(certDERs, cert.Raw)
+			}
+			msg.Headers.Unprotected[int64(33)] = certDERs
+		}
+	}
 
 	if err := msg.Sign(rand.Reader, nil, signer); err != nil {
 		return "", fmt.Errorf("COSE signing: %w", err)

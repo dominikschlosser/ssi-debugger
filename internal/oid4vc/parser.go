@@ -26,6 +26,12 @@ import (
 // Parse detects and parses an OID4VCI credential offer or OID4VP authorization request.
 // It returns the request type, the parsed object (CredentialOffer or AuthorizationRequest), and any error.
 func Parse(raw string) (RequestType, any, error) {
+	return ParseWithOptions(raw, ParseOptions{})
+}
+
+// ParseWithOptions is like Parse but accepts options to customize behavior
+// (e.g. a custom request_uri fetcher for request_uri_method=post support).
+func ParseWithOptions(raw string, opts ParseOptions) (RequestType, any, error) {
 	raw = strings.TrimSpace(raw)
 
 	// 1. URI scheme detection
@@ -33,12 +39,12 @@ func Parse(raw string) (RequestType, any, error) {
 		return parseVCIURI(raw)
 	}
 	if strings.HasPrefix(raw, "openid4vp://") || strings.HasPrefix(raw, "haip://") || strings.HasPrefix(raw, "eudi-openid4vp://") {
-		return parseVPURI(raw)
+		return parseVPURI(raw, opts)
 	}
 
 	// 2. HTTPS/HTTP URL
 	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") {
-		return parseHTTPURL(raw)
+		return parseHTTPURL(raw, opts)
 	}
 
 	// 3. JWT (3 dot-separated base64url parts)
@@ -69,16 +75,16 @@ func parseVCIURI(raw string) (RequestType, any, error) {
 }
 
 // parseVPURI parses an openid4vp://, haip://, or eudi-openid4vp:// URI.
-func parseVPURI(raw string) (RequestType, any, error) {
+func parseVPURI(raw string, opts ParseOptions) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return TypeVP, nil, fmt.Errorf("parsing VP URI: %w", err)
 	}
-	return parseVPParams(u.Query())
+	return parseVPParams(u.Query(), opts)
 }
 
 // parseHTTPURL parses an HTTPS/HTTP URL by checking query params.
-func parseHTTPURL(raw string) (RequestType, any, error) {
+func parseHTTPURL(raw string, opts ParseOptions) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return 0, nil, fmt.Errorf("parsing URL: %w", err)
@@ -87,7 +93,7 @@ func parseHTTPURL(raw string) (RequestType, any, error) {
 	if q.Has("credential_offer") || q.Has("credential_offer_uri") {
 		return parseVCIParams(q)
 	}
-	return parseVPParams(q)
+	return parseVPParams(q, opts)
 }
 
 // parseVCIParams extracts a credential offer from URL query parameters.
@@ -153,7 +159,7 @@ func parseVCIJSON(data []byte) (RequestType, any, error) {
 }
 
 // parseVPParams extracts an authorization request from URL query parameters.
-func parseVPParams(q url.Values) (RequestType, any, error) {
+func parseVPParams(q url.Values, opts ParseOptions) (RequestType, any, error) {
 	req := &AuthorizationRequest{
 		FullParams: make(map[string]string),
 	}
@@ -170,10 +176,22 @@ func parseVPParams(q url.Values) (RequestType, any, error) {
 	req.RedirectURI = q.Get("redirect_uri")
 	req.ResponseURI = q.Get("response_uri")
 	req.Scope = q.Get("scope")
+	req.RequestURIMethod = q.Get("request_uri_method") // OID4VP 1.0 §5.10
 
 	// Resolve request_uri (fetch and parse JWT)
 	if requestURI := q.Get("request_uri"); requestURI != "" {
-		fetched, err := format.FetchURL(requestURI)
+		method := req.RequestURIMethod
+		if method == "" {
+			method = "get"
+		}
+
+		var fetched string
+		var err error
+		if opts.FetchRequestURI != nil {
+			fetched, err = opts.FetchRequestURI(requestURI, method)
+		} else {
+			fetched, err = format.FetchURL(requestURI)
+		}
 		if err != nil {
 			return TypeVP, nil, fmt.Errorf("fetching request_uri: %w", err)
 		}

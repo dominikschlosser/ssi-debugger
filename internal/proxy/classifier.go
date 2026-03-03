@@ -56,8 +56,13 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 		return ClassVPAuthRequest
 	}
 
-	// VP Request Object: response body is a JWT
+	// VP Request Object: GET returns a JWT (standard request_uri fetch)
 	if e.Method == "GET" && isJWTBody(e.ResponseBody) {
+		return ClassVPRequestObject
+	}
+	// VP Request Object via POST (request_uri_method=post per OID4VP 1.0 §5.10):
+	// wallet sends wallet_metadata/wallet_nonce, verifier responds with JWT or JWE
+	if e.Method == "POST" && (hasBodyField(e.RequestBody, "wallet_metadata") || hasBodyField(e.RequestBody, "wallet_nonce")) {
 		return ClassVPRequestObject
 	}
 
@@ -110,6 +115,9 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			if v := q.Get("response_uri"); v != "" {
 				decoded["response_uri"] = v
 			}
+			if v := q.Get("request_uri_method"); v != "" {
+				decoded["request_uri_method"] = v
+			}
 			// Parse JSON query params into proper objects
 			if v := q.Get("dcql_query"); v != "" {
 				var m map[string]any
@@ -130,13 +138,50 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 		}
 
 	case ClassVPRequestObject:
-		if header, payload, _, err := format.ParseJWTParts(strings.TrimSpace(e.ResponseBody)); err == nil {
-			decoded["header"] = header
-			decoded["payload"] = payload
-			// Surface the verifier's ephemeral encryption key if present
-			// (used by the wallet to encrypt the JARM response in direct_post.jwt)
-			if jwks, ok := payload["jwks"].(map[string]any); ok {
-				decoded["encryption_jwks"] = jwks
+		responseBody := strings.TrimSpace(e.ResponseBody)
+		if isJWTBody(responseBody) {
+			if header, payload, _, err := format.ParseJWTParts(responseBody); err == nil {
+				decoded["header"] = header
+				decoded["payload"] = payload
+				// Surface the verifier's ephemeral encryption key if present
+				// (used by the wallet to encrypt the JARM response in direct_post.jwt)
+				if jwks, ok := payload["jwks"].(map[string]any); ok {
+					decoded["encryption_jwks"] = jwks
+				}
+				if wn, ok := payload["wallet_nonce"].(string); ok {
+					decoded["wallet_nonce_in_response"] = wn
+				}
+			}
+		} else if isJWE(responseBody) {
+			// Encrypted request object — surface JWE header info
+			headerBytes, err := format.DecodeBase64URL(strings.SplitN(responseBody, ".", 2)[0])
+			if err == nil {
+				var header map[string]any
+				if err := json.Unmarshal(headerBytes, &header); err == nil {
+					decoded["header"] = header
+					decoded["encrypted"] = true
+					if alg, ok := header["alg"].(string); ok {
+						decoded["encryption_alg"] = alg
+					}
+					if enc, ok := header["enc"].(string); ok {
+						decoded["encryption_enc"] = enc
+					}
+				}
+			}
+		}
+		// Surface wallet_metadata and wallet_nonce from POST request body
+		if e.RequestBody != "" {
+			fields := parseFormOrJSON(e.RequestBody)
+			if wm, ok := fields["wallet_metadata"]; ok && wm != "" {
+				var wmObj map[string]any
+				if err := json.Unmarshal([]byte(wm), &wmObj); err == nil {
+					decoded["wallet_metadata"] = wmObj
+				} else {
+					decoded["wallet_metadata"] = wm
+				}
+			}
+			if wn, ok := fields["wallet_nonce"]; ok && wn != "" {
+				decoded["wallet_nonce"] = wn
 			}
 		}
 

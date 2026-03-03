@@ -62,27 +62,29 @@ type NextErrorOverride struct {
 
 // Wallet holds credentials, keys, and manages presentation consent flows.
 type Wallet struct {
-	HolderKey            *ecdsa.PrivateKey
-	IssuerKey            *ecdsa.PrivateKey
-	CAKey                *ecdsa.PrivateKey
-	CertChain            []*x509.Certificate // [leaf, CA] certificate chain
-	AutoAccept           bool
-	SessionTranscript    SessionTranscriptMode // "oid4vp" (default) or "iso"
-	PreferredFormat      string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
-	Credentials          []StoredCredential
-	StatusEntries        map[string]StatusEntry // credential ID → status entry
-	StatusListCounter    int                    // next available status list index
-	BaseURL              string                 // base URL for status list endpoint
-	Requests             map[string]*ConsentRequest
-	TxCode               string `json:"-"` // one-shot tx_code for OID4VCI token request
-	Log                  []LogEntry
-	mu                   sync.RWMutex
-	nextError            *NextErrorOverride
-	subscribers          map[int64]chan *ConsentRequest
-	subID                int64
-	errSubscribers       map[int64]chan WalletError
-	errSubID             int64
-	lastError            *WalletError
+	HolderKey              *ecdsa.PrivateKey
+	IssuerKey              *ecdsa.PrivateKey
+	CAKey                  *ecdsa.PrivateKey
+	CertChain              []*x509.Certificate // [leaf, CA] certificate chain
+	AutoAccept             bool
+	SessionTranscript      SessionTranscriptMode // "oid4vp" (default) or "iso"
+	PreferredFormat        string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
+	RequireEncryptedRequest bool                 // when true, sends encryption keys in wallet_metadata
+	RequestEncryptionKey   *ecdsa.PrivateKey     // key for decrypting encrypted request objects
+	Credentials            []StoredCredential
+	StatusEntries          map[string]StatusEntry // credential ID → status entry
+	StatusListCounter      int                    // next available status list index
+	BaseURL                string                 // base URL for status list endpoint
+	Requests               map[string]*ConsentRequest
+	TxCode                 string `json:"-"` // one-shot tx_code for OID4VCI token request
+	Log                    []LogEntry
+	mu                     sync.RWMutex
+	nextError              *NextErrorOverride
+	subscribers            map[int64]chan *ConsentRequest
+	subID                  int64
+	errSubscribers         map[int64]chan WalletError
+	errSubID               int64
+	lastError              *WalletError
 }
 
 // WalletError is an error event that can be displayed in the UI.

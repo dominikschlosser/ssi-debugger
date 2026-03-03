@@ -1,0 +1,371 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package wallet
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
+)
+
+func TestBuildWalletMetadata_Basic(t *testing.T) {
+	w := &Wallet{}
+	meta := BuildWalletMetadata(w)
+
+	if meta["vp_formats_supported"] == nil {
+		t.Fatal("expected vp_formats_supported")
+	}
+	if meta["request_object_signing_alg_values_supported"] == nil {
+		t.Fatal("expected request_object_signing_alg_values_supported")
+	}
+	// Should not have encryption keys without RequireEncryptedRequest
+	if meta["jwks"] != nil {
+		t.Error("should not include jwks without RequireEncryptedRequest")
+	}
+}
+
+func TestBuildWalletMetadata_WithEncryption(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Wallet{
+		RequireEncryptedRequest: true,
+		RequestEncryptionKey:    key,
+	}
+	meta := BuildWalletMetadata(w)
+
+	jwks, ok := meta["jwks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected jwks map")
+	}
+	keys, ok := jwks["keys"].([]any)
+	if !ok || len(keys) == 0 {
+		t.Fatal("expected at least one key in jwks")
+	}
+	jwk := keys[0].(map[string]any)
+	if jwk["kty"] != "EC" {
+		t.Errorf("expected kty EC, got %s", jwk["kty"])
+	}
+	if jwk["use"] != "enc" {
+		t.Errorf("expected use enc, got %s", jwk["use"])
+	}
+	if jwk["alg"] != "ECDH-ES" {
+		t.Errorf("expected alg ECDH-ES, got %s", jwk["alg"])
+	}
+
+	algSupported := meta["authorization_encryption_alg_values_supported"].([]string)
+	if len(algSupported) != 1 || algSupported[0] != "ECDH-ES" {
+		t.Errorf("unexpected alg_values_supported: %v", algSupported)
+	}
+	encSupported := meta["authorization_encryption_enc_values_supported"].([]string)
+	if len(encSupported) != 2 {
+		t.Errorf("expected 2 enc values, got %d", len(encSupported))
+	}
+}
+
+func TestGenerateWalletNonce(t *testing.T) {
+	nonce1, err := GenerateWalletNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonce1 == "" {
+		t.Fatal("expected non-empty nonce")
+	}
+
+	nonce2, err := GenerateWalletNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonce1 == nonce2 {
+		t.Error("expected unique nonces")
+	}
+}
+
+func TestMakeFetchRequestURI_GET(t *testing.T) {
+	// Set up a test server that returns a JWT on GET
+	jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		"client_id":     "test-client",
+		"response_type": "vp_token",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	w := &Wallet{}
+	fetch := MakeFetchRequestURI(w, nil)
+	result, err := fetch(srv.URL, "get")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != jwt {
+		t.Errorf("expected JWT, got %s", result)
+	}
+}
+
+func TestMakeFetchRequestURI_POST(t *testing.T) {
+	// Set up a test server that expects POST with wallet_metadata and wallet_nonce
+	var receivedContentType string
+	var receivedWalletMetadata string
+	var receivedWalletNonce string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		receivedContentType = r.Header.Get("Content-Type")
+		r.ParseForm()
+		receivedWalletMetadata = r.Form.Get("wallet_metadata")
+		receivedWalletNonce = r.Form.Get("wallet_nonce")
+
+		// Return JWT that includes the wallet_nonce
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id":     "test-client",
+			"response_type": "vp_token",
+			"wallet_nonce":  receivedWalletNonce,
+		})
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	wallet := &Wallet{}
+	var logs []string
+	logFn := func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+
+	fetch := MakeFetchRequestURI(wallet, logFn)
+	result, err := fetch(srv.URL, "post")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if receivedContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("expected form-urlencoded content type, got %s", receivedContentType)
+	}
+	if receivedWalletMetadata == "" {
+		t.Error("expected wallet_metadata to be sent")
+	}
+	if receivedWalletNonce == "" {
+		t.Error("expected wallet_nonce to be sent")
+	}
+
+	// Verify wallet_metadata is valid JSON
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(receivedWalletMetadata), &meta); err != nil {
+		t.Errorf("wallet_metadata is not valid JSON: %v", err)
+	}
+
+	if !isJWT(result) {
+		t.Error("expected JWT result")
+	}
+}
+
+func TestMakeFetchRequestURI_POST_WalletNonceMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return JWT with wrong wallet_nonce
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id":    "test-client",
+			"wallet_nonce": "wrong-nonce",
+		})
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	wallet := &Wallet{}
+	fetch := MakeFetchRequestURI(wallet, nil)
+	_, err := fetch(srv.URL, "post")
+	if err == nil {
+		t.Fatal("expected error for wallet_nonce mismatch")
+	}
+	if !contains(err.Error(), "wallet_nonce mismatch") {
+		t.Errorf("expected wallet_nonce mismatch error, got: %v", err)
+	}
+}
+
+func TestDecryptRequestObjectJWE(t *testing.T) {
+	// Generate wallet encryption key
+	walletKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a JWT payload
+	jwt := makeTestJWT(map[string]any{"alg": "ES256", "typ": "oauth-authz-req+jwt"}, map[string]any{
+		"client_id":     "test-verifier",
+		"response_type": "vp_token",
+		"nonce":         "test-nonce",
+	})
+
+	// Encrypt the JWT using the wallet's public key (simulating verifier behavior)
+	jweStr, _, err := EncryptJWE([]byte(jwt), &walletKey.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Decrypt with wallet's private key
+	decrypted, err := DecryptRequestObjectJWE(jweStr, walletKey)
+	if err != nil {
+		t.Fatalf("DecryptRequestObjectJWE: %v", err)
+	}
+
+	if decrypted != jwt {
+		t.Errorf("decrypted JWT doesn't match original")
+	}
+}
+
+func TestMakeFetchRequestURI_POST_Encrypted(t *testing.T) {
+	walletKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wallet := &Wallet{
+		RequireEncryptedRequest: true,
+		RequestEncryptionKey:    walletKey,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		walletNonce := r.Form.Get("wallet_nonce")
+		walletMetaStr := r.Form.Get("wallet_metadata")
+
+		// Parse wallet_metadata to get the encryption key
+		var meta map[string]any
+		json.Unmarshal([]byte(walletMetaStr), &meta)
+		jwks := meta["jwks"].(map[string]any)
+		keys := jwks["keys"].([]any)
+		jwk := keys[0].(map[string]any)
+
+		// Build the public key from the JWK
+		xB64 := jwk["x"].(string)
+		yB64 := jwk["y"].(string)
+		pubKey, err := ecdsaPublicKeyFromJWK(xB64, yB64)
+		if err != nil {
+			t.Fatalf("parsing wallet encryption key: %v", err)
+		}
+
+		// Create a JWT with the wallet_nonce
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
+			"client_id":     "test-verifier",
+			"response_type": "vp_token",
+			"wallet_nonce":  walletNonce,
+		})
+
+		// Encrypt the JWT with the wallet's public key
+		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "verifier-kid", "ECDH-ES", "A128GCM", nil)
+		if err != nil {
+			t.Fatalf("encrypting request object: %v", err)
+		}
+
+		w.Write([]byte(jweStr))
+	}))
+	defer srv.Close()
+
+	fetch := MakeFetchRequestURI(wallet, nil)
+	result, err := fetch(srv.URL, "post")
+	if err != nil {
+		t.Fatalf("fetch with encrypted response: %v", err)
+	}
+
+	if !isJWT(result) {
+		t.Error("expected decrypted JWT result")
+	}
+
+	// Verify the JWT content
+	_, payload, _, err := format.ParseJWTParts(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["client_id"] != "test-verifier" {
+		t.Errorf("unexpected client_id in decrypted JWT: %v", payload["client_id"])
+	}
+}
+
+func TestParseWithOptionsRequestURIMethodPost(t *testing.T) {
+	// Set up a test server that returns a JWT on POST
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		walletNonce := r.Form.Get("wallet_nonce")
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id":     "test-client",
+			"response_type": "vp_token",
+			"nonce":         "verifier-nonce",
+			"wallet_nonce":  walletNonce,
+		})
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	wallet := &Wallet{}
+	opts := oid4vc.ParseOptions{
+		FetchRequestURI: MakeFetchRequestURI(wallet, nil),
+	}
+
+	uri := fmt.Sprintf("openid4vp://authorize?client_id=test-client&request_uri=%s&request_uri_method=post&response_type=vp_token",
+		srv.URL)
+
+	authReq, err := ParseAuthorizationRequestWithOptions(uri, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if authReq.ClientID != "test-client" {
+		t.Errorf("expected client_id test-client, got %s", authReq.ClientID)
+	}
+	if authReq.RequestURIMethod != "post" {
+		t.Errorf("expected request_uri_method post, got %s", authReq.RequestURIMethod)
+	}
+	if authReq.RequestObject == nil {
+		t.Fatal("expected request object to be parsed")
+	}
+	if authReq.Nonce != "verifier-nonce" {
+		t.Errorf("expected nonce from request object, got %s", authReq.Nonce)
+	}
+}
+
+// makeTestJWT creates a minimal unsigned JWT for testing.
+func makeTestJWT(header, payload map[string]any) string {
+	h, _ := json.Marshal(header)
+	p, _ := json.Marshal(payload)
+	return format.EncodeBase64URL(h) + "." + format.EncodeBase64URL(p) + ".testsig"
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+}
+
+func containsStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

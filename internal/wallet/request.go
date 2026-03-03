@@ -24,9 +24,15 @@ import (
 
 // ParseAuthorizationRequest parses an OID4VP authorization request from a URI or query params.
 func ParseAuthorizationRequest(raw string) (*oid4vc.AuthorizationRequest, error) {
+	return ParseAuthorizationRequestWithOptions(raw, oid4vc.ParseOptions{})
+}
+
+// ParseAuthorizationRequestWithOptions is like ParseAuthorizationRequest but accepts
+// ParseOptions for custom behavior (e.g. request_uri_method=post with wallet_metadata).
+func ParseAuthorizationRequestWithOptions(raw string, opts oid4vc.ParseOptions) (*oid4vc.AuthorizationRequest, error) {
 	raw = strings.TrimSpace(raw)
 
-	reqType, result, err := oid4vc.Parse(raw)
+	reqType, result, err := oid4vc.ParseWithOptions(raw, opts)
 	if err != nil {
 		return nil, fmt.Errorf("parsing authorization request: %w", err)
 	}

@@ -22,6 +22,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ type Server struct {
 	onConsentRequest func(req *ConsentRequest)
 	logFunc          func(format string, args ...any)
 	httpSrv          *http.Server
+	parseOpts        oid4vc.ParseOptions
 }
 
 // NewServer creates a new wallet HTTP server.
@@ -49,6 +51,13 @@ func NewServer(w *Wallet, port int, onSave func()) *Server {
 	s := &Server{wallet: w, port: port, onSave: onSave}
 	s.mux = http.NewServeMux()
 	s.setupRoutes()
+	// Set up ParseOptions with wallet-aware request_uri fetcher.
+	// The logFunc is captured lazily so it works even if SetLogger is called after NewServer.
+	s.parseOpts = oid4vc.ParseOptions{
+		FetchRequestURI: MakeFetchRequestURI(w, func(format string, args ...any) {
+			s.log(format, args...)
+		}),
+	}
 	return s
 }
 
@@ -144,13 +153,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if r.Method == "GET" {
-		authReq, err = parseAuthParams(r.URL.Query())
+		authReq, err = parseAuthParams(r.URL.Query(), s.parseOpts)
 	} else {
 		if parseErr := r.ParseForm(); parseErr != nil {
 			http.Error(w, "invalid form data", http.StatusBadRequest)
 			return
 		}
-		authReq, err = parseAuthParams(r.Form)
+		authReq, err = parseAuthParams(r.Form, s.parseOpts)
 	}
 
 	if err != nil {
@@ -176,7 +185,7 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	uriDisplay := format.Truncate(body.URI, 120)
 	s.log("  URI: %s", uriDisplay)
 
-	parsed, err := ParseAuthorizationRequest(body.URI)
+	parsed, err := ParseAuthorizationRequestWithOptions(body.URI, s.parseOpts)
 	if err != nil {
 		s.log("  ERROR: %v", err)
 		s.wallet.AddLog("presentation", fmt.Sprintf("Failed to parse request: %v", err), false)
@@ -196,6 +205,9 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	s.log("  Response URI:  %s", parsed.ResponseURI)
 	if parsed.Nonce != "" {
 		s.log("  Nonce:         %s", parsed.Nonce)
+	}
+	if parsed.RequestURIMethod != "" {
+		s.log("  Request URI Method: %s", parsed.RequestURIMethod)
 	}
 
 	parsedResponseURI := parsed.ResponseURI
@@ -743,7 +755,7 @@ type AuthorizationRequestParams struct {
 }
 
 // parseAuthParams extracts authorization request params from URL values.
-func parseAuthParams(values map[string][]string) (*AuthorizationRequestParams, error) {
+func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions) (*AuthorizationRequestParams, error) {
 	get := func(key string) string {
 		if vs, ok := values[key]; ok && len(vs) > 0 {
 			return vs[0]
@@ -770,9 +782,18 @@ func parseAuthParams(values map[string][]string) (*AuthorizationRequestParams, e
 		params.DCQLQuery = query
 	}
 
-	// If request_uri is present, fetch and parse it
+	// If request_uri is present, build a synthetic openid4vp:// URI with all
+	// params so the parser can handle request_uri_method and fetch the JWT.
 	if requestURI := get("request_uri"); requestURI != "" {
-		parsed, err := ParseAuthorizationRequest(requestURI)
+		syntheticParams := url.Values{}
+		for k, vs := range values {
+			if len(vs) > 0 {
+				syntheticParams.Set(k, vs[0])
+			}
+		}
+		syntheticURI := "openid4vp://authorize?" + syntheticParams.Encode()
+
+		parsed, err := ParseAuthorizationRequestWithOptions(syntheticURI, opts)
 		if err != nil {
 			log.Printf("[Wallet] Failed to parse request_uri %q: %v", requestURI, err)
 		} else {
@@ -805,7 +826,7 @@ func parseAuthParams(values map[string][]string) (*AuthorizationRequestParams, e
 
 	// If request (JWT) is present, parse it
 	if requestJWT := get("request"); requestJWT != "" {
-		parsed, err := ParseAuthorizationRequest(requestJWT)
+		parsed, err := ParseAuthorizationRequestWithOptions(requestJWT, opts)
 		if err != nil {
 			log.Printf("[Wallet] Failed to parse request JWT: %v", err)
 		} else {

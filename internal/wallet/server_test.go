@@ -1002,6 +1002,205 @@ func TestOnConsentRequest_NotCalledOnAutoAccept(t *testing.T) {
 	}
 }
 
+func TestPresentationFlow_RequestURIMethodPost(t *testing.T) {
+	w := generateTestWallet(t)
+	w.AutoAccept = true
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	// Create a mock verifier that receives the VP token
+	var receivedVPToken string
+	verifier := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		parsed, _ := url.ParseQuery(string(body))
+		receivedVPToken = parsed.Get("vp_token")
+		rw.Header().Set("Content-Type", "application/json")
+		rw.Write([]byte(`{}`))
+	}))
+	defer verifier.Close()
+
+	// Create a mock request_uri endpoint that expects POST with wallet_metadata/wallet_nonce
+	var receivedMethod string
+	var receivedWalletMeta string
+	var receivedWalletNonce string
+	requestURIServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		r.ParseForm()
+		receivedWalletMeta = r.Form.Get("wallet_metadata")
+		receivedWalletNonce = r.Form.Get("wallet_nonce")
+
+		dcqlQuery := map[string]any{
+			"credentials": []any{
+				map[string]any{
+					"id":     "pid",
+					"format": "dc+sd-jwt",
+					"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+					"claims": []any{map[string]any{"path": []any{"given_name"}}},
+				},
+			},
+		}
+		dcqlJSON, _ := json.Marshal(dcqlQuery)
+
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id":     "https://verifier.example",
+			"response_type": "vp_token",
+			"response_mode": "direct_post",
+			"nonce":         "test-nonce",
+			"state":         "test-state",
+			"response_uri":  verifier.URL,
+			"dcql_query":    json.RawMessage(dcqlJSON),
+			"wallet_nonce":  receivedWalletNonce,
+		})
+		rw.Write([]byte(jwt))
+	}))
+	defer requestURIServer.Close()
+
+	// Send request with request_uri and request_uri_method=post
+	params := url.Values{
+		"client_id":          {"https://verifier.example"},
+		"response_type":      {"vp_token"},
+		"request_uri":        {requestURIServer.URL},
+		"request_uri_method": {"post"},
+	}
+
+	req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify request_uri endpoint was called with POST
+	if receivedMethod != "POST" {
+		t.Errorf("expected POST to request_uri, got %s", receivedMethod)
+	}
+	if receivedWalletMeta == "" {
+		t.Error("expected wallet_metadata in POST body")
+	}
+	if receivedWalletNonce == "" {
+		t.Error("expected wallet_nonce in POST body")
+	}
+
+	// Verify wallet_metadata is valid JSON with expected fields
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(receivedWalletMeta), &meta); err != nil {
+		t.Fatalf("wallet_metadata not valid JSON: %v", err)
+	}
+	if meta["vp_formats_supported"] == nil {
+		t.Error("expected vp_formats_supported in wallet_metadata")
+	}
+
+	// Verify the verifier received the VP token
+	if receivedVPToken == "" {
+		t.Fatal("verifier did not receive VP token")
+	}
+}
+
+func TestPresentationFlow_RequestURIMethodPost_Encrypted(t *testing.T) {
+	encKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := generateTestWallet(t)
+	w.AutoAccept = true
+	w.RequireEncryptedRequest = true
+	w.RequestEncryptionKey = encKey
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	// Create a mock verifier that receives the VP token
+	var receivedVPToken string
+	verifier := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		parsed, _ := url.ParseQuery(string(body))
+		receivedVPToken = parsed.Get("vp_token")
+		rw.Header().Set("Content-Type", "application/json")
+		rw.Write([]byte(`{}`))
+	}))
+	defer verifier.Close()
+
+	// Mock request_uri endpoint: reads wallet encryption key from wallet_metadata,
+	// encrypts the request object JWT as JWE
+	requestURIServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		walletMetaStr := r.Form.Get("wallet_metadata")
+		walletNonce := r.Form.Get("wallet_nonce")
+
+		// Parse wallet_metadata to get encryption key
+		var meta map[string]any
+		json.Unmarshal([]byte(walletMetaStr), &meta)
+		jwks := meta["jwks"].(map[string]any)
+		keys := jwks["keys"].([]any)
+		jwk := keys[0].(map[string]any)
+		pubKey, err := ecdsaPublicKeyFromJWK(jwk["x"].(string), jwk["y"].(string))
+		if err != nil {
+			t.Fatalf("parsing wallet key: %v", err)
+		}
+
+		dcqlQuery := map[string]any{
+			"credentials": []any{
+				map[string]any{
+					"id":     "pid",
+					"format": "dc+sd-jwt",
+					"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+					"claims": []any{map[string]any{"path": []any{"given_name"}}},
+				},
+			},
+		}
+		dcqlJSON, _ := json.Marshal(dcqlQuery)
+
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
+			"client_id":     "https://verifier.example",
+			"response_type": "vp_token",
+			"response_mode": "direct_post",
+			"nonce":         "test-nonce",
+			"state":         "test-state",
+			"response_uri":  verifier.URL,
+			"dcql_query":    json.RawMessage(dcqlJSON),
+			"wallet_nonce":  walletNonce,
+		})
+
+		// Encrypt the JWT with the wallet's public key
+		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "kid", "ECDH-ES", "A128GCM", nil)
+		if err != nil {
+			t.Fatalf("encrypting request object: %v", err)
+		}
+		rw.Write([]byte(jweStr))
+	}))
+	defer requestURIServer.Close()
+
+	params := url.Values{
+		"client_id":          {"https://verifier.example"},
+		"response_type":      {"vp_token"},
+		"request_uri":        {requestURIServer.URL},
+		"request_uri_method": {"post"},
+	}
+
+	req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	result := decodeJSON(t, rec)
+	if result["status"] != "submitted" {
+		t.Errorf("expected status 'submitted', got %v", result["status"])
+	}
+
+	// Verify the verifier received the VP token (wallet successfully decrypted the JWE)
+	if receivedVPToken == "" {
+		t.Fatal("verifier did not receive VP token — wallet failed to decrypt JWE request object")
+	}
+}
+
 // --- Helper ---
 
 func generateSDJWTForTest(t *testing.T, srv *Server) string {

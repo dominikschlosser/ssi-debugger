@@ -107,19 +107,20 @@ func loadWallet() (*wallet.Wallet, *wallet.WalletStore, error) {
 
 func walletServeCmd() *cobra.Command {
 	var (
-		port              int
-		autoAccept        bool
-		credFiles         []string
-		pid               bool
-		keyPath           string
-		issuerKey         string
-		sessionTranscript string
-		register          bool
-		noRegister        bool
-		statusList        bool
-		baseURL           string
-		docker            bool
-		preferredFormat   string
+		port                    int
+		autoAccept              bool
+		credFiles               []string
+		pid                     bool
+		keyPath                 string
+		issuerKey               string
+		sessionTranscript       string
+		register                bool
+		noRegister              bool
+		statusList              bool
+		baseURL                 string
+		docker                  bool
+		preferredFormat         string
+		requireEncryptedRequest bool
 	)
 
 	cmd := &cobra.Command{
@@ -169,6 +170,15 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			if preferredFormat != "" {
 				w.PreferredFormat = preferredFormat
+			}
+
+			if requireEncryptedRequest {
+				encKey, err := mock.GenerateKey()
+				if err != nil {
+					return fmt.Errorf("generating request encryption key: %w", err)
+				}
+				w.RequireEncryptedRequest = true
+				w.RequestEncryptionKey = encKey
 			}
 
 			if statusList {
@@ -226,6 +236,9 @@ so the wallet automatically receives incoming protocol requests.`,
 			}
 			if w.BaseURL != "" {
 				fmt.Printf("  Status List: %s/api/statuslist\n", w.BaseURL)
+			}
+			if w.RequireEncryptedRequest {
+				fmt.Printf("  Encrypted:   request object encryption required\n")
 			}
 
 			// Register URL scheme handlers if requested
@@ -291,6 +304,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")
 	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for --base-url")
 	cmd.Flags().StringVar(&preferredFormat, "preferred-format", "", "Preferred credential format when multiple match: 'dc+sd-jwt', 'mso_mdoc', or 'jwt_vc_json'")
+	cmd.Flags().BoolVar(&requireEncryptedRequest, "require-encrypted-request", false, "Require verifiers to encrypt request objects (sends encryption key in wallet_metadata)")
 	return cmd
 }
 

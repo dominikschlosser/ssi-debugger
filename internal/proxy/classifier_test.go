@@ -1088,3 +1088,62 @@ func TestClassifyVPAuthResponseWithDebugKey(t *testing.T) {
 		t.Errorf("expected vp_token=decrypted-token, got %v", responsePayload["vp_token"])
 	}
 }
+
+func TestClassifyPOSTRequestObjectWithWalletMetadata(t *testing.T) {
+	// POST with wallet_metadata and wallet_nonce should be classified as ClassVPRequestObject
+	jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		"client_id":    "verifier",
+		"wallet_nonce": "test-nonce",
+	})
+
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/request_uri",
+		RequestBody: "wallet_metadata=%7B%22vp_formats_supported%22%3A%7B%7D%7D&wallet_nonce=test-nonce",
+		ResponseBody: jwt,
+		StatusCode:  200,
+	}
+	Classify(e)
+
+	if e.Class != ClassVPRequestObject {
+		t.Errorf("expected ClassVPRequestObject, got %d (%s)", e.Class, e.ClassLabel)
+	}
+
+	// wallet_nonce should be surfaced in decoded
+	if e.Decoded["wallet_nonce"] != "test-nonce" {
+		t.Errorf("expected wallet_nonce=test-nonce, got %v", e.Decoded["wallet_nonce"])
+	}
+
+	// wallet_metadata should be parsed as JSON object
+	if e.Decoded["wallet_metadata"] == nil {
+		t.Error("expected wallet_metadata in decoded")
+	}
+
+	// wallet_nonce_in_response should be surfaced from JWT payload
+	if e.Decoded["wallet_nonce_in_response"] != "test-nonce" {
+		t.Errorf("expected wallet_nonce_in_response=test-nonce, got %v", e.Decoded["wallet_nonce_in_response"])
+	}
+}
+
+func TestClassifyVPAuthRequestWithRequestURIMethod(t *testing.T) {
+	e := &TrafficEntry{
+		Method:     "GET",
+		URL:        "http://example.com/authorize?client_id=verifier&response_type=vp_token&request_uri=https%3A%2F%2Fexample.com%2Frequest&request_uri_method=post",
+		StatusCode: 302,
+	}
+	Classify(e)
+
+	if e.Class != ClassVPAuthRequest {
+		t.Errorf("expected ClassVPAuthRequest, got %d (%s)", e.Class, e.ClassLabel)
+	}
+
+	if e.Decoded["request_uri_method"] != "post" {
+		t.Errorf("expected request_uri_method=post, got %v", e.Decoded["request_uri_method"])
+	}
+}
+
+func makeTestJWT(header, payload map[string]any) string {
+	h, _ := json.Marshal(header)
+	p, _ := json.Marshal(payload)
+	return format.EncodeBase64URL(h) + "." + format.EncodeBase64URL(p) + ".testsig"
+}

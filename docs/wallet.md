@@ -105,6 +105,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--status-list`         | `false`  | Embed status list references in generated credentials |
 | `--base-url`            | —        | Base URL for status list endpoint (default: `http://localhost:<port>`) |
 | `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` for `--base-url` |
+| `--require-encrypted-request` | `false` | Require verifiers to encrypt request objects (sends encryption key in `wallet_metadata`) |
 
 ## `wallet accept <uri>`
 
@@ -307,6 +308,32 @@ curl -X POST http://localhost:8085/api/credentials/<id>/status \
 ```
 
 The status list JWT is served at `GET /api/statuslist`.
+
+### Encrypted request objects (`request_uri_method=post`)
+
+OID4VP 1.0 Section 5.10 defines an optional mechanism where the wallet POSTs its capabilities and an encryption key to the verifier's `request_uri` endpoint, instead of using a plain GET. This allows the verifier to encrypt the request object so that only the wallet can read it.
+
+**Note:** This is an OID4VP 1.0 feature. HAIP 1.0 does not mention `wallet_metadata`, `wallet_nonce`, or `request_uri_method`. Use this to test verifiers that support the optional encrypted request object flow.
+
+Enable with `--require-encrypted-request`:
+
+```bash
+oid4vc-dev wallet serve --auto-accept --pid --require-encrypted-request
+```
+
+When enabled, the wallet:
+
+1. Generates an ECDSA P-256 encryption key at startup
+2. When `request_uri_method=post` is set in the authorization request, POSTs to the `request_uri` with:
+   - `wallet_metadata` — JSON object containing `vp_formats_supported`, `request_object_signing_alg_values_supported`, and `jwks` with the wallet's public encryption key
+   - `wallet_nonce` — base64url-encoded random nonce for replay protection
+3. Expects the verifier to encrypt the request object as a JWE (ECDH-ES + A128GCM or A256GCM) using the wallet's public key
+4. Decrypts the received JWE to extract the signed JWT request object
+5. Validates that `wallet_nonce` in the response matches the one sent
+
+The proxy dashboard surfaces `request_uri_method`, `wallet_metadata`, and `wallet_nonce` in the decoded traffic view when these fields are present.
+
+Without `--require-encrypted-request`, the wallet still supports `request_uri_method=post` (sending `wallet_metadata` without encryption keys and validating `wallet_nonce`), but does not include encryption keys or attempt JWE decryption.
 
 ### Example: E2E test flow
 

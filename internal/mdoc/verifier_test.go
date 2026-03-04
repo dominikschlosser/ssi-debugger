@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/veraison/go-cose"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
@@ -127,6 +129,132 @@ func TestVerify(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCoseAlgName(t *testing.T) {
+	tests := []struct {
+		id   int64
+		want string
+	}{
+		{-7, "ES256"},
+		{-35, "ES384"},
+		{-36, "ES512"},
+		{-37, "PS256"},
+		{-257, "RS256"},
+		{0, "unknown(0)"},
+		{42, "unknown(42)"},
+	}
+	for _, tt := range tests {
+		got := coseAlgName(tt.id)
+		if got != tt.want {
+			t.Errorf("coseAlgName(%d) = %q, want %q", tt.id, got, tt.want)
+		}
+	}
+}
+
+func TestCoseAlgorithm(t *testing.T) {
+	tests := []struct {
+		name   string
+		want   cose.Algorithm
+		wantOK bool
+	}{
+		{"ES256", cose.AlgorithmES256, true},
+		{"ES384", cose.AlgorithmES384, true},
+		{"ES512", cose.AlgorithmES512, true},
+		{"PS256", cose.AlgorithmPS256, true},
+		{"RS256", 0, false},
+		{"es256", 0, false},
+		{"", 0, false},
+	}
+	for _, tt := range tests {
+		got, ok := coseAlgorithm(tt.name)
+		if ok != tt.wantOK || got != tt.want {
+			t.Errorf("coseAlgorithm(%q) = (%v, %v), want (%v, %v)", tt.name, got, ok, tt.want, tt.wantOK)
+		}
+	}
+}
+
+func TestConvertCBORMapToStringKeys(t *testing.T) {
+	m := map[any]any{
+		"str_key": "value1",
+		42:        "value2",
+		true:      "value3",
+	}
+	result := convertCBORMapToStringKeys(m)
+
+	if result["str_key"] != "value1" {
+		t.Errorf("expected str_key=value1, got %v", result["str_key"])
+	}
+	if result["42"] != "value2" {
+		t.Errorf("expected 42=value2, got %v", result["42"])
+	}
+	if result["true"] != "value3" {
+		t.Errorf("expected true=value3, got %v", result["true"])
+	}
+}
+
+func TestConvertCBORValue(t *testing.T) {
+	// Scalar passthrough
+	if got := convertCBORValue("hello"); got != "hello" {
+		t.Errorf("expected string passthrough, got %v", got)
+	}
+	if got := convertCBORValue(42); got != 42 {
+		t.Errorf("expected int passthrough, got %v", got)
+	}
+	if got := convertCBORValue(nil); got != nil {
+		t.Errorf("expected nil passthrough, got %v", got)
+	}
+
+	// Array conversion
+	arr := convertCBORValue([]any{"a", "b"})
+	if result, ok := arr.([]any); !ok || len(result) != 2 {
+		t.Errorf("expected 2-element array, got %v", arr)
+	}
+
+	// Nested map conversion
+	nested := convertCBORValue(map[any]any{1: "one"})
+	if m, ok := nested.(map[string]any); !ok || m["1"] != "one" {
+		t.Errorf("expected map with string keys, got %v", nested)
+	}
+}
+
+func TestDecodeCBOR(t *testing.T) {
+	// Valid CBOR-encoded integer (0x18 0x2A = unsigned integer 42)
+	got, err := decodeCBOR([]byte{0x18, 0x2a})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != int64(42) {
+		t.Errorf("expected 42, got %v (%T)", got, got)
+	}
+
+	// Invalid CBOR
+	_, err = decodeCBOR([]byte{0xff, 0xff})
+	if err == nil {
+		t.Error("expected error for invalid CBOR")
+	}
+}
+
+func TestParseDeviceSigned(t *testing.T) {
+	// With deviceAuth
+	ds := map[any]any{
+		"deviceAuth": map[any]any{
+			"key": "value",
+		},
+	}
+	result := parseDeviceSigned(ds)
+	if result.DeviceAuth == nil {
+		t.Fatal("expected DeviceAuth to be set")
+	}
+	if result.DeviceAuth["key"] != "value" {
+		t.Errorf("expected key=value, got %v", result.DeviceAuth["key"])
+	}
+
+	// Without deviceAuth
+	result2 := parseDeviceSigned(map[any]any{})
+	if result2.DeviceAuth != nil {
+		t.Errorf("expected nil DeviceAuth, got %v", result2.DeviceAuth)
 	}
 }
 

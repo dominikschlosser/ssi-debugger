@@ -230,3 +230,140 @@ func TestParse_ArrayDisclosure(t *testing.T) {
 		t.Errorf("Name = %q, want empty", d.Name)
 	}
 }
+
+func TestResolveArray(t *testing.T) {
+	disc := &Disclosure{
+		Name:         "",
+		Value:        "resolved-value",
+		IsArrayEntry: true,
+		Digest:       "abc123",
+	}
+	digestMap := map[string]*Disclosure{
+		"abc123": disc,
+	}
+
+	// Array with a matching digest reference
+	arr := []any{
+		map[string]any{"...": "abc123"},
+		"plain-value",
+	}
+	result := resolveArray(arr, digestMap)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(result))
+	}
+	if result[0] != "resolved-value" {
+		t.Errorf("expected resolved-value, got %v", result[0])
+	}
+	if result[1] != "plain-value" {
+		t.Errorf("expected plain-value, got %v", result[1])
+	}
+
+	// Unresolved digest reference (not in map)
+	arr2 := []any{
+		map[string]any{"...": "unknown"},
+	}
+	result2 := resolveArray(arr2, digestMap)
+	if len(result2) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result2))
+	}
+	// Should be passed through as-is (map)
+	if _, ok := result2[0].(map[string]any); !ok {
+		t.Errorf("expected map passthrough, got %T", result2[0])
+	}
+
+	// Non-array-entry digest (IsArrayEntry=false) — not resolved as array element
+	nonArrayDisc := &Disclosure{
+		Name:         "test",
+		Value:        "val",
+		IsArrayEntry: false,
+		Digest:       "def456",
+	}
+	digestMap2 := map[string]*Disclosure{
+		"def456": nonArrayDisc,
+	}
+	arr3 := []any{map[string]any{"...": "def456"}}
+	result3 := resolveArray(arr3, digestMap2)
+	if _, ok := result3[0].(map[string]any); !ok {
+		t.Errorf("expected map passthrough for non-array disclosure, got %T", result3[0])
+	}
+
+	// Empty array
+	result4 := resolveArray([]any{}, digestMap)
+	if len(result4) != 0 {
+		t.Errorf("expected empty result, got %d items", len(result4))
+	}
+}
+
+func TestCheckFullyUndisclosedChildren(t *testing.T) {
+	// No warnings for simple disclosures
+	warnings := checkFullyUndisclosedChildren([]Disclosure{
+		{Name: "name", Value: "Max", Digest: "d1"},
+	})
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+
+	// Warning: array with all undisclosed elements
+	warnings = checkFullyUndisclosedChildren([]Disclosure{
+		{
+			Name: "addresses",
+			Value: []any{
+				map[string]any{"...": "unknown_digest1"},
+				map[string]any{"...": "unknown_digest2"},
+			},
+			Digest: "d1",
+		},
+	})
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d", len(warnings))
+	}
+
+	// No warning: array with some disclosed elements
+	warnings = checkFullyUndisclosedChildren([]Disclosure{
+		{
+			Name:   "addresses",
+			Value:  []any{"visible_value"},
+			Digest: "d1",
+		},
+	})
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for partially disclosed array, got %v", warnings)
+	}
+
+	// Warning: map with all undisclosed sub-claims
+	warnings = checkFullyUndisclosedChildren([]Disclosure{
+		{
+			Name: "address",
+			Value: map[string]any{
+				"_sd": []any{"unknown_digest1", "unknown_digest2"},
+			},
+			Digest: "d1",
+		},
+	})
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning for fully undisclosed map, got %d", len(warnings))
+	}
+
+	// No warning: map with visible claims besides _sd
+	warnings = checkFullyUndisclosedChildren([]Disclosure{
+		{
+			Name: "address",
+			Value: map[string]any{
+				"_sd":  []any{"unknown"},
+				"city": "Berlin",
+			},
+			Digest: "d1",
+		},
+	})
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for map with visible claims, got %v", warnings)
+	}
+
+	// Array entries should be skipped
+	warnings = checkFullyUndisclosedChildren([]Disclosure{
+		{IsArrayEntry: true, Value: []any{map[string]any{"...": "x"}}, Digest: "d1"},
+	})
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for array entries, got %v", warnings)
+	}
+}

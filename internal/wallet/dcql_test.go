@@ -538,3 +538,90 @@ func TestFilterClaims(t *testing.T) {
 		t.Error("family_name should not be in filtered claims")
 	}
 }
+
+func TestClaimKeyFromPath(t *testing.T) {
+	sdCred := StoredCredential{
+		Format: "dc+sd-jwt",
+		Claims: map[string]any{
+			"given_name": "Max",
+			"address": map[string]any{
+				"street_address": "123 Main St",
+				"city":           "Berlin",
+			},
+			"nationalities": []any{"DE", "FR"},
+		},
+	}
+	mdocCred := StoredCredential{
+		Format: "mso_mdoc",
+		Claims: map[string]any{
+			"eu.europa.ec.eudi.pid.1:given_name": "Max",
+		},
+	}
+
+	tests := []struct {
+		name string
+		cred StoredCredential
+		path []any
+		want string
+	}{
+		{"empty path", sdCred, []any{}, ""},
+		{"sd-jwt simple", sdCred, []any{"given_name"}, "given_name"},
+		{"sd-jwt missing", sdCred, []any{"missing"}, ""},
+		{"sd-jwt nested object", sdCred, []any{"address", "street_address"}, "address"},
+		{"sd-jwt nested missing key", sdCred, []any{"address", "zipcode"}, ""},
+		{"sd-jwt nested non-map", sdCred, []any{"given_name", "sub"}, ""},
+		{"sd-jwt array index", sdCred, []any{"nationalities", float64(0)}, "nationalities"},
+		{"sd-jwt array oob", sdCred, []any{"nationalities", float64(5)}, ""},
+		{"sd-jwt array negative", sdCred, []any{"nationalities", float64(-1)}, ""},
+		{"sd-jwt array non-array", sdCred, []any{"given_name", float64(0)}, ""},
+		{"sd-jwt array wildcard", sdCred, []any{"nationalities", nil}, "nationalities"},
+		{"sd-jwt wildcard non-array", sdCred, []any{"given_name", nil}, ""},
+		{"sd-jwt non-string first", sdCred, []any{42}, ""},
+		{"sd-jwt unknown second type", sdCred, []any{"given_name", true}, ""},
+		{"mdoc valid", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "given_name"}, "eu.europa.ec.eudi.pid.1:given_name"},
+		{"mdoc missing", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "missing"}, ""},
+		{"mdoc short path", mdocCred, []any{"eu.europa.ec.eudi.pid.1"}, ""},
+		{"mdoc non-string ns", mdocCred, []any{42, "given_name"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := claimKeyFromPath(tt.cred, tt.path)
+			if got != tt.want {
+				t.Errorf("claimKeyFromPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectArrayDigests(t *testing.T) {
+	digests := make(map[string]bool)
+
+	// Array with digest references
+	collectArrayDigests([]any{
+		map[string]any{"...": "digest1"},
+		map[string]any{"...": "digest2"},
+		"plain",
+		map[string]any{"other": "value"},
+	}, digests)
+
+	if !digests["digest1"] || !digests["digest2"] {
+		t.Errorf("expected digest1 and digest2, got %v", digests)
+	}
+	if len(digests) != 2 {
+		t.Errorf("expected 2 digests, got %d", len(digests))
+	}
+
+	// Non-array value: no-op
+	digests2 := make(map[string]bool)
+	collectArrayDigests("not-an-array", digests2)
+	if len(digests2) != 0 {
+		t.Errorf("expected no digests for non-array, got %d", len(digests2))
+	}
+
+	// Empty array
+	digests3 := make(map[string]bool)
+	collectArrayDigests([]any{}, digests3)
+	if len(digests3) != 0 {
+		t.Errorf("expected no digests for empty array, got %d", len(digests3))
+	}
+}

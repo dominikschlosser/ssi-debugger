@@ -80,3 +80,29 @@ func TestDecodeHexOrBase64URL(t *testing.T) {
 		t.Errorf("base64url decode got %q, want %q", string(got), "hello")
 	}
 }
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		max  int
+		want string
+	}{
+		{"short string", "hi", 10, "hi"},
+		{"exact length", "hello", 5, "hello"},
+		{"truncated", "hello world", 5, "hello..."},
+		{"empty string", "", 5, ""},
+		{"zero max", "hello", 0, "..."},
+		{"negative max", "hello", -1, "..."},
+		{"unicode", "héllo wörld", 5, "héllo..."},
+		{"max 1", "hello", 1, "h..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Truncate(tt.s, tt.max)
+			if got != tt.want {
+				t.Errorf("Truncate(%q, %d) = %q, want %q", tt.s, tt.max, got, tt.want)
+			}
+		})
+	}
+}

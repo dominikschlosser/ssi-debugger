@@ -25,7 +25,7 @@ Status of implemented features against the relevant specifications.
 | Request object `typ` header | Validated | Warns if not `oauth-authz-req+jwt` per OID4VP §5.3 |
 | `trusted_authorities` (`etsi_tl`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust list |
 | `transaction_data` | Accepted with warning | Spec requires wallets to reject if unsupported; this tool intentionally accepts it with a log warning to allow testing verifiers that send it |
-| `presentation_definition` | Not supported | OID4VP 1.0 Draft 28 uses DCQL; legacy PE queries are ignored |
+
 
 ## OID4VCI 1.0 (OpenID for Verifiable Credential Issuance)
 

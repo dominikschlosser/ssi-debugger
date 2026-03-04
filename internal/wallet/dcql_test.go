@@ -660,7 +660,7 @@ func TestEvaluateDCQL_TrustedAuthorities_Match(t *testing.T) {
 					map[string]any{"path": []any{"given_name"}},
 				},
 				"trusted_authorities": []any{
-					map[string]any{"type": "etsi_tl", "value": ts.URL},
+					map[string]any{"type": "etsi_tl", "values": []any{ts.URL}},
 				},
 			},
 		},
@@ -697,7 +697,7 @@ func TestEvaluateDCQL_TrustedAuthorities_NoMatch(t *testing.T) {
 					map[string]any{"path": []any{"given_name"}},
 				},
 				"trusted_authorities": []any{
-					map[string]any{"type": "etsi_tl", "value": ts.URL},
+					map[string]any{"type": "etsi_tl", "values": []any{ts.URL}},
 				},
 			},
 		},
@@ -722,7 +722,7 @@ func TestEvaluateDCQL_TrustedAuthorities_UnknownType(t *testing.T) {
 					map[string]any{"path": []any{"given_name"}},
 				},
 				"trusted_authorities": []any{
-					map[string]any{"type": "aki", "value": "some-value"},
+					map[string]any{"type": "aki", "values": []any{"some-value"}},
 				},
 			},
 		},
@@ -766,7 +766,7 @@ func TestEvaluateDCQL_TrustedAuthorities_NoCertChain(t *testing.T) {
 					map[string]any{"path": []any{"given_name"}},
 				},
 				"trusted_authorities": []any{
-					map[string]any{"type": "etsi_tl", "value": ts.URL},
+					map[string]any{"type": "etsi_tl", "values": []any{ts.URL}},
 				},
 			},
 		},

@@ -481,7 +481,7 @@ func optionMatchesFormat(opt any, queryFormat map[string]string, format string) 
 
 // checkTrustedAuthorities validates that the credential's issuer certificate chain
 // is trusted by at least one of the given trusted authorities.
-// Each entry must have "type" and "value" fields. Only "etsi_tl" type is supported.
+// Each entry must have "type" and "values" (array) fields. Only "etsi_tl" type is supported.
 func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 	for _, taRaw := range taList {
 		taMap, ok := taRaw.(map[string]any)
@@ -489,16 +489,27 @@ func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 			continue
 		}
 		taType, _ := taMap["type"].(string)
-		taValue, _ := taMap["value"].(string)
+
+		// Collect trust list URLs from "values" (array, per spec)
+		var urls []string
+		if valuesRaw, ok := taMap["values"].([]any); ok {
+			for _, v := range valuesRaw {
+				if s, ok := v.(string); ok && s != "" {
+					urls = append(urls, s)
+				}
+			}
+		}
 
 		switch taType {
 		case "etsi_tl":
-			if taValue == "" {
-				log.Printf("[DCQL]   trusted_authorities: etsi_tl entry missing value")
+			if len(urls) == 0 {
+				log.Printf("[DCQL]   trusted_authorities: etsi_tl entry missing values")
 				continue
 			}
-			if checkETSITrustList(cred, taValue) {
-				return true
+			for _, u := range urls {
+				if checkETSITrustList(cred, u) {
+					return true
+				}
 			}
 		default:
 			log.Printf("[DCQL]   trusted_authorities: unsupported type %q", taType)

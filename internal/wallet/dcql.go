@@ -17,6 +17,7 @@ package wallet
 import (
 	"log"
 	"sort"
+	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
@@ -522,6 +523,13 @@ func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 // issuer certificate chain against it.
 func checkETSITrustList(cred StoredCredential, trustListURL string) bool {
 	tlRaw, err := format.FetchURL(trustListURL)
+	// If fetch fails and URL contains host.docker.internal, retry with localhost
+	// (verifier runs in Docker but wallet runs on the host).
+	if err != nil && strings.Contains(trustListURL, "host.docker.internal") {
+		fallbackURL := strings.Replace(trustListURL, "host.docker.internal", "localhost", 1)
+		log.Printf("[DCQL]   trusted_authorities: retrying with %s", fallbackURL)
+		tlRaw, err = format.FetchURL(fallbackURL)
+	}
 	if err != nil {
 		log.Printf("[DCQL]   trusted_authorities: failed to fetch trust list %s: %v", trustListURL, err)
 		return false

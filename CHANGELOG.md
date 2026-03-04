@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-05
+
+### Added
+
+- `wallet show <id>` subcommand to inspect stored credentials (raw by default, `--decoded` for human-readable output)
+
 ## [1.0.4] - 2026-03-04
 
 ### Fixed
@@ -69,6 +75,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 - RFC 9596 - Token status list generation and checking
 - SIOPv2 - Self-issued ID token with JWK thumbprint subject
 
+[1.1.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.1.0
 [1.0.4]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.4
 [1.0.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.3
 [1.0.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.2

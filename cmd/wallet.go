@@ -28,7 +28,10 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/output"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
@@ -44,6 +47,7 @@ func init() {
 	walletCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory (default ~/.oid4vc-dev/wallet/)")
 	walletCmd.AddCommand(walletServeCmd())
 	walletCmd.AddCommand(walletListCmd())
+	walletCmd.AddCommand(walletShowCmd())
 	walletCmd.AddCommand(walletImportCmd())
 	walletCmd.AddCommand(walletRemoveCmd())
 	walletCmd.AddCommand(walletGeneratePIDCmd())
@@ -136,6 +140,55 @@ func walletListCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// --- wallet show ---
+
+func walletShowCmd() *cobra.Command {
+	var decoded bool
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show a stored credential",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w, _, err := loadWallet()
+			if err != nil {
+				return err
+			}
+			cred, ok := w.GetCredential(args[0])
+			if !ok {
+				return fmt.Errorf("credential %s not found", args[0])
+			}
+			if !decoded {
+				fmt.Println(cred.Raw)
+				return nil
+			}
+			opts := output.Options{JSON: jsonOutput, NoColor: noColor, Verbose: verbose}
+			switch cred.Format {
+			case "dc+sd-jwt":
+				token, err := sdjwt.Parse(cred.Raw)
+				if err != nil {
+					return err
+				}
+				output.PrintSDJWT(token, opts)
+			case "mso_mdoc":
+				doc, err := mdoc.Parse(cred.Raw)
+				if err != nil {
+					return err
+				}
+				output.PrintMDOC(doc, opts)
+			case "jwt_vc_json":
+				token, err := sdjwt.Parse(cred.Raw)
+				if err != nil {
+					return err
+				}
+				output.PrintJWT(token, opts)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&decoded, "decoded", false, "Show human-readable decoded output instead of raw")
+	return cmd
 }
 
 // --- wallet import ---

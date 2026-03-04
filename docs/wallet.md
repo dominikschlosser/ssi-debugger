@@ -8,6 +8,7 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 |----------------|-----------------------------------------------------------------|
 | `serve`        | Start wallet HTTP server with web UI, OID4VP endpoints, and optional URL scheme handling |
 | `list`         | List stored credentials                                         |
+| `show`         | Show a stored credential by ID (raw or decoded)                 |
 | `import`       | Import a credential from file, stdin, or raw string (SD-JWT, JWT VC, mDoc) |
 | `remove`       | Remove a credential by ID                                       |
 | `generate-pid` | Generate default EUDI PID credentials (SD-JWT + mDoc)           |
@@ -24,6 +25,12 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 oid4vc-dev wallet generate-pid
 oid4vc-dev wallet generate-pid --claims '{"given_name":"MAX","family_name":"POWER"}'
 oid4vc-dev wallet list
+
+# Show a credential (raw)
+oid4vc-dev wallet show <id>
+
+# Show a credential (human-readable decoded)
+oid4vc-dev wallet show --decoded <id>
 
 # Start the wallet web UI with stored credentials
 oid4vc-dev wallet serve
@@ -70,6 +77,20 @@ The CA key and certificates are ephemeral (regenerated each time the wallet star
 Generated credentials expire in **30 days** by default. Use `--exp` to override (e.g. `--exp 720h` for 30 days, `--exp 24h` for 1 day). Use `--nbf` to set a not-before time (RFC3339 or duration, e.g. `--nbf 2025-01-15T00:00:00Z` or `--nbf -1h`).
 
 ![Wallet UI](./wallet-ui.png)
+
+## `wallet show <id>`
+
+Displays a stored credential by its ID (as shown in `wallet list`). By default, outputs the raw credential string. Use `--decoded` for human-readable decoded output (supports `--json` and `-v` global flags).
+
+```bash
+oid4vc-dev wallet show <id>                  # Raw credential string
+oid4vc-dev wallet show --decoded <id>        # Human-readable output
+oid4vc-dev wallet show --decoded --json <id> # JSON output
+```
+
+| Flag        | Default | Description                                          |
+|-------------|---------|------------------------------------------------------|
+| `--decoded` | `false` | Show human-readable decoded output instead of raw    |
 
 ## `wallet serve`
 

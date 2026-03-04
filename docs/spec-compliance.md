@@ -22,7 +22,7 @@ Status of implemented features against the relevant specifications.
 | VP Token as JSON array | Implemented | Multiple credentials in a single response |
 | `fragment` response mode | Implemented | Builds redirect URL with vp_token/state as fragment params; not the default |
 | SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
-| `transaction_data` | Not implemented | Optional for verifiers to send; wallets MUST reject if unsupported |
+| `transaction_data` | Accepted with warning | Spec requires wallets to reject if unsupported; this tool intentionally accepts it with a log warning to allow testing verifiers that send it |
 
 ## OID4VCI 1.0 (OpenID for Verifiable Credential Issuance)
 
@@ -64,7 +64,7 @@ Status of implemented features against the relevant specifications.
 |---------|--------|-------|
 | IssuerSigned CBOR parsing | Implemented | |
 | DeviceResponse generation | Implemented | |
-| COSE_Sign1 verification | Implemented | ES256 |
+| COSE_Sign1 verification | Implemented | ES256/384/512, PS256, RS256 |
 | MSO (Mobile Security Object) parsing | Implemented | |
 | Validity info (validFrom, validUntil) | Implemented | |
 | IssuerSignedItem digest verification | Implemented | |

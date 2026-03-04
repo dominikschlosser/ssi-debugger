@@ -46,7 +46,6 @@ linters:
         - G304
         - G306
         - G301
-        - G402
 
   exclusions:
     rules:

@@ -104,7 +104,13 @@ func (s *Server) setupRoutes() {
 
 // ListenAndServe starts the wallet server.
 func (s *Server) ListenAndServe() error {
-	s.httpSrv = &http.Server{Addr: fmt.Sprintf(":%d", s.port), Handler: s.mux}
+	s.httpSrv = &http.Server{
+		Addr:         fmt.Sprintf(":%d", s.port),
+		Handler:      s.mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 	return s.httpSrv.ListenAndServe()
 }
 
@@ -115,7 +121,12 @@ func (s *Server) ListenAndServeBackground() (string, error) {
 		return "", err
 	}
 	addr := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
-	s.httpSrv = &http.Server{Handler: s.mux}
+	s.httpSrv = &http.Server{
+		Handler:      s.mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 	go func() { _ = s.httpSrv.Serve(ln) }()
 	return addr, nil
 }

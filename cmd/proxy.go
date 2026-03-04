@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -148,8 +149,11 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	if !noDashboard {
 		dashboard := proxy.NewDashboard(srv.Store(), dashboardPort)
 		dashboardServer = &http.Server{
-			Addr:    fmt.Sprintf(":%d", dashboardPort),
-			Handler: dashboard.Handler(),
+			Addr:         fmt.Sprintf(":%d", dashboardPort),
+			Handler:      dashboard.Handler(),
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 60 * time.Second,
+			IdleTimeout:  120 * time.Second,
 		}
 		go func() {
 			if err := dashboardServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -164,6 +168,9 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	// When subprocess exits on its own, just log it (proxy keeps running).

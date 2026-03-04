@@ -316,6 +316,12 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions) (*Aut
 		ResponseURI:  get("response_uri"),
 	}
 
+	// Warn about transaction_data — spec says wallets MUST reject if unsupported,
+	// but as a testing tool we accept it to allow debugging verifiers that send it.
+	if td := get("transaction_data"); td != "" {
+		log.Printf("[Wallet] WARNING: request contains transaction_data which is not processed (OID4VP §7.2)")
+	}
+
 	// Parse dcql_query if present
 	if dq := get("dcql_query"); dq != "" {
 		var query map[string]any

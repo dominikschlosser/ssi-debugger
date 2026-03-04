@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/web"
 )
@@ -54,7 +55,14 @@ func (d *Dashboard) Handler() http.Handler {
 
 // ListenAndServe starts the dashboard HTTP server.
 func (d *Dashboard) ListenAndServe() error {
-	return http.ListenAndServe(fmt.Sprintf(":%d", d.port), d.Handler())
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", d.port),
+		Handler:      d.Handler(),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 func (d *Dashboard) handleEntries(w http.ResponseWriter, r *http.Request) {

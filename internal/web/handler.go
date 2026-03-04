@@ -19,14 +19,21 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"time"
 )
 
 const maxRequestBody = 1 << 20 // 1MB
 
 // ListenAndServe starts the HTTP server on the given port.
 func ListenAndServe(port int, credential string) error {
-	mux := NewMux(credential)
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      NewMux(credential),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 // NewMux creates the HTTP handler with API and static file routes.

@@ -132,6 +132,196 @@ func TestEncryptJWE_A256GCM(t *testing.T) {
 	}
 }
 
+func TestEncryptJWE_A128CBC_HS256(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"vp_token":"test","state":"abc123"}`)
+	jwe, cek, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "ECDH-ES", "A128CBC-HS256", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.Split(jwe, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 parts, got %d", len(parts))
+	}
+
+	// Encrypted key must be empty for ECDH-ES
+	if parts[1] != "" {
+		t.Errorf("expected empty encrypted key, got %q", parts[1])
+	}
+
+	// CEK should be 32 bytes (256-bit for MAC+ENC)
+	if len(cek) != 32 {
+		t.Errorf("expected 32-byte CEK for A128CBC-HS256, got %d bytes", len(cek))
+	}
+
+	// Decode and verify protected header
+	headerJSON, err := format.DecodeBase64URL(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatal(err)
+	}
+
+	if header["enc"] != "A128CBC-HS256" {
+		t.Errorf("expected enc=A128CBC-HS256, got %v", header["enc"])
+	}
+}
+
+func TestEncryptJWE_UnsupportedEnc(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = EncryptJWE([]byte(`{}`), &key.PublicKey, "kid", "ECDH-ES", "A192GCM", nil)
+	if err == nil {
+		t.Error("expected error for unsupported enc algorithm")
+	}
+}
+
+func TestEcdsaPublicKeyFromJWK(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	xB64 := format.EncodeBase64URL(key.PublicKey.X.Bytes())
+	yB64 := format.EncodeBase64URL(key.PublicKey.Y.Bytes())
+
+	pub, err := ecdsaPublicKeyFromJWK(xB64, yB64)
+	if err != nil {
+		t.Fatalf("ecdsaPublicKeyFromJWK() error: %v", err)
+	}
+
+	if pub.X.Cmp(key.PublicKey.X) != 0 || pub.Y.Cmp(key.PublicKey.Y) != 0 {
+		t.Error("parsed key does not match original")
+	}
+	if pub.Curve != elliptic.P256() {
+		t.Error("expected P-256 curve")
+	}
+}
+
+func TestEcdsaPublicKeyFromJWK_InvalidX(t *testing.T) {
+	_, err := ecdsaPublicKeyFromJWK("not-valid-base64!!!", "dGVzdA")
+	if err == nil {
+		t.Error("expected error for invalid x coordinate")
+	}
+}
+
+func TestEcdsaPublicKeyFromJWK_InvalidY(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	xB64 := format.EncodeBase64URL(key.PublicKey.X.Bytes())
+
+	_, err := ecdsaPublicKeyFromJWK(xB64, "not-valid-base64!!!")
+	if err == nil {
+		t.Error("expected error for invalid y coordinate")
+	}
+}
+
+func TestEncKeyBitLen(t *testing.T) {
+	tests := []struct {
+		enc     string
+		want    int
+		wantErr bool
+	}{
+		{"A128GCM", 128, false},
+		{"A256GCM", 256, false},
+		{"A128CBC-HS256", 256, false},
+		{"UNKNOWN", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.enc, func(t *testing.T) {
+			got, err := encKeyBitLen(tt.enc)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("encKeyBitLen(%q) error = %v, wantErr %v", tt.enc, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("encKeyBitLen(%q) = %d, want %d", tt.enc, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConcatKDF(t *testing.T) {
+	z := make([]byte, 32)
+	for i := range z {
+		z[i] = byte(i)
+	}
+
+	// Test with nil apu, 128-bit key
+	derived128 := concatKDF(z, "A128GCM", nil, nil, 128)
+	if len(derived128) != 16 {
+		t.Errorf("expected 16-byte derived key, got %d bytes", len(derived128))
+	}
+
+	// Test with non-nil apu, 256-bit key
+	derived256 := concatKDF(z, "A256GCM", []byte("test"), nil, 256)
+	if len(derived256) != 32 {
+		t.Errorf("expected 32-byte derived key, got %d bytes", len(derived256))
+	}
+
+	// Same inputs should produce same output (deterministic)
+	derived256Again := concatKDF(z, "A256GCM", []byte("test"), nil, 256)
+	for i := range derived256 {
+		if derived256[i] != derived256Again[i] {
+			t.Error("concatKDF is not deterministic")
+			break
+		}
+	}
+
+	// Different apu should produce different output
+	derivedDiffApu := concatKDF(z, "A256GCM", []byte("other"), nil, 256)
+	same := true
+	for i := range derived256 {
+		if derived256[i] != derivedDiffApu[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Error("different apu should produce different derived keys")
+	}
+}
+
+func TestPkcs7Pad(t *testing.T) {
+	// 13 bytes with blockSize=16 -> 16 bytes, last 3 bytes = 0x03
+	data13 := make([]byte, 13)
+	for i := range data13 {
+		data13[i] = byte(i)
+	}
+	padded13 := pkcs7Pad(data13, 16)
+	if len(padded13) != 16 {
+		t.Errorf("expected 16 bytes, got %d", len(padded13))
+	}
+	for i := 13; i < 16; i++ {
+		if padded13[i] != 0x03 {
+			t.Errorf("expected padding byte 0x03 at index %d, got 0x%02x", i, padded13[i])
+		}
+	}
+
+	// 16 bytes with blockSize=16 -> 32 bytes, last 16 bytes = 0x10
+	data16 := make([]byte, 16)
+	padded16 := pkcs7Pad(data16, 16)
+	if len(padded16) != 32 {
+		t.Errorf("expected 32 bytes, got %d", len(padded16))
+	}
+	for i := 16; i < 32; i++ {
+		if padded16[i] != 0x10 {
+			t.Errorf("expected padding byte 0x10 at index %d, got 0x%02x", i, padded16[i])
+		}
+	}
+}
+
 func TestEncryptJWE_ReturnsCEK(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

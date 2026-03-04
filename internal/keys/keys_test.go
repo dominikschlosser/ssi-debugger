@@ -394,3 +394,120 @@ func TestParsePrivateKey_JWK(t *testing.T) {
 		t.Fatalf("expected *ecdsa.PrivateKey, got %T", priv)
 	}
 }
+
+// --- Additional coverage tests ---
+
+func TestParseJWK_EC_P384(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jwk := map[string]any{
+		"kty": "EC",
+		"crv": "P-384",
+		"x":   format.EncodeBase64URL(key.PublicKey.X.Bytes()),
+		"y":   format.EncodeBase64URL(key.PublicKey.Y.Bytes()),
+	}
+	data, _ := json.Marshal(jwk)
+
+	pub, err := ParseJWK(data)
+	if err != nil {
+		t.Fatalf("ParseJWK() error: %v", err)
+	}
+
+	ecPub, ok := pub.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PublicKey, got %T", pub)
+	}
+	if ecPub.Curve != elliptic.P384() {
+		t.Error("expected P-384 curve")
+	}
+	if ecPub.X.Cmp(key.PublicKey.X) != 0 || ecPub.Y.Cmp(key.PublicKey.Y) != 0 {
+		t.Error("parsed key does not match original")
+	}
+}
+
+func TestParseJWK_EC_P521(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jwk := map[string]any{
+		"kty": "EC",
+		"crv": "P-521",
+		"x":   format.EncodeBase64URL(key.PublicKey.X.Bytes()),
+		"y":   format.EncodeBase64URL(key.PublicKey.Y.Bytes()),
+	}
+	data, _ := json.Marshal(jwk)
+
+	pub, err := ParseJWK(data)
+	if err != nil {
+		t.Fatalf("ParseJWK() error: %v", err)
+	}
+
+	ecPub, ok := pub.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PublicKey, got %T", pub)
+	}
+	if ecPub.Curve != elliptic.P521() {
+		t.Error("expected P-521 curve")
+	}
+	if ecPub.X.Cmp(key.PublicKey.X) != 0 || ecPub.Y.Cmp(key.PublicKey.Y) != 0 {
+		t.Error("parsed key does not match original")
+	}
+}
+
+func TestParseJWK_EC_UnsupportedCurve(t *testing.T) {
+	data := []byte(`{"kty":"EC","crv":"P-192","x":"dGVzdA","y":"dGVzdA"}`)
+	_, err := ParseJWK(data)
+	if err == nil {
+		t.Error("expected error for unsupported curve P-192")
+	}
+}
+
+func TestParsePublicKey_PEM_RSA_PKCS1(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	derBytes := x509.MarshalPKCS1PublicKey(&key.PublicKey)
+	pemData := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: derBytes,
+	})
+
+	pub, err := ParsePublicKey(pemData)
+	if err != nil {
+		t.Fatalf("ParsePublicKey() error: %v", err)
+	}
+
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *rsa.PublicKey, got %T", pub)
+	}
+	if rsaPub.N.Cmp(key.N) != 0 {
+		t.Error("public key N does not match")
+	}
+}
+
+func TestParsePublicKey_UnsupportedPEMType(t *testing.T) {
+	pemData := pem.EncodeToMemory(&pem.Block{
+		Type:  "DSA PUBLIC KEY",
+		Bytes: []byte("garbage data that is not a valid key"),
+	})
+
+	_, err := ParsePublicKey(pemData)
+	if err == nil {
+		t.Error("expected error for unsupported PEM block type")
+	}
+}
+
+func TestParseJWK_InvalidJSON(t *testing.T) {
+	_, err := ParseJWK([]byte("not json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}

@@ -812,6 +812,79 @@ func TestEncryptResponse_ErrorWhenJWKMissingAlg(t *testing.T) {
 	}
 }
 
+func TestCollectArrayDigests_NonArray(t *testing.T) {
+	digests := make(map[string]bool)
+	collectArrayDigests("not an array", digests)
+	if len(digests) != 0 {
+		t.Error("expected empty digests for non-array")
+	}
+}
+
+func TestCollectArrayDigests_EmptyArray(t *testing.T) {
+	digests := make(map[string]bool)
+	collectArrayDigests([]any{}, digests)
+	if len(digests) != 0 {
+		t.Error("expected empty digests for empty array")
+	}
+}
+
+func TestVPTokenMapResult_VPToken(t *testing.T) {
+	r := &VPTokenMapResult{
+		TokenMap: map[string]string{
+			"pid": "token1",
+			"mdl": "token2",
+		},
+	}
+	vp := r.VPToken()
+	if len(vp) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(vp))
+	}
+	if len(vp["pid"]) != 1 || vp["pid"][0] != "token1" {
+		t.Errorf("wrong pid token: %v", vp["pid"])
+	}
+	if len(vp["mdl"]) != 1 || vp["mdl"][0] != "token2" {
+		t.Errorf("wrong mdl token: %v", vp["mdl"])
+	}
+}
+
+func TestVPTokenMapResult_VPToken_Empty(t *testing.T) {
+	r := &VPTokenMapResult{
+		TokenMap: map[string]string{},
+	}
+	vp := r.VPToken()
+	if len(vp) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(vp))
+	}
+}
+
+func TestVPTokenMapResult_QueryIDs(t *testing.T) {
+	r := &VPTokenMapResult{
+		TokenMap: map[string]string{"pid": "t1", "mdl": "t2"},
+	}
+	ids := r.QueryIDs()
+	if len(ids) != 2 {
+		t.Errorf("expected 2 IDs, got %d", len(ids))
+	}
+	// Check both IDs are present (order may vary)
+	idSet := make(map[string]bool)
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	if !idSet["pid"] || !idSet["mdl"] {
+		t.Errorf("expected pid and mdl in query IDs, got %v", ids)
+	}
+}
+
+func TestVPTokenMapResult_QueryIDs_Empty(t *testing.T) {
+	r := &VPTokenMapResult{
+		TokenMap: map[string]string{},
+	}
+	ids := r.QueryIDs()
+	if len(ids) != 0 {
+		t.Errorf("expected 0 IDs, got %d", len(ids))
+	}
+}
+
 func TestEncryptJWE_A128CBCHS256(t *testing.T) {
 	key, _ := mock.GenerateKey()
 	payload := []byte(`{"vp_token":"test","state":"s"}`)

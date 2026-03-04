@@ -17,6 +17,7 @@ package wallet
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,5 +127,28 @@ func TestNewWalletStore_DefaultDir(t *testing.T) {
 	store := NewWalletStore("")
 	if store.Dir == "" {
 		t.Error("expected non-empty default dir")
+	}
+}
+
+func TestWalletStore_PathHelpers(t *testing.T) {
+	store := NewWalletStore("/tmp/test-wallet")
+	if store.walletPath() != "/tmp/test-wallet/wallet.json" {
+		t.Errorf("wrong wallet path: %s", store.walletPath())
+	}
+	if store.holderKeyPath() != "/tmp/test-wallet/holder.pem" {
+		t.Errorf("wrong holder key path: %s", store.holderKeyPath())
+	}
+	if store.issuerKeyPath() != "/tmp/test-wallet/issuer.pem" {
+		t.Errorf("wrong issuer key path: %s", store.issuerKeyPath())
+	}
+}
+
+func TestDefaultWalletDir(t *testing.T) {
+	dir := DefaultWalletDir()
+	if dir == "" {
+		t.Error("expected non-empty dir")
+	}
+	if !strings.Contains(dir, ".oid4vc-dev") {
+		t.Errorf("expected .oid4vc-dev in path, got %s", dir)
 	}
 }

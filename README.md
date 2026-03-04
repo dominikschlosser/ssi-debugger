@@ -211,6 +211,10 @@ The wallet evaluates `credential_sets` constraints when processing DCQL queries,
 | **OpenID4VCI / VP** | Credential offers, authorization requests, URI schemes (`openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`) |
 | **ETSI Trust Lists** | TS 119 602 trust list JWTs with entity names, identifiers, and service types |
 
+## Spec Compliance
+
+See [docs/spec-compliance.md](docs/spec-compliance.md) for detailed compliance status against OID4VP 1.0, OID4VCI 1.0, HAIP 1.0, SD-JWT, mDoc (ISO 18013-5), ETSI trust lists, and RFC 9596.
+
 ## Global Flags
 
 | Flag         | Description              |

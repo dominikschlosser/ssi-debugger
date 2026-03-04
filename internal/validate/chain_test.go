@@ -20,10 +20,12 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
 
@@ -236,5 +238,184 @@ func TestExtractAndValidateX5C_ValidBase64InvalidDER(t *testing.T) {
 	_, err := ExtractAndValidateX5C(header, tlCerts)
 	if err == nil {
 		t.Error("expected error for invalid DER data")
+	}
+}
+
+func TestExtractAndValidateX5C_ValidChain(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	// x5c uses standard base64 encoding of DER certs, leaf first
+	leafB64 := base64.StdEncoding.EncodeToString(leafDER)
+	caB64 := base64.StdEncoding.EncodeToString(caDER)
+
+	header := map[string]any{
+		"x5c": []any{leafB64, caB64},
+	}
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := ExtractAndValidateX5C(header, tlCerts)
+	if err != nil {
+		t.Fatalf("ExtractAndValidateX5C() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+	if _, ok := key.(*ecdsa.PublicKey); !ok {
+		t.Fatalf("expected *ecdsa.PublicKey, got %T", key)
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_NilIssuerAuth(t *testing.T) {
+	doc := &mdoc.Document{}
+	key, err := ExtractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key for nil IssuerAuth")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_NilUnprotectedHeader(t *testing.T) {
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{},
+	}
+	key, err := ExtractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key for nil UnprotectedHeader")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_NoX5Chain(t *testing.T) {
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(1): "something else",
+			},
+		},
+	}
+	key, err := ExtractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key when no x5chain key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_SingleCert(t *testing.T) {
+	caCert, _, caDER := generateCACert(t)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): caDER,
+			},
+		},
+	}
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("ExtractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_CertArray(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): []any{leafDER, caDER},
+			},
+		},
+	}
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("ExtractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_UnsupportedType(t *testing.T) {
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): "not bytes",
+			},
+		},
+	}
+	tlCerts := []trustlist.CertInfo{
+		{Raw: []byte("x")},
+	}
+
+	key, err := ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key for unsupported x5chain type")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_Uint64Key(t *testing.T) {
+	caCert, _, caDER := generateCACert(t)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				uint64(33): caDER,
+			},
+		},
+	}
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("ExtractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_EmptyTrustList(t *testing.T) {
+	_, _, caDER := generateCACert(t)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): caDER,
+			},
+		},
+	}
+
+	key, err := ExtractAndValidateMDOCX5Chain(doc, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key for empty trust list")
 	}
 }

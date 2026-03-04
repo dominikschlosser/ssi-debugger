@@ -15,6 +15,9 @@
 package wallet
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -91,5 +94,169 @@ func TestBuildFragmentRedirect(t *testing.T) {
 				t.Errorf("expected no state parameter, got: %s", got)
 			}
 		})
+	}
+}
+
+func TestSubmitDirectPost_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "https://example.com/done"})
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPost(ts.URL, "state123", map[string]string{"pid": "token1"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected status 200, got %d", result.StatusCode)
+	}
+	if result.RedirectURI != "https://example.com/done" {
+		t.Errorf("expected redirect URI 'https://example.com/done', got %q", result.RedirectURI)
+	}
+}
+
+func TestSubmitDirectPost_WithIDToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parsing form: %v", err)
+		}
+		if r.FormValue("vp_token") == "" {
+			t.Error("expected vp_token in form")
+		}
+		if r.FormValue("id_token") != "eyJ.test.token" {
+			t.Errorf("expected id_token 'eyJ.test.token', got %q", r.FormValue("id_token"))
+		}
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "https://example.com/cb"})
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPost(ts.URL, "s1", map[string]string{"pid": "tok"}, "eyJ.test.token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", result.StatusCode)
+	}
+}
+
+func TestSubmitDirectPost_LocationHeader(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://example.com/redirect-via-header")
+		w.WriteHeader(200)
+		w.Write([]byte("no json"))
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPost(ts.URL, "state1", map[string]string{"pid": "tok"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RedirectURI != "https://example.com/redirect-via-header" {
+		t.Errorf("expected redirect from Location header, got %q", result.RedirectURI)
+	}
+}
+
+func TestSubmitDirectPost_NoVPToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parsing form: %v", err)
+		}
+		if r.FormValue("vp_token") != "" {
+			t.Error("expected no vp_token in form")
+		}
+		if r.FormValue("state") != "onlystate" {
+			t.Errorf("expected state 'onlystate', got %q", r.FormValue("state"))
+		}
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPost(ts.URL, "onlystate", nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", result.StatusCode)
+	}
+}
+
+func TestSubmitDirectPostJWT_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parsing form: %v", err)
+		}
+		if r.FormValue("response") != "jwe.compact.token" {
+			t.Errorf("expected response 'jwe.compact.token', got %q", r.FormValue("response"))
+		}
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "https://example.com/jwt-done"})
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPostJWT(ts.URL, "jwe.compact.token", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", result.StatusCode)
+	}
+	if result.RedirectURI != "https://example.com/jwt-done" {
+		t.Errorf("expected redirect URI, got %q", result.RedirectURI)
+	}
+}
+
+func TestSubmitDirectPostJWT_WithCEK(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cekHeader := r.Header.Get("X-Debug-JWE-CEK")
+		if cekHeader == "" {
+			t.Error("expected X-Debug-JWE-CEK header to be present")
+		}
+		w.WriteHeader(200)
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPostJWT(ts.URL, "jwe.token", []byte("0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", result.StatusCode)
+	}
+}
+
+func TestBuildFragmentRedirect_WithIDTokenAndVPToken(t *testing.T) {
+	got, err := BuildFragmentRedirect("https://verifier.example/callback", "s1", map[string]string{"pid": "tok1"}, "eyJ.id.token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "id_token=") {
+		t.Errorf("expected id_token in fragment, got: %s", got)
+	}
+	if !strings.Contains(got, "vp_token=") {
+		t.Errorf("expected vp_token in fragment, got: %s", got)
+	}
+	if !strings.Contains(got, "state=s1") {
+		t.Errorf("expected state in fragment, got: %s", got)
+	}
+}
+
+func TestBuildFragmentRedirect_NilVPToken(t *testing.T) {
+	got, err := BuildFragmentRedirect("https://verifier.example/callback", "s1", nil, "eyJ.id.token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "vp_token=") {
+		t.Errorf("expected no vp_token in fragment, got: %s", got)
+	}
+	if !strings.Contains(got, "id_token=") {
+		t.Errorf("expected id_token in fragment, got: %s", got)
+	}
+	if !strings.Contains(got, "state=s1") {
+		t.Errorf("expected state in fragment, got: %s", got)
 	}
 }

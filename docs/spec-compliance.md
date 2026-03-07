@@ -35,7 +35,7 @@ Status of implemented features against the relevant specifications.
 | Pre-authorized code grant | Implemented | With optional `tx_code` |
 | Authorization code grant | Not implemented | Optional per spec; offers with only `authorization_code` are rejected |
 | Token endpoint | Implemented | Exchanges pre-authorized code for access token |
-| Credential endpoint | Implemented | Proof of possession via JWT |
+| Credential endpoint | Implemented | Uses OID4VCI 1.0 final `proofs.jwt` and sends `credential_identifier` or `credential_configuration_id` as required |
 | Batch credential issuance | Not implemented | Optional per spec |
 | Deferred credential issuance | Not implemented | Optional per spec |
 

@@ -33,11 +33,15 @@ type mockIssuerOpts struct {
 	tokenCNonce string
 	// nonceEndpoint, if true, serves a nonce endpoint.
 	nonceEndpoint bool
+	// tokenAuthorizationDetails, if non-empty, is returned in the token response.
+	tokenAuthorizationDetails []any
 	// credentialResponse is the raw JSON object returned by the credential endpoint.
 	// If nil, a default response with a single SD-JWT credential is returned.
 	credentialResponse map[string]any
 	// credentialConfigFormat overrides the format in credential_configurations_supported.
 	credentialConfigFormat string
+	// inspectCredentialRequest validates the credential request body sent by the wallet.
+	inspectCredentialRequest func(*testing.T, map[string]any)
 }
 
 func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Server, string) {
@@ -92,6 +96,9 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 			if opts.tokenCNonce != "" {
 				resp["c_nonce"] = opts.tokenCNonce
 			}
+			if opts.tokenAuthorizationDetails != nil {
+				resp["authorization_details"] = opts.tokenAuthorizationDetails
+			}
 			rw.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(rw).Encode(resp)
 
@@ -105,6 +112,14 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 				rw.WriteHeader(http.StatusUnauthorized)
 				json.NewEncoder(rw).Encode(map[string]string{"error": "invalid_token"})
 				return
+			}
+			if opts.inspectCredentialRequest != nil {
+				body, _ := io.ReadAll(r.Body)
+				var reqBody map[string]any
+				if err := json.Unmarshal(body, &reqBody); err != nil {
+					t.Fatalf("credential request JSON: %v", err)
+				}
+				opts.inspectCredentialRequest(t, reqBody)
 			}
 			rw.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(rw).Encode(credResp)
@@ -153,6 +168,23 @@ func TestProcessCredentialOffer_HappyPath(t *testing.T) {
 
 	srv, offerURI := setupMockIssuer(t, w, mockIssuerOpts{
 		tokenCNonce: "test-c-nonce",
+		inspectCredentialRequest: func(t *testing.T, reqBody map[string]any) {
+			t.Helper()
+			if _, ok := reqBody["proof"]; ok {
+				t.Fatal("credential request must not use legacy proof field")
+			}
+			proofs, ok := reqBody["proofs"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected proofs object, got %T", reqBody["proofs"])
+			}
+			jwts, ok := proofs["jwt"].([]any)
+			if !ok || len(jwts) != 1 {
+				t.Fatalf("expected single jwt proof, got %v", proofs["jwt"])
+			}
+			if reqBody["credential_configuration_id"] != "test-config" {
+				t.Fatalf("expected credential_configuration_id=test-config, got %v", reqBody["credential_configuration_id"])
+			}
+		},
 	})
 	defer srv.Close()
 
@@ -419,5 +451,38 @@ func TestProcessCredentialOffer_Draft14RawStringArray(t *testing.T) {
 
 	if result.CredentialID == "" {
 		t.Error("expected non-empty credential ID")
+	}
+}
+
+func TestProcessCredentialOffer_UsesCredentialIdentifierFromAuthorizationDetails(t *testing.T) {
+	w := generateTestWallet(t)
+
+	srv, offerURI := setupMockIssuer(t, w, mockIssuerOpts{
+		tokenCNonce: "test-c-nonce",
+		tokenAuthorizationDetails: []any{
+			map[string]any{
+				"type":                        "openid_credential",
+				"credential_configuration_id": "test-config",
+				"credential_identifiers":      []any{"credential-id-123"},
+			},
+		},
+		inspectCredentialRequest: func(t *testing.T, reqBody map[string]any) {
+			t.Helper()
+			if reqBody["credential_identifier"] != "credential-id-123" {
+				t.Fatalf("expected credential_identifier, got %v", reqBody["credential_identifier"])
+			}
+			if _, ok := reqBody["credential_configuration_id"]; ok {
+				t.Fatalf("did not expect credential_configuration_id when credential_identifier is present")
+			}
+		},
+	})
+	defer srv.Close()
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	if _, err := w.ProcessCredentialOffer(offerURI); err != nil {
+		t.Fatalf("ProcessCredentialOffer: %v", err)
 	}
 }

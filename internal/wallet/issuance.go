@@ -112,6 +112,10 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 
 	// Extract credential_identifiers from authorization_details in token response
 	credentialIdentifier := resolveCredentialIdentifier(tokenResp, offer.CredentialConfigurationIDs)
+	credentialConfigurationID := ""
+	if credentialIdentifier == "" && len(offer.CredentialConfigurationIDs) > 0 {
+		credentialConfigurationID = offer.CredentialConfigurationIDs[0]
+	}
 
 	// If no c_nonce in token response, try a nonce endpoint or send without
 	// proof first to get a c_nonce from the error response.
@@ -129,7 +133,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	if cNonce == "" {
 		// Try credential request without proof to get c_nonce from error response
 		log.Printf("[VCI] No c_nonce available, attempting credential request to obtain one")
-		nonceResp, nonceErr := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier)
+		nonceResp, nonceErr := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID)
 		if nonceErr != nil {
 			// Check if the error response contained a c_nonce
 			if n, ok := nonceResp["c_nonce"].(string); ok && n != "" {
@@ -164,7 +168,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 		}
 	}
 
-	credResp, err := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier)
+	credResp, err := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID)
 	if err != nil {
 		return nil, fmt.Errorf("requesting credential: %w", err)
 	}
@@ -373,9 +377,9 @@ func createProofJWT(holderKey *ecdsa.PrivateKey, audience, cNonce string) (strin
 }
 
 // resolveCredentialIdentifier extracts a credential_identifier from the token
-// response's authorization_details. Per OID4VCI, the token response may contain
-// authorization_details with credential_identifiers that should be used instead
-// of the credential_configuration_id from the offer.
+// response's authorization_details. Per OID4VCI 1.0 final, the token response
+// may contain credential_identifiers that should be used instead of the
+// credential_configuration_id from the offer.
 func resolveCredentialIdentifier(tokenResp map[string]any, configIDs []string) string {
 	if authDetails, ok := tokenResp["authorization_details"].([]any); ok {
 		for _, detail := range authDetails {
@@ -391,10 +395,6 @@ func resolveCredentialIdentifier(tokenResp map[string]any, configIDs []string) s
 		}
 	}
 
-	// Fallback to credential_configuration_id from the offer
-	if len(configIDs) > 0 {
-		return configIDs[0]
-	}
 	return ""
 }
 
@@ -461,16 +461,17 @@ func fetchNonce(metadata map[string]any, issuer string) string {
 }
 
 // requestCredential sends a credential request to the issuer.
-func requestCredential(credentialEndpoint, accessToken, proofJWT string, credentialIdentifier string) (map[string]any, error) {
+func requestCredential(credentialEndpoint, accessToken, proofJWT string, credentialIdentifier string, credentialConfigurationID string) (map[string]any, error) {
 	reqBody := map[string]any{
-		"proof": map[string]any{
-			"proof_type": "jwt",
-			"jwt":        proofJWT,
+		"proofs": map[string]any{
+			"jwt": []string{proofJWT},
 		},
 	}
 
 	if credentialIdentifier != "" {
 		reqBody["credential_identifier"] = credentialIdentifier
+	} else if credentialConfigurationID != "" {
+		reqBody["credential_configuration_id"] = credentialConfigurationID
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)

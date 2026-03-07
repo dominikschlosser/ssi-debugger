@@ -42,8 +42,8 @@ func TestResolveCredentialIdentifier_FallbackToConfigID(t *testing.T) {
 	}
 
 	got := resolveCredentialIdentifier(tokenResp, []string{"pid-config"})
-	if got != "pid-config" {
-		t.Errorf("expected pid-config, got %s", got)
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestResolveCredentialIdentifier_EmptyAuthDetails(t *testing.T) {
 	}
 
 	got := resolveCredentialIdentifier(tokenResp, []string{"fallback"})
-	if got != "fallback" {
-		t.Errorf("expected fallback, got %s", got)
+	if got != "" {
+		t.Errorf("expected empty string, got %s", got)
 	}
 }
 

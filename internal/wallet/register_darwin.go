@@ -67,6 +67,12 @@ case "$URI" in
       -d "{\"uri\":\"$URI\"}" 2>/dev/null \
       || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
     ;;
+  haip-vci://*)
+    curl -sf -X POST "$LISTENER/api/offers" \
+      -H "Content-Type: application/json" \
+      -d "{\"uri\":\"$URI\"}" 2>/dev/null \
+      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
+    ;;
   *)
     curl -sf -X POST "$LISTENER/api/presentations" \
       -H "Content-Type: application/json" \
@@ -125,12 +131,13 @@ end open location
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes array", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string openid4vp", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string eudi-openid4vp", plistPath},
-		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:2 string haip", plistPath},
+		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:2 string haip-vp", plistPath},
 		// OID4VCI scheme
 		{"-c", "Add :CFBundleURLTypes:1 dict", plistPath},
 		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLName string OID4VCI", plistPath},
 		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLSchemes array", plistPath},
 		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLSchemes:0 string openid-credential-offer", plistPath},
+		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLSchemes:1 string haip-vci", plistPath},
 	}
 
 	for _, args := range plistCmds {
@@ -157,7 +164,7 @@ end open location
 	fmt.Printf("  App bundle: %s\n", bundlePath)
 	fmt.Printf("  Handler:    %s\n", handlerPath)
 	fmt.Printf("  Binary:     %s\n", binaryPath)
-	fmt.Printf("  Schemes:    openid4vp://, eudi-openid4vp://, haip://, openid-credential-offer://\n")
+	fmt.Printf("  Schemes:    openid4vp://, eudi-openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://\n")
 	return nil
 }
 

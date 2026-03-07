@@ -40,6 +40,13 @@ func newTestServer(t *testing.T, autoAccept bool) *Server {
 	return NewServer(w, 0, nil)
 }
 
+func newStrictTestServer(t *testing.T, autoAccept bool) *Server {
+	t.Helper()
+	srv := newTestServer(t, autoAccept)
+	srv.wallet.ValidationMode = ValidationModeStrict
+	return srv
+}
+
 func serverRequest(t *testing.T, srv *Server, method, path string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r io.Reader
@@ -86,6 +93,20 @@ func TestListCredentials(t *testing.T) {
 	creds := decodeJSONArray(t, w)
 	if len(creds) != 2 {
 		t.Errorf("expected 2 credentials, got %d", len(creds))
+	}
+}
+
+func TestAuthorize_StrictRejectsTransactionData(t *testing.T) {
+	srv := newStrictTestServer(t, true)
+	req := httptest.NewRequest("GET", "/authorize?client_id=https://verifier.example&response_type=vp_token&transaction_data=%5B%5D", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "transaction_data") {
+		t.Fatalf("expected transaction_data error, got %s", w.Body.String())
 	}
 }
 

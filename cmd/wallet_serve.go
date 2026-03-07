@@ -58,7 +58,7 @@ Capabilities:
   - Request logging with timestamps
   - Browser-based consent UI for incoming requests
 
-Use --register to also register OS URL scheme handlers (openid4vp://, openid-credential-offer://)
+Use --register to also register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)
 so the wallet automatically receives incoming protocol requests.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := loadStore()
@@ -232,7 +232,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().StringVar(&keyPath, "key", "", "Holder private key file (PEM/JWK); uses stored key or auto-generates")
 	cmd.Flags().StringVar(&issuerKey, "issuer-key", "", "Issuer key for generated credentials (PEM/JWK)")
 	cmd.Flags().StringVar(&sessionTranscript, "session-transcript", "oid4vp", "mDoc session transcript mode: 'oid4vp' (OID4VP 1.0, default) or 'iso' (ISO 18013-7)")
-	cmd.Flags().BoolVar(&register, "register", false, "Register OS URL scheme handlers (openid4vp://, openid-credential-offer://)")
+	cmd.Flags().BoolVar(&register, "register", false, "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)")
 	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip URL scheme registration (overrides --register)")
 	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")

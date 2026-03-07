@@ -36,7 +36,7 @@ func ParseWithOptions(raw string, opts ParseOptions) (RequestType, any, error) {
 	raw = strings.TrimSpace(raw)
 
 	// 1. URI scheme detection
-	if strings.HasPrefix(raw, "openid-credential-offer://") {
+	if strings.HasPrefix(raw, "openid-credential-offer://") || strings.HasPrefix(raw, "haip-vci://") {
 		return parseVCIURI(raw)
 	}
 	if strings.HasPrefix(raw, "openid4vp://") || strings.HasPrefix(raw, "haip-vp://") || strings.HasPrefix(raw, "eudi-openid4vp://") {
@@ -66,7 +66,7 @@ func isJWT(s string) bool {
 	return len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0
 }
 
-// parseVCIURI parses an openid-credential-offer:// URI.
+// parseVCIURI parses an openid-credential-offer:// or haip-vci:// URI.
 func parseVCIURI(raw string) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {

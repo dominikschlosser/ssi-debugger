@@ -277,7 +277,7 @@ func walletRegisterCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "register",
-		Short: "Register OS URL scheme handlers (openid4vp://, openid-credential-offer://)",
+		Short: "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return wallet.RegisterURLSchemes(port)
 		},

@@ -37,7 +37,7 @@ const (
 // Detect auto-detects the format from raw input.
 //
 // Detection order:
-//  1. OpenID URI schemes (openid-credential-offer://, openid4vp://, haip://, eudi-openid4vp://)
+//  1. OpenID URI schemes (openid-credential-offer://, haip-vci://, openid4vp://, haip-vp://, eudi-openid4vp://)
 //  2. HTTP(S) URL with OID4 query params
 //  3. SD-JWT (contains '~')
 //  4. mDOC (hex/base64url CBOR)
@@ -51,10 +51,10 @@ func Detect(input string) CredentialFormat {
 
 	// 1. OpenID URI schemes
 	lower := strings.ToLower(input)
-	if strings.HasPrefix(lower, "openid-credential-offer://") {
+	if strings.HasPrefix(lower, "openid-credential-offer://") || strings.HasPrefix(lower, "haip-vci://") {
 		return FormatOID4VCI
 	}
-	if strings.HasPrefix(lower, "openid4vp://") || strings.HasPrefix(lower, "haip://") || strings.HasPrefix(lower, "eudi-openid4vp://") {
+	if strings.HasPrefix(lower, "openid4vp://") || strings.HasPrefix(lower, "haip-vp://") || strings.HasPrefix(lower, "eudi-openid4vp://") {
 		return FormatOID4VP
 	}
 

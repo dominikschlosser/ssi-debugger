@@ -105,7 +105,7 @@ The server exposes:
 - OID4VP authorization endpoint (`/authorize`)
 - ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating credentials issued by the wallet
 
-Use `--register` to also register OS URL scheme handlers so that `openid4vp://` and `openid-credential-offer://` links automatically open the wallet.
+Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
 ```bash
 oid4vc-dev wallet serve
@@ -138,10 +138,10 @@ oid4vc-dev wallet serve --register --port 9000
 
 Auto-detects the URI type and dispatches to the appropriate flow:
 
-- `openid4vp://`, `haip://`, `eudi-openid4vp://` → OID4VP presentation (evaluates DCQL, shows consent UI, submits VP token)
+- `openid4vp://`, `haip-vp://`, `eudi-openid4vp://` → OID4VP presentation (evaluates DCQL, shows consent UI, submits VP token)
   - Supports `response_type=vp_token id_token` (SIOPv2 + OID4VP combined flow) — generates a self-issued ID token alongside the VP token
   - Supports `response_type=id_token` (SIOPv2 only) — generates a self-issued ID token without VP token
-- `openid-credential-offer://` → OID4VCI credential issuance (fetches credential from issuer)
+- `openid-credential-offer://`, `haip-vci://` → OID4VCI credential issuance (fetches credential from issuer)
 
 In interactive mode (default), OID4VP requests start a temporary consent UI server and auto-open it in the browser. With `--auto-accept`, auto-selects and submits the first matching credentials.
 
@@ -198,7 +198,7 @@ oid4vc-dev wallet trust-list --url --docker           # http://host.docker.inter
 
 ## `wallet register` / `wallet unregister`
 
-Registers (or removes) OS-level URL scheme handlers so that `openid4vp://`, `eudi-openid4vp://`, `haip://`, and `openid-credential-offer://` links automatically open the wallet.
+Registers (or removes) OS-level URL scheme handlers so that `openid4vp://`, `eudi-openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
 The handler script first tries to POST to a running `wallet serve` instance. If the server is not running, it falls back to invoking the CLI directly (`wallet accept`).
 
@@ -379,7 +379,8 @@ When enabled, the wallet:
    - `wallet_nonce` — base64url-encoded random nonce for replay protection
 3. Expects the verifier to encrypt the request object as a JWE (ECDH-ES + A128GCM or A256GCM) using the wallet's public key
 4. Decrypts the received JWE to extract the signed JWT request object
-5. Validates that `wallet_nonce` in the response matches the one sent
+5. In `debug` mode, validates that `wallet_nonce` in the response matches the one sent and warns if it is missing
+6. In `strict` mode, rejects the flow if the response omits `wallet_nonce`
 
 The proxy dashboard surfaces `request_uri_method`, `wallet_metadata`, and `wallet_nonce` in the decoded traffic view when these fields are present.
 

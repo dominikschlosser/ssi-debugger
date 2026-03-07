@@ -209,6 +209,26 @@ func TestMakeFetchRequestURI_POST_WalletNonceMismatch(t *testing.T) {
 	}
 }
 
+func TestMakeFetchRequestURI_POST_StrictRequiresWalletNonce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id": "test-client",
+		})
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	wallet := &Wallet{ValidationMode: ValidationModeStrict}
+	fetch := MakeFetchRequestURI(wallet, nil)
+	_, err := fetch(srv.URL, "post")
+	if err == nil {
+		t.Fatal("expected error when wallet_nonce is missing in strict mode")
+	}
+	if !contains(err.Error(), "wallet_nonce") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDecryptRequestObjectJWE(t *testing.T) {
 	// Generate wallet encryption key
 	walletKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

@@ -196,6 +196,22 @@ func TestParseAlternativeSchemes(t *testing.T) {
 	}
 }
 
+func TestParseHAIPVCIScheme(t *testing.T) {
+	offer := `{"credential_issuer":"https://issuer.example","credential_configuration_ids":["pid"],"grants":{}}`
+	uri := "haip-vci://?credential_offer=" + url.QueryEscape(offer)
+
+	reqType, result, err := Parse(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reqType != TypeVCI {
+		t.Fatalf("expected TypeVCI, got %d", reqType)
+	}
+	if result.(*CredentialOffer).CredentialIssuer != "https://issuer.example" {
+		t.Fatalf("unexpected issuer: %s", result.(*CredentialOffer).CredentialIssuer)
+	}
+}
+
 func TestParseVPRequestObjectOverridesOuterParams(t *testing.T) {
 	payload := map[string]any{
 		"client_id":     "https://verifier.example",
@@ -269,6 +285,7 @@ func TestParseErrorCases(t *testing.T) {
 		{"random string", "not-a-valid-input"},
 		{"invalid json", "{broken"},
 		{"json without markers", `{"foo":"bar"}`},
+		{"legacy haip scheme", "haip://?client_id=test&response_type=vp_token"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

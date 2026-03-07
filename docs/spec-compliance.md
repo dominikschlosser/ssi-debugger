@@ -6,9 +6,9 @@ Status of implemented features against the relevant specifications.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Authorization request parsing | Implemented | `openid4vp://`, `haip://`, `eudi-openid4vp://` schemes |
+| Authorization request parsing | Implemented | `openid4vp://`, `haip-vp://`, `eudi-openid4vp://` schemes |
 | `request_uri` (GET) | Implemented | Fetches and parses signed request objects |
-| `request_uri_method=post` | Implemented | Sends `wallet_metadata` and `wallet_nonce` |
+| `request_uri_method=post` | Implemented | Sends `wallet_metadata` and `wallet_nonce`; strict mode rejects missing `wallet_nonce` in the response |
 | Encrypted request objects (JWE) | Implemented | `--require-encrypted-request` flag |
 | DCQL query evaluation | Implemented | Including `credential_sets` constraints |
 | `direct_post` response mode | Implemented | |
@@ -24,7 +24,7 @@ Status of implemented features against the relevant specifications.
 | SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
 | Request object `typ` header | Enforced in strict mode | Debug mode logs a warning and continues |
 | `trusted_authorities` (`etsi_tl`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust list |
-| `transaction_data` | Accepted with warning | Spec requires wallets to reject if unsupported; this tool intentionally accepts it with a log warning to allow testing verifiers that send it |
+| `transaction_data` | Enforced in strict mode | Debug mode logs a warning and continues; strict mode rejects unsupported `transaction_data` |
 
 
 ## OID4VCI 1.0 (OpenID for Verifiable Credential Issuance)

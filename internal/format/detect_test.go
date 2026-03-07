@@ -71,6 +71,7 @@ func TestDetect_OID4VCI_URIScheme(t *testing.T) {
 		input string
 	}{
 		{"basic", "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D"},
+		{"haip-vci", "haip-vci://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D"},
 		{"uppercase", "OpenID-Credential-Offer://?credential_offer=test"},
 	}
 	for _, tt := range tests {
@@ -89,7 +90,7 @@ func TestDetect_OID4VP_URIScheme(t *testing.T) {
 		input string
 	}{
 		{"openid4vp", "openid4vp://?client_id=did:example:123&response_type=vp_token"},
-		{"haip", "haip://?client_id=did:example:123&response_type=vp_token"},
+		{"haip-vp", "haip-vp://?client_id=did:example:123&response_type=vp_token"},
 		{"eudi", "eudi-openid4vp://?client_id=did:example:123"},
 	}
 	for _, tt := range tests {
@@ -99,6 +100,12 @@ func TestDetect_OID4VP_URIScheme(t *testing.T) {
 				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, FormatOID4VP)
 			}
 		})
+	}
+}
+
+func TestDetect_RejectsLegacyHAIPScheme(t *testing.T) {
+	if got := Detect("haip://?client_id=did:example:123&response_type=vp_token"); got != FormatUnknown {
+		t.Fatalf("Detect(legacy haip://) = %q, want %q", got, FormatUnknown)
 	}
 }
 

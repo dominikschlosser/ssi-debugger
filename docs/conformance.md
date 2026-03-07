@@ -22,18 +22,37 @@ The script currently targets the official wallet plan:
 - `oid4vp-1final-wallet-test-plan`
 - display name: `OpenID for Verifiable Presentations 1.0 Final: Test a wallet - alpha tests (not currently part of certification program)`
 
-## Default scenarios
+## Default scenario
 
-The wrapper runs the official plan twice with variants that match the wallet's current strict-mode support:
+By default the wrapper runs only the stable strict-mode scenario:
 
-- signed `request_uri` with `x509_hash` client IDs, for the happy-flow and invalid-signature coverage
-- unsigned `request_uri` with `redirect_uri` client IDs, for the happy-flow and `response_uri` validation coverage
+- signed `request_uri` with `x509_hash` client IDs
 
-Both runs use:
+This run covers:
+
+- `happy-flow-no-state`
+- `happy-flow-with-state-and-redirect`
+- `invalid-request-object-signature`
+
+The scenario uses:
 
 - `vp_profile=plain_vp`
 - `response_mode=direct_post`
 - `credential_format=sd_jwt_vc`
+
+## Optional alpha scenario
+
+You can opt into the current unsigned alpha path with:
+
+```bash
+OIDF_INCLUDE_ALPHA_UNSIGNED=1 scripts/oidf-wallet-conformance.sh
+```
+
+That adds:
+
+- unsigned `request_uri` with `redirect_uri` client IDs
+
+This is kept behind an explicit flag because the current OIDF alpha suite omits the required `typ: oauth-authz-req+jwt` header for that path, so a spec-strict wallet rejects it.
 
 ## Prerequisites
 
@@ -62,6 +81,7 @@ Useful environment overrides:
 - `PORT`: wallet port, default `8085`
 - `OIDF_RUN_DIR`: keep all runner artifacts in a chosen directory instead of a temp dir
 - `OIDF_WALLET_DIR`: reuse a specific wallet store
+- `OIDF_INCLUDE_ALPHA_UNSIGNED=1`: also run the current unsigned alpha scenario
 - `CONFORMANCE_SERVER`: override the OIDF base URL; defaults to `https://demo.certification.openid.net/`
 
 The script prints the run directory and leaves behind:
@@ -88,7 +108,7 @@ These are the remaining blockers for broad OID4VP wallet-suite coverage:
 - no `dc_api` / `dc_api.jwt` response modes
 - no full verifier trust-anchor validation beyond the supplied `x5c`
 - HAIP support is an **OID4VP subset**, not full HAIP 1.0 issuance/profile coverage
-- the current OIDF **alpha** unsigned `request_uri` path omits the required `typ: oauth-authz-req+jwt` header, so a spec-strict wallet rejects those modules until the suite is updated
+- the current OIDF **alpha** unsigned `request_uri` path omits the required `typ: oauth-authz-req+jwt` header, so a spec-strict wallet rejects that opt-in scenario until the suite is updated
 
 ## References
 

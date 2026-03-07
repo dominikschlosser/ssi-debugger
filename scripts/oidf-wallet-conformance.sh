@@ -8,6 +8,7 @@ SUITE_URL=${OIDF_SUITE_URL:-https://github.com/openid-certification/conformance-
 WALLET_DIR=${OIDF_WALLET_DIR:-"$RUN_DIR/wallet"}
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
 CONFORMANCE_SERVER=${CONFORMANCE_SERVER:-https://demo.certification.openid.net/}
+OIDF_INCLUDE_ALPHA_UNSIGNED=${OIDF_INCLUDE_ALPHA_UNSIGNED:-0}
 
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -29,6 +30,7 @@ VENV_DIR="$RUN_DIR/venv"
 RESULTS_DIR="$RUN_DIR/results"
 RUNNER_LOG="$RUN_DIR/runner.log"
 WALLET_LOG="$RUN_DIR/wallet.log"
+EXTRA_ARGS=""
 
 mkdir -p "$RESULTS_DIR" "$WALLET_DIR"
 
@@ -72,13 +74,18 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1; do
 done
 
 echo "Running official OIDF wallet plan via demo.certification.openid.net"
+if [ "$OIDF_INCLUDE_ALPHA_UNSIGNED" = "1" ]; then
+  EXTRA_ARGS="--include-alpha-unsigned"
+fi
+
 CONFORMANCE_SERVER="$CONFORMANCE_SERVER" \
 CONFORMANCE_TOKEN="$CONFORMANCE_TOKEN" \
 "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/oidf_wallet_conformance.py" \
   --suite-dir "$SUITE_DIR" \
   --wallet-url "$WALLET_URL" \
   --results-dir "$RESULTS_DIR" \
-  --runner-log "$RUNNER_LOG"
+  --runner-log "$RUNNER_LOG" \
+  $EXTRA_ARGS
 
 echo "Wallet log:   $WALLET_LOG"
 echo "Runner log:   $RUNNER_LOG"

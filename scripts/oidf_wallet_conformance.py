@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wallet-url", required=True, help="Base URL of the local wallet server")
     parser.add_argument("--results-dir", required=True, help="Directory for exported official runner results")
     parser.add_argument("--runner-log", required=True, help="Path for mirrored official runner stdout")
+    parser.add_argument(
+        "--include-alpha-unsigned",
+        action="store_true",
+        help="Also run the unsigned redirect_uri alpha scenario, which currently fails against strict mode because the upstream alpha plan omits the required typ header",
+    )
     return parser.parse_args()
 
 
@@ -90,7 +95,12 @@ def create_config(suite_dir: Path, results_dir: Path) -> Path:
     return output
 
 
-def official_runner_args(runner_path: Path, config_path: Path, results_dir: Path) -> list[str]:
+def official_runner_args(
+    runner_path: Path,
+    config_path: Path,
+    results_dir: Path,
+    include_alpha_unsigned: bool,
+) -> list[str]:
     signed = (
         "oid4vp-1final-wallet-test-plan"
         "[credential_format=sd_jwt_vc]"
@@ -99,15 +109,7 @@ def official_runner_args(runner_path: Path, config_path: Path, results_dir: Path
         "[vp_profile=plain_vp]"
         "[response_mode=direct_post]"
     )
-    redirect = (
-        "oid4vp-1final-wallet-test-plan"
-        "[credential_format=sd_jwt_vc]"
-        "[client_id_prefix=redirect_uri]"
-        "[request_method=request_uri_unsigned]"
-        "[vp_profile=plain_vp]"
-        "[response_mode=direct_post]"
-    )
-    return [
+    args = [
         sys.executable,
         str(runner_path),
         "--export-dir",
@@ -115,9 +117,18 @@ def official_runner_args(runner_path: Path, config_path: Path, results_dir: Path
         "--no-parallel",
         signed,
         str(config_path),
-        redirect,
-        str(config_path),
     ]
+    if include_alpha_unsigned:
+        redirect = (
+            "oid4vp-1final-wallet-test-plan"
+            "[credential_format=sd_jwt_vc]"
+            "[client_id_prefix=redirect_uri]"
+            "[request_method=request_uri_unsigned]"
+            "[vp_profile=plain_vp]"
+            "[response_mode=direct_post]"
+        )
+        args.extend([redirect, str(config_path)])
+    return args
 
 
 def reader_thread(stream, line_queue: queue.Queue[str]) -> None:
@@ -217,7 +228,7 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     config_path = create_config(suite_dir, results_dir)
 
-    cmd = official_runner_args(runner_path, config_path, results_dir)
+    cmd = official_runner_args(runner_path, config_path, results_dir, args.include_alpha_unsigned)
     proc = subprocess.Popen(
         cmd,
         cwd=suite_dir / "scripts",

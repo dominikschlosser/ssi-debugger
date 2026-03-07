@@ -6,3 +6,6 @@ e2e/node_modules/
 e2e/test-results/
 coverage.out
 .env
+runner.log
+wallet.log
+oid4vp-1final-wallet-test-plan-*.zip

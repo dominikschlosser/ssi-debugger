@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -174,7 +175,7 @@ func TestParseAlternativeSchemes(t *testing.T) {
 	tests := []struct {
 		scheme string
 	}{
-		{"haip://"},
+		{"haip-vp://"},
 		{"eudi-openid4vp://"},
 	}
 	for _, tt := range tests {
@@ -192,6 +193,55 @@ func TestParseAlternativeSchemes(t *testing.T) {
 				t.Errorf("unexpected client_id: %s", ar.ClientID)
 			}
 		})
+	}
+}
+
+func TestParseVPRequestObjectOverridesOuterParams(t *testing.T) {
+	payload := map[string]any{
+		"client_id":     "https://verifier.example",
+		"response_type": "vp_token",
+		"response_mode": "direct_post.jwt",
+		"response_uri":  "https://verifier.example/request-object",
+		"nonce":         "request-object-nonce",
+	}
+	jwt := makeTestJWT(map[string]any{"alg": "ES256", "typ": "oauth-authz-req+jwt"}, payload)
+	uri := "openid4vp://?client_id=https://verifier.example&response_type=vp_token&response_mode=direct_post&response_uri=" +
+		url.QueryEscape("https://verifier.example/outer") + "&nonce=outer-nonce&request=" + url.QueryEscape(jwt)
+
+	_, result, err := Parse(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ar := result.(*AuthorizationRequest)
+	if ar.ResponseMode != "direct_post.jwt" {
+		t.Errorf("expected request object response_mode, got %s", ar.ResponseMode)
+	}
+	if ar.ResponseURI != "https://verifier.example/request-object" {
+		t.Errorf("expected request object response_uri, got %s", ar.ResponseURI)
+	}
+	if ar.Nonce != "request-object-nonce" {
+		t.Errorf("expected request object nonce, got %s", ar.Nonce)
+	}
+	if ar.RequestObject == nil || ar.RequestObject.Raw != jwt {
+		t.Fatal("expected raw request object to be preserved")
+	}
+}
+
+func TestParseVPRejectsMismatchedRequestObjectClientID(t *testing.T) {
+	payload := map[string]any{
+		"client_id":     "https://inner.example",
+		"response_type": "vp_token",
+	}
+	jwt := makeTestJWT(map[string]any{"alg": "ES256"}, payload)
+	uri := "openid4vp://?client_id=https://outer.example&request=" + url.QueryEscape(jwt)
+
+	_, _, err := Parse(uri)
+	if err == nil {
+		t.Fatal("expected client_id mismatch error")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "client_id") || !strings.Contains(got, "outer") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -39,7 +39,7 @@ func ParseWithOptions(raw string, opts ParseOptions) (RequestType, any, error) {
 	if strings.HasPrefix(raw, "openid-credential-offer://") {
 		return parseVCIURI(raw)
 	}
-	if strings.HasPrefix(raw, "openid4vp://") || strings.HasPrefix(raw, "haip://") || strings.HasPrefix(raw, "eudi-openid4vp://") {
+	if strings.HasPrefix(raw, "openid4vp://") || strings.HasPrefix(raw, "haip-vp://") || strings.HasPrefix(raw, "eudi-openid4vp://") {
 		return parseVPURI(raw, opts)
 	}
 
@@ -75,7 +75,7 @@ func parseVCIURI(raw string) (RequestType, any, error) {
 	return parseVCIParams(u.Query())
 }
 
-// parseVPURI parses an openid4vp://, haip://, or eudi-openid4vp:// URI.
+// parseVPURI parses an openid4vp://, haip-vp://, or eudi-openid4vp:// URI.
 func parseVPURI(raw string, opts ParseOptions) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -193,8 +193,21 @@ func parseVPParams(q url.Values, opts ParseOptions) (RequestType, any, error) {
 			if err != nil {
 				return TypeVP, nil, fmt.Errorf("parsing request object JWT: %w", err)
 			}
-			req.RequestObject = &RequestObjectJWT{Header: header, Payload: payload}
-			mergeJWTPayloadIntoRequest(req, payload)
+			req.RequestObject = &RequestObjectJWT{Raw: fetched, Header: header, Payload: payload}
+			if err := applyRequestObjectPayload(req, payload); err != nil {
+				return TypeVP, nil, err
+			}
+		}
+	}
+
+	if requestJWT := q.Get("request"); requestJWT != "" {
+		header, payload, _, err := format.ParseJWTParts(requestJWT)
+		if err != nil {
+			return TypeVP, nil, fmt.Errorf("parsing request JWT: %w", err)
+		}
+		req.RequestObject = &RequestObjectJWT{Raw: requestJWT, Header: header, Payload: payload}
+		if err := applyRequestObjectPayload(req, payload); err != nil {
+			return TypeVP, nil, err
 		}
 	}
 
@@ -209,29 +222,33 @@ func parseVPParams(q url.Values, opts ParseOptions) (RequestType, any, error) {
 	return TypeVP, req, nil
 }
 
-// mergeJWTPayloadIntoRequest fills empty request fields from JWT payload claims.
-func mergeJWTPayloadIntoRequest(req *AuthorizationRequest, payload map[string]any) {
-	setIfEmpty := func(target *string, key string) {
-		if *target == "" {
-			if v, ok := payload[key].(string); ok {
-				*target = v
-			}
+// applyRequestObjectPayload applies Request Object claims authoritatively per OID4VP 1.0.
+func applyRequestObjectPayload(req *AuthorizationRequest, payload map[string]any) error {
+	if outerClientID := req.ClientID; outerClientID != "" {
+		if innerClientID, ok := payload["client_id"].(string); ok && innerClientID != "" && innerClientID != outerClientID {
+			return fmt.Errorf("request object client_id %q does not match outer client_id %q", innerClientID, outerClientID)
 		}
 	}
-	setIfEmpty(&req.ClientID, "client_id")
-	setIfEmpty(&req.ResponseType, "response_type")
-	setIfEmpty(&req.ResponseMode, "response_mode")
-	setIfEmpty(&req.Nonce, "nonce")
-	setIfEmpty(&req.State, "state")
-	setIfEmpty(&req.RedirectURI, "redirect_uri")
-	setIfEmpty(&req.ResponseURI, "response_uri")
-	setIfEmpty(&req.Scope, "scope")
 
-	if req.DCQLQuery == nil {
-		if dq, ok := payload["dcql_query"].(map[string]any); ok {
-			req.DCQLQuery = dq
+	setString := func(target *string, key string) {
+		if v, ok := payload[key].(string); ok && v != "" {
+			*target = v
 		}
 	}
+	setString(&req.ClientID, "client_id")
+	setString(&req.ResponseType, "response_type")
+	setString(&req.ResponseMode, "response_mode")
+	setString(&req.Nonce, "nonce")
+	setString(&req.State, "state")
+	setString(&req.RedirectURI, "redirect_uri")
+	setString(&req.ResponseURI, "response_uri")
+	setString(&req.Scope, "scope")
+
+	if dq, ok := payload["dcql_query"].(map[string]any); ok {
+		req.DCQLQuery = dq
+	}
+
+	return nil
 }
 
 // parseJWTInput decodes a JWT and auto-detects VCI vs VP.
@@ -253,23 +270,23 @@ func parseJWTInput(raw string) (RequestType, any, error) {
 
 	// VP: has client_id or response_type
 	if _, ok := payload["client_id"]; ok {
-		rt, req := buildVPFromJWT(header, payload)
+		rt, req := buildVPFromJWT(raw, header, payload)
 		return rt, req, nil
 	}
 	if _, ok := payload["response_type"]; ok {
-		rt, req := buildVPFromJWT(header, payload)
+		rt, req := buildVPFromJWT(raw, header, payload)
 		return rt, req, nil
 	}
 
 	return 0, nil, fmt.Errorf("JWT payload does not contain VCI or VP markers (credential_issuer, client_id, response_type)")
 }
 
-func buildVPFromJWT(header, payload map[string]any) (RequestType, *AuthorizationRequest) {
+func buildVPFromJWT(raw string, header, payload map[string]any) (RequestType, *AuthorizationRequest) {
 	req := &AuthorizationRequest{
-		RequestObject: &RequestObjectJWT{Header: header, Payload: payload},
+		RequestObject: &RequestObjectJWT{Raw: raw, Header: header, Payload: payload},
 		FullParams:    make(map[string]string),
 	}
-	mergeJWTPayloadIntoRequest(req, payload)
+	_ = applyRequestObjectPayload(req, payload)
 	return TypeVP, req
 }
 

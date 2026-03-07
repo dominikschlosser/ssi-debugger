@@ -56,20 +56,27 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		return
 	}
 
-	// Check client_id against x5c SAN / redirect_uri
 	responseURI := authReq.ResponseURI
 	if responseURI == "" {
 		responseURI = authReq.RedirectURI
 	}
-	if warning := VerifyClientID(authReq.ClientID, authReq.RequestObject, responseURI); warning != "" {
-		s.log("  WARNING: %s", warning)
-		s.wallet.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)
+	findings, err := ValidatePresentationRequest(s.wallet.ValidationMode, authReq.ClientID, authReq.RequestObject, responseURI)
+	if err != nil {
+		s.log("  ERROR: %v", err)
+		s.wallet.AddLog("presentation", err.Error(), false)
+		s.wallet.NotifyError(WalletError{
+			Message: "Authorization request validation failed",
+			Detail:  err.Error(),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
 	}
-
-	// Validate Request Object typ header (OID4VP 1.0: MUST be oauth-authz-req+jwt)
-	if warning := ValidateRequestObject(authReq.ClientID, authReq.RequestObject); warning != "" {
-		s.log("  WARNING: %s", warning)
-		s.wallet.AddLog("presentation", fmt.Sprintf("request object warning: %s", warning), false)
+	for _, finding := range findings {
+		s.log("  WARNING: %s", finding)
+		s.wallet.AddLog("presentation", fmt.Sprintf("request validation warning: %s", finding), false)
 	}
 
 	// HAIP 1.0 compliance check
@@ -298,7 +305,7 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 }
 
 // parseAuthParams extracts authorization request params from URL values.
-func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions) (*AuthorizationRequestParams, error) {
+func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode ValidationMode) (*AuthorizationRequestParams, error) {
 	get := func(key string) string {
 		if vs, ok := values[key]; ok && len(vs) > 0 {
 			return vs[0]
@@ -316,9 +323,10 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions) (*Aut
 		ResponseURI:  get("response_uri"),
 	}
 
-	// Warn about transaction_data — spec says wallets MUST reject if unsupported,
-	// but as a testing tool we accept it to allow debugging verifiers that send it.
 	if td := get("transaction_data"); td != "" {
+		if mode == ValidationModeStrict {
+			return nil, fmt.Errorf("transaction_data is not supported by this wallet")
+		}
 		log.Printf("[Wallet] WARNING: request contains transaction_data which is not processed (OID4VP §7.2)")
 	}
 
@@ -344,66 +352,34 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions) (*Aut
 
 		parsed, err := ParseAuthorizationRequestWithOptions(syntheticURI, opts)
 		if err != nil {
-			log.Printf("[Wallet] Failed to parse request_uri %q: %v", requestURI, err)
-		} else {
-			if params.ClientID == "" {
-				params.ClientID = parsed.ClientID
-			}
-			if params.Nonce == "" {
-				params.Nonce = parsed.Nonce
-			}
-			if params.State == "" {
-				params.State = parsed.State
-			}
-			if params.ResponseURI == "" {
-				params.ResponseURI = parsed.ResponseURI
-			}
-			if params.RedirectURI == "" {
-				params.RedirectURI = parsed.RedirectURI
-			}
-			if params.ResponseMode == "" {
-				params.ResponseMode = parsed.ResponseMode
-			}
-			if params.DCQLQuery == nil {
-				params.DCQLQuery = parsed.DCQLQuery
-			}
-			if params.RequestObject == nil {
-				params.RequestObject = parsed.RequestObject
-			}
+			return nil, fmt.Errorf("parsing request_uri %q: %w", requestURI, err)
 		}
+		params.ClientID = parsed.ClientID
+		params.ResponseType = parsed.ResponseType
+		params.Nonce = parsed.Nonce
+		params.State = parsed.State
+		params.ResponseURI = parsed.ResponseURI
+		params.RedirectURI = parsed.RedirectURI
+		params.ResponseMode = parsed.ResponseMode
+		params.DCQLQuery = parsed.DCQLQuery
+		params.RequestObject = parsed.RequestObject
 	}
 
 	// If request (JWT) is present, parse it
 	if requestJWT := get("request"); requestJWT != "" {
 		parsed, err := ParseAuthorizationRequestWithOptions(requestJWT, opts)
 		if err != nil {
-			log.Printf("[Wallet] Failed to parse request JWT: %v", err)
-		} else {
-			if params.ClientID == "" {
-				params.ClientID = parsed.ClientID
-			}
-			if params.Nonce == "" {
-				params.Nonce = parsed.Nonce
-			}
-			if params.State == "" {
-				params.State = parsed.State
-			}
-			if params.ResponseURI == "" {
-				params.ResponseURI = parsed.ResponseURI
-			}
-			if params.RedirectURI == "" {
-				params.RedirectURI = parsed.RedirectURI
-			}
-			if params.ResponseMode == "" {
-				params.ResponseMode = parsed.ResponseMode
-			}
-			if params.DCQLQuery == nil {
-				params.DCQLQuery = parsed.DCQLQuery
-			}
-			if params.RequestObject == nil {
-				params.RequestObject = parsed.RequestObject
-			}
+			return nil, fmt.Errorf("parsing request JWT: %w", err)
 		}
+		params.ClientID = parsed.ClientID
+		params.ResponseType = parsed.ResponseType
+		params.Nonce = parsed.Nonce
+		params.State = parsed.State
+		params.ResponseURI = parsed.ResponseURI
+		params.RedirectURI = parsed.RedirectURI
+		params.ResponseMode = parsed.ResponseMode
+		params.DCQLQuery = parsed.DCQLQuery
+		params.RequestObject = parsed.RequestObject
 	}
 
 	if params.ClientID == "" {

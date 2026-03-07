@@ -175,6 +175,9 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 					logFn("  wallet_nonce validated in request object")
 				}
 			} else {
+				if w.ValidationMode == ValidationModeStrict {
+					return "", fmt.Errorf("request object does not contain wallet_nonce")
+				}
 				if logFn != nil {
 					logFn("  WARNING: request object does not contain wallet_nonce (verifier MUST include it per OID4VP 1.0 §5.10)")
 				}

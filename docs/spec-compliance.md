@@ -13,7 +13,7 @@ Status of implemented features against the relevant specifications.
 | DCQL query evaluation | Implemented | Including `credential_sets` constraints |
 | `direct_post` response mode | Implemented | |
 | `direct_post.jwt` response mode | Implemented | JARM-encrypted responses |
-| JAR (signed request objects) | Implemented | Signature verification with x5c chain |
+| JAR (signed request objects) | Implemented | Strict mode verifies the JWS signature with the leaf `x5c` key and rejects failures; debug mode logs findings and continues |
 | `x509_san_dns:` client_id | Implemented | Verified against leaf cert SAN |
 | `x509_hash:` client_id | Implemented | SHA-256 thumbprint matching |
 | `redirect_uri:` client_id | Implemented | Parsed, no additional validation |
@@ -22,7 +22,7 @@ Status of implemented features against the relevant specifications.
 | VP Token as JSON array | Implemented | Multiple credentials in a single response |
 | `fragment` response mode | Implemented | Builds redirect URL with vp_token/state as fragment params; not the default |
 | SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
-| Request object `typ` header | Validated | Warns if not `oauth-authz-req+jwt` per OID4VP §5.3 |
+| Request object `typ` header | Enforced in strict mode | Debug mode logs a warning and continues |
 | `trusted_authorities` (`etsi_tl`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust list |
 | `transaction_data` | Accepted with warning | Spec requires wallets to reject if unsupported; this tool intentionally accepts it with a log warning to allow testing verifiers that send it |
 

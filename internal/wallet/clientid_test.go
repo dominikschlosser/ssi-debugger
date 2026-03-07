@@ -48,6 +48,19 @@ func testCertDER(dnsNames []string) (string, []byte) {
 	return base64.StdEncoding.EncodeToString(der), der
 }
 
+func testCertWithKeyDER(dnsNames []string) (*ecdsa.PrivateKey, string, []byte) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "test-signer"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     dnsNames,
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	return key, base64.StdEncoding.EncodeToString(der), der
+}
+
 func testRSACertDER() (string, []byte) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	tmpl := &x509.Certificate{
@@ -397,5 +410,42 @@ func TestVerifyAlgMatchesCert_NoX5C(t *testing.T) {
 	}
 	if warning := verifyAlgMatchesCert(reqObj); warning != "" {
 		t.Errorf("expected no warning without x5c, got: %s", warning)
+	}
+}
+
+func TestVerifyRequestObjectSignature(t *testing.T) {
+	key, certB64, _ := testCertWithKeyDER([]string{"example.com"})
+	header := map[string]any{
+		"alg": "ES256",
+		"typ": "oauth-authz-req+jwt",
+		"x5c": []any{certB64},
+	}
+	payload := map[string]any{
+		"client_id":     "x509_san_dns:example.com",
+		"response_type": "vp_token",
+		"nonce":         "nonce-123",
+	}
+
+	raw, err := signJWT(header, payload, key)
+	if err != nil {
+		t.Fatalf("signJWT: %v", err)
+	}
+	parsedHeader, parsedPayload, _, err := format.ParseJWTParts(raw)
+	if err != nil {
+		t.Fatalf("ParseJWTParts: %v", err)
+	}
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Raw:     raw,
+		Header:  parsedHeader,
+		Payload: parsedPayload,
+	}
+	if warning := VerifyRequestObjectSignature(reqObj); warning != "" {
+		t.Fatalf("expected valid signature, got %s", warning)
+	}
+
+	reqObj.Raw = raw[:len(raw)-1] + "A"
+	if warning := VerifyRequestObjectSignature(reqObj); warning == "" {
+		t.Fatal("expected signature verification failure")
 	}
 }

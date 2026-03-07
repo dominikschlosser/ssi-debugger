@@ -15,17 +15,64 @@
 package wallet
 
 import (
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/jsonutil"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
+
+// VerifyRequestObjectSignature verifies the Request Object JWS using the leaf x5c certificate.
+// If an x5c chain is present, it also verifies that the supplied chain is internally consistent.
+func VerifyRequestObjectSignature(reqObj *oid4vc.RequestObjectJWT) string {
+	if reqObj == nil {
+		return ""
+	}
+	if reqObj.Raw == "" {
+		return "Request Object signature cannot be verified because the raw JWT is unavailable"
+	}
+	if reqObj.Header == nil {
+		return "Request Object has no header"
+	}
+
+	alg := jsonutil.GetString(reqObj.Header, "alg")
+	if alg == "" || alg == "none" {
+		return fmt.Sprintf("Request Object has unsupported signing algorithm %q", alg)
+	}
+
+	certs, warning := extractCertChain(reqObj)
+	if warning != "" {
+		return warning
+	}
+	if warning := verifySuppliedX5CChain(certs); warning != "" {
+		return warning
+	}
+
+	parts := strings.Split(reqObj.Raw, ".")
+	if len(parts) != 3 {
+		return "Request Object is not a compact JWS"
+	}
+	sigInput := []byte(parts[0] + "." + parts[1])
+	sig, err := format.DecodeBase64URL(parts[2])
+	if err != nil {
+		return fmt.Sprintf("failed to decode Request Object signature: %v", err)
+	}
+
+	if err := verifyJWSSignature(certs[0].PublicKey, alg, sigInput, sig); err != nil {
+		return fmt.Sprintf("Request Object signature verification failed: %v", err)
+	}
+
+	return ""
+}
 
 // VerifyClientID validates the client_id prefix against the request object and
 // response URI per OID4VP 1.0 Client Identifier Prefixes.
@@ -197,6 +244,36 @@ func extractLeafCert(reqObj *oid4vc.RequestObjectJWT) (*x509.Certificate, string
 	return cert, ""
 }
 
+func extractCertChain(reqObj *oid4vc.RequestObjectJWT) ([]*x509.Certificate, string) {
+	if reqObj == nil || reqObj.Header == nil {
+		return nil, "Request Object signature verification requires an x5c header"
+	}
+
+	x5cArr := jsonutil.GetArray(reqObj.Header, "x5c")
+	if len(x5cArr) == 0 {
+		return nil, "Request Object signature verification requires an x5c header"
+	}
+
+	certs := make([]*x509.Certificate, 0, len(x5cArr))
+	for i, entry := range x5cArr {
+		b64, ok := entry.(string)
+		if !ok {
+			return nil, fmt.Sprintf("Request Object x5c[%d] is not a string", i)
+		}
+		der, err := format.DecodeBase64Std(b64)
+		if err != nil {
+			return nil, fmt.Sprintf("failed to decode Request Object x5c[%d]: %v", i, err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Sprintf("failed to parse Request Object x5c[%d]: %v", i, err)
+		}
+		certs = append(certs, cert)
+	}
+
+	return certs, ""
+}
+
 // prefixRequiresSigning returns true if the client_id prefix requires a signed
 // Request Object per OID4VP 1.0.
 func prefixRequiresSigning(clientID string) bool {
@@ -268,4 +345,99 @@ func verifyAlgMatchesCert(reqObj *oid4vc.RequestObjectJWT) string {
 	}
 
 	return ""
+}
+
+func verifySuppliedX5CChain(certs []*x509.Certificate) string {
+	if len(certs) < 2 {
+		return ""
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(certs[len(certs)-1])
+
+	intermediates := x509.NewCertPool()
+	for _, cert := range certs[1 : len(certs)-1] {
+		intermediates.AddCert(cert)
+	}
+
+	if _, err := certs[0].Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}); err != nil {
+		return fmt.Sprintf("Request Object x5c chain is not internally consistent: %v", err)
+	}
+
+	return ""
+}
+
+func verifyJWSSignature(pubKey crypto.PublicKey, alg string, sigInput, sig []byte) error {
+	hash, err := jwsHash(alg)
+	if err != nil {
+		return err
+	}
+	digest := hashDigest(hash, sigInput)
+
+	switch key := pubKey.(type) {
+	case *ecdsa.PublicKey:
+		if !verifyECDSAJWS(key, sig, digest) {
+			return fmt.Errorf("%s signature invalid", alg)
+		}
+		return nil
+	case *rsa.PublicKey:
+		switch {
+		case strings.HasPrefix(alg, "RS"):
+			return rsa.VerifyPKCS1v15(key, hash, digest, sig)
+		case strings.HasPrefix(alg, "PS"):
+			return rsa.VerifyPSS(key, hash, digest, sig, nil)
+		default:
+			return fmt.Errorf("algorithm %s is not compatible with RSA", alg)
+		}
+	default:
+		return fmt.Errorf("unsupported public key type %T", pubKey)
+	}
+}
+
+func jwsHash(alg string) (crypto.Hash, error) {
+	switch alg {
+	case "ES256", "RS256", "PS256":
+		return crypto.SHA256, nil
+	case "ES384", "RS384", "PS384":
+		return crypto.SHA384, nil
+	case "ES512", "RS512", "PS512":
+		return crypto.SHA512, nil
+	default:
+		return 0, fmt.Errorf("unsupported JWS algorithm %q", alg)
+	}
+}
+
+func hashDigest(hash crypto.Hash, input []byte) []byte {
+	switch hash {
+	case crypto.SHA256:
+		sum := sha256.Sum256(input)
+		return sum[:]
+	case crypto.SHA384:
+		sum := sha512.Sum384(input)
+		return sum[:]
+	case crypto.SHA512:
+		sum := sha512.Sum512(input)
+		return sum[:]
+	default:
+		return nil
+	}
+}
+
+func verifyECDSAJWS(pub *ecdsa.PublicKey, sig, digest []byte) bool {
+	curveBytes := (pub.Params().BitSize + 7) / 8
+	if len(sig) != 2*curveBytes {
+		return false
+	}
+	r := new(big.Int).SetBytes(sig[:curveBytes])
+	s := new(big.Int).SetBytes(sig[curveBytes:])
+
+	if pub.Curve == elliptic.P256() || pub.Curve == elliptic.P384() || pub.Curve == elliptic.P521() {
+		return ecdsa.Verify(pub, digest, r, s)
+	}
+
+	return false
 }

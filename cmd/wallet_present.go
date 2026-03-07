@@ -74,15 +74,21 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 // runPresent handles an OID4VP authorization request: evaluates credentials,
 // optionally shows a consent UI, creates VP tokens, and submits the response.
 func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port int) error {
-	parsed, err := wallet.ParseAuthorizationRequest(uri)
+	parsed, err := wallet.ParseAuthorizationRequestWithOptions(uri, oid4vc.ParseOptions{
+		FetchRequestURI: wallet.MakeFetchRequestURI(w, nil),
+	})
 	if err != nil {
 		return fmt.Errorf("parsing authorization request: %w", err)
 	}
 
-	if warning := wallet.VerifyClientID(parsed.ClientID, parsed.RequestObject, wallet.GetResponseURI(parsed)); warning != "" {
+	findings, err := wallet.ValidatePresentationRequest(w.ValidationMode, parsed.ClientID, parsed.RequestObject, wallet.GetResponseURI(parsed))
+	if err != nil {
+		return err
+	}
+	for _, warning := range findings {
 		yellow := color.New(color.FgYellow)
 		yellow.Printf("  WARNING: %s\n", warning)
-		w.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)
+		w.AddLog("presentation", fmt.Sprintf("request validation warning: %s", warning), false)
 	}
 
 	// Evaluate DCQL

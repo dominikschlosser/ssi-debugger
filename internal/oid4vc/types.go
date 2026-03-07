@@ -58,6 +58,7 @@ type AuthorizationRequest struct {
 
 // RequestObjectJWT holds the decoded header and payload of a JWT request object.
 type RequestObjectJWT struct {
+	Raw     string
 	Header  map[string]any
 	Payload map[string]any
 }

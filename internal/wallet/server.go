@@ -160,13 +160,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if r.Method == "GET" {
-		authReq, err = parseAuthParams(r.URL.Query(), s.parseOpts)
+		authReq, err = parseAuthParams(r.URL.Query(), s.parseOpts, s.wallet.ValidationMode)
 	} else {
 		if parseErr := r.ParseForm(); parseErr != nil {
 			http.Error(w, "invalid form data", http.StatusBadRequest)
 			return
 		}
-		authReq, err = parseAuthParams(r.Form, s.parseOpts)
+		authReq, err = parseAuthParams(r.Form, s.parseOpts, s.wallet.ValidationMode)
 	}
 
 	if err != nil {
@@ -221,9 +221,20 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	if parsedResponseURI == "" {
 		parsedResponseURI = parsed.RedirectURI
 	}
-	if warning := VerifyClientID(parsed.ClientID, parsed.RequestObject, parsedResponseURI); warning != "" {
-		s.log("  WARNING: %s", warning)
-		s.wallet.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)
+	findings, err := ValidatePresentationRequest(s.wallet.ValidationMode, parsed.ClientID, parsed.RequestObject, parsedResponseURI)
+	if err != nil {
+		s.log("  ERROR: %v", err)
+		s.wallet.AddLog("presentation", err.Error(), false)
+		s.wallet.NotifyError(WalletError{
+			Message: "Authorization request validation failed",
+			Detail:  err.Error(),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, finding := range findings {
+		s.log("  WARNING: %s", finding)
+		s.wallet.AddLog("presentation", fmt.Sprintf("request validation warning: %s", finding), false)
 	}
 
 	authReq := &AuthorizationRequestParams{

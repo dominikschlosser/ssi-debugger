@@ -1,48 +1,94 @@
 # OIDF Conformance
 
-This repository can be used against the OpenID Foundation wallet conformance tests in **strict** mode, but not all official test plans are supported yet.
+This repository can run the official OpenID Foundation wallet runner in **strict** mode against the OID4VP early-version wallet plan, with the local wallet acting as the wallet under test.
 
-## What is included here
+## What the script does
 
-- `scripts/oidf-wallet-conformance.sh` starts the built-in wallet in a conformance-friendly mode:
-  - `wallet serve`
-  - `--mode strict`
-  - `--auto-accept`
-  - `--pid`
-- The wallet now uses final-spec request precedence and final OID4VCI credential request payloads.
+`scripts/oidf-wallet-conformance.sh` now:
 
-## Current scope
+- loads `OIDF_TOKEN` from the local `.env` file or `CONFORMANCE_TOKEN` from the environment
+- downloads the latest official OIDF conformance suite
+- creates a Python virtualenv with the runner dependencies
+- starts `oid4vc-dev wallet serve --mode strict --auto-accept --pid`
+- derives a local DCQL config from the official `vp-wallet-test-config-dcql.json`
+- runs the official `run-test-plan.py` against `https://demo.certification.openid.net/`
+- monitors waiting modules and automatically:
+  - submits the generated verifier request URL into the local wallet
+  - follows returned verifier `redirect_uri` values
+  - uploads a placeholder screenshot for negative tests that require one
 
-The current strict-mode wallet is suitable for the OID4VP subset that matches the features implemented in this repository:
+The script currently targets the official wallet plan:
 
-- `openid4vp://`, `haip-vp://`, `eudi-openid4vp://`
-- `direct_post` and `direct_post.jwt`
-- signed Request Objects with `x5c`
-- `request_uri` and `request_uri_method=post`
-- SD-JWT and mDoc presentation
-- DCQL-based matching
+- `oid4vp-1final-wallet-test-plan`
+- display name: `OpenID for Verifiable Presentations 1.0 Final: Test a wallet - alpha tests (not currently part of certification program)`
 
-## Known gaps
+## Default scenarios
 
-These areas still prevent claiming full OIDF wallet-suite coverage:
+The wrapper runs the official plan twice with variants that match the wallet's current strict-mode support:
 
-- no Presentation Exchange / `presentation_definition` support
-- no `dc_api` / `dc_api.jwt` response modes
-- no full verifier trust-anchor management for Request Object chains beyond the supplied `x5c`
-- HAIP support is currently an **OID4VP subset**, not the full HAIP 1.0 profile
-- no integrated runner for the external OIDF certification service; the official tests still need to be configured and launched there
+- signed `request_uri` with `x509_hash` client IDs, for the happy-flow and invalid-signature coverage
+- unsigned `request_uri` with `redirect_uri` client IDs, for the happy-flow and `response_uri` validation coverage
 
-## Running against the OIDF service
+Both runs use:
 
-1. Start the wallet:
+- `vp_profile=plain_vp`
+- `response_mode=direct_post`
+- `credential_format=sd_jwt_vc`
+
+## Prerequisites
+
+Create a local `.env` file with your OIDF bearer token:
+
+```bash
+OIDF_TOKEN=...
+```
+
+`.env` is gitignored in this repository.
+
+You also need:
+
+- `python3`
+- `curl`
+- network access to `demo.certification.openid.net`
+
+## Running it
 
 ```bash
 scripts/oidf-wallet-conformance.sh
 ```
 
-2. Use the running wallet endpoint in the OIDF conformance service as the wallet under test.
+Useful environment overrides:
 
-3. Select only plans that match the current implementation scope above.
+- `PORT`: wallet port, default `8085`
+- `OIDF_RUN_DIR`: keep all runner artifacts in a chosen directory instead of a temp dir
+- `OIDF_WALLET_DIR`: reuse a specific wallet store
+- `CONFORMANCE_SERVER`: override the OIDF base URL; defaults to `https://demo.certification.openid.net/`
+
+The script prints the run directory and leaves behind:
+
+- wallet log
+- mirrored official runner log
+- exported OIDF result archives
+
+## Current scope
+
+The strict-mode wallet is currently suitable for this OID4VP subset:
+
+- `openid4vp://`, `haip-vp://`, `eudi-openid4vp://`
+- `direct_post` and `direct_post.jwt`
+- signed and unsigned `request_uri`
+- `request_uri_method=post`
+- DCQL-based matching
+- SD-JWT and mDoc presentation
+
+## Known gaps
+
+These are the remaining blockers for broad OID4VP wallet-suite coverage:
+
+- no `dc_api` / `dc_api.jwt` response modes
+- no full verifier trust-anchor validation beyond the supplied `x5c`
+- HAIP support is an **OID4VP subset**, not full HAIP 1.0 issuance/profile coverage
+- the current OIDF **alpha** unsigned `request_uri` path omits the required `typ: oauth-authz-req+jwt` header, so a spec-strict wallet rejects those modules until the suite is updated
 
 ## References
 

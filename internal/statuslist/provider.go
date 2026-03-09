@@ -29,9 +29,20 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
-// GenerateStatusListJWT creates a signed status list JWT (RFC 9596) from a bitstring.
-// If certChain is provided, the x5c header is included for certificate chain validation.
-func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, certChain ...*x509.Certificate) (string, error) {
+// StatusListConfig holds parameters for generating a status list JWT.
+type StatusListConfig struct {
+	// URI is the status list token URI, used as the "sub" claim (REQUIRED per draft-ietf-oauth-status-list).
+	URI string
+	// Issuer is the "iss" claim value.
+	Issuer string
+	// TTL is the time-to-live in seconds for caching (RECOMMENDED per spec). Defaults to 43200 (12h).
+	TTL int
+	// CertChain, if provided, is included as x5c header for certificate chain validation.
+	CertChain []*x509.Certificate
+}
+
+// GenerateStatusListJWT creates a signed status list JWT (draft-ietf-oauth-status-list) from a bitstring.
+func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, cfg StatusListConfig) (string, error) {
 	// zlib-compress the bitstring
 	var buf bytes.Buffer
 	w, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
@@ -47,11 +58,22 @@ func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, certC
 
 	lst := format.EncodeBase64URL(buf.Bytes())
 
+	ttl := cfg.TTL
+	if ttl <= 0 {
+		ttl = 43200 // 12 hours default
+	}
+	issuer := cfg.Issuer
+	if issuer == "" {
+		issuer = "https://issuer.example"
+	}
+
 	now := time.Now()
 	payload := map[string]any{
-		"iss": "https://issuer.example",
+		"sub": cfg.URI,
+		"iss": issuer,
 		"iat": now.Unix(),
 		"exp": now.Add(24 * time.Hour).Unix(),
+		"ttl": ttl,
 		"status_list": map[string]any{
 			"bits": 1,
 			"lst":  lst,
@@ -63,9 +85,9 @@ func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, certC
 		"typ": "statuslist+jwt",
 	}
 
-	if len(certChain) > 0 {
+	if len(cfg.CertChain) > 0 {
 		var x5c []string
-		for _, cert := range certChain {
+		for _, cert := range cfg.CertChain {
 			x5c = append(x5c, base64.StdEncoding.EncodeToString(cert.Raw))
 		}
 		header["x5c"] = x5c

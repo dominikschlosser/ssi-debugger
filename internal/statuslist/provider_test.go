@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"strings"
@@ -42,7 +43,11 @@ func TestGenerateStatusListJWT_ValidStructure(t *testing.T) {
 	key := generateTestKey(t)
 	bitstring := make([]byte, 16)
 
-	jwt, err := GenerateStatusListJWT(bitstring, key)
+	cfg := StatusListConfig{
+		URI:    "https://example.com/statuslists/1",
+		Issuer: "https://example.com",
+	}
+	jwt, err := GenerateStatusListJWT(bitstring, key, cfg)
 	if err != nil {
 		t.Fatalf("GenerateStatusListJWT: %v", err)
 	}
@@ -78,6 +83,16 @@ func TestGenerateStatusListJWT_ValidStructure(t *testing.T) {
 		t.Fatalf("parsing payload: %v", err)
 	}
 
+	if payload["sub"] != "https://example.com/statuslists/1" {
+		t.Errorf("expected sub=https://example.com/statuslists/1, got %v", payload["sub"])
+	}
+	if payload["iss"] != "https://example.com" {
+		t.Errorf("expected iss=https://example.com, got %v", payload["iss"])
+	}
+	if payload["ttl"] != float64(43200) {
+		t.Errorf("expected default ttl=43200, got %v", payload["ttl"])
+	}
+
 	sl, ok := payload["status_list"].(map[string]any)
 	if !ok {
 		t.Fatal("missing status_list in payload")
@@ -96,7 +111,7 @@ func TestGenerateStatusListJWT_RoundTrip(t *testing.T) {
 	// Set index 3 to revoked
 	bitstring[0] = 1 << 3
 
-	jwt, err := GenerateStatusListJWT(bitstring, key)
+	jwt, err := GenerateStatusListJWT(bitstring, key, StatusListConfig{URI: "https://example.com/statuslists/1"})
 	if err != nil {
 		t.Fatalf("GenerateStatusListJWT: %v", err)
 	}
@@ -157,7 +172,7 @@ func TestGenerateStatusListJWT_AllZeros(t *testing.T) {
 	key := generateTestKey(t)
 	bitstring := make([]byte, 16)
 
-	jwt, err := GenerateStatusListJWT(bitstring, key)
+	jwt, err := GenerateStatusListJWT(bitstring, key, StatusListConfig{URI: "https://example.com/statuslists/1"})
 	if err != nil {
 		t.Fatalf("GenerateStatusListJWT: %v", err)
 	}
@@ -185,7 +200,10 @@ func TestGenerateStatusListJWT_WithCertChain(t *testing.T) {
 	}
 
 	bitstring := make([]byte, 16)
-	jwt, err := GenerateStatusListJWT(bitstring, key, leafCert, caCert)
+	jwt, err := GenerateStatusListJWT(bitstring, key, StatusListConfig{
+		URI:       "https://example.com/statuslists/1",
+		CertChain: []*x509.Certificate{leafCert, caCert},
+	})
 	if err != nil {
 		t.Fatalf("GenerateStatusListJWT with cert chain: %v", err)
 	}
@@ -217,7 +235,7 @@ func TestGenerateStatusListJWT_WithoutCertChain(t *testing.T) {
 	key := generateTestKey(t)
 	bitstring := make([]byte, 16)
 
-	jwt, err := GenerateStatusListJWT(bitstring, key)
+	jwt, err := GenerateStatusListJWT(bitstring, key, StatusListConfig{URI: "https://example.com/statuslists/1"})
 	if err != nil {
 		t.Fatal(err)
 	}

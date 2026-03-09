@@ -17,6 +17,7 @@ package statuslist
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -245,7 +246,10 @@ func TestCheckWithOptions_SignatureVerification(t *testing.T) {
 
 	// Generate a status list JWT with x5c chain
 	bitstring := make([]byte, 16)
-	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, leafCert, caCert)
+	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, StatusListConfig{
+		URI:       "https://example.com/statuslists/1",
+		CertChain: []*x509.Certificate{leafCert, caCert},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +310,10 @@ func TestCheckWithOptions_UntrustedCert(t *testing.T) {
 	}
 
 	bitstring := make([]byte, 16)
-	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, leafCert, caCert)
+	statusJWT, err := GenerateStatusListJWT(bitstring, issuerKey, StatusListConfig{
+		URI:       "https://example.com/statuslists/1",
+		CertChain: []*x509.Certificate{leafCert, caCert},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +343,7 @@ func TestCheckWithOptions_NoX5C(t *testing.T) {
 	// Status list JWT without x5c should report signature invalid when trust list provided
 	bitstring := make([]byte, 16)
 	key := generateTestKey(t)
-	statusJWT, err := GenerateStatusListJWT(bitstring, key) // no cert chain
+	statusJWT, err := GenerateStatusListJWT(bitstring, key, StatusListConfig{URI: "https://example.com/statuslists/1"}) // no cert chain
 	if err != nil {
 		t.Fatal(err)
 	}

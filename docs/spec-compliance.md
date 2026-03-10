@@ -23,7 +23,7 @@ Status of implemented features against the relevant specifications.
 | `fragment` response mode | Implemented | Builds redirect URL with vp_token/state as fragment params; not the default |
 | SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
 | Request object `typ` header | Enforced in strict mode | Debug mode logs a warning and continues |
-| `trusted_authorities` (`etsi_tl`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust list |
+| `trusted_authorities` (`etsi_tl`, `aki`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust lists or matching Authority Key Identifier values |
 | `transaction_data` | Enforced in strict mode | Debug mode logs a warning and continues; strict mode rejects unsupported `transaction_data` |
 
 

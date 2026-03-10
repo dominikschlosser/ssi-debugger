@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
@@ -709,7 +710,36 @@ func TestEvaluateDCQL_TrustedAuthorities_NoMatch(t *testing.T) {
 	}
 }
 
-func TestEvaluateDCQL_TrustedAuthorities_UnknownType(t *testing.T) {
+func TestEvaluateDCQL_TrustedAuthorities_AKIMatch(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+	aki := w.CertChain[0].AuthorityKeyId
+	if len(aki) == 0 {
+		t.Fatal("expected test credential leaf certificate to include an authority key identifier")
+	}
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "aki", "values": []any{format.EncodeBase64URL(aki)}},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_AKINoMatch(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
 	query := map[string]any{
@@ -722,7 +752,7 @@ func TestEvaluateDCQL_TrustedAuthorities_UnknownType(t *testing.T) {
 					map[string]any{"path": []any{"given_name"}},
 				},
 				"trusted_authorities": []any{
-					map[string]any{"type": "aki", "values": []any{"some-value"}},
+					map[string]any{"type": "aki", "values": []any{format.EncodeBase64URL([]byte("wrong-aki"))}},
 				},
 			},
 		},
@@ -730,7 +760,32 @@ func TestEvaluateDCQL_TrustedAuthorities_UnknownType(t *testing.T) {
 
 	matches := w.EvaluateDCQL(query)
 	if len(matches) != 0 {
-		t.Fatalf("expected 0 matches (unknown trusted_authority type), got %d", len(matches))
+		t.Fatalf("expected 0 matches (AKI mismatch), got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_UnsupportedType(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "unsupported", "values": []any{"some-value"}},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Fatalf("expected 0 matches (unsupported trusted_authority type), got %d", len(matches))
 	}
 }
 

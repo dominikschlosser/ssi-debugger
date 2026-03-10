@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"crypto/x509"
 	"log"
 	"sort"
 	"strings"
@@ -482,7 +483,7 @@ func optionMatchesFormat(opt any, queryFormat map[string]string, format string) 
 
 // checkTrustedAuthorities validates that the credential's issuer certificate chain
 // is trusted by at least one of the given trusted authorities.
-// Each entry must have "type" and "values" (array) fields. Only "etsi_tl" type is supported.
+// Each entry must have "type" and "values" (array) fields.
 func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 	for _, taRaw := range taList {
 		taMap, ok := taRaw.(map[string]any)
@@ -502,6 +503,14 @@ func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 		}
 
 		switch taType {
+		case "aki":
+			if len(urls) == 0 {
+				log.Printf("[DCQL]   trusted_authorities: aki entry missing values")
+				continue
+			}
+			if checkAuthorityKeyIdentifiers(cred, urls) {
+				return true
+			}
 		case "etsi_tl":
 			if len(urls) == 0 {
 				log.Printf("[DCQL]   trusted_authorities: etsi_tl entry missing values")
@@ -517,6 +526,119 @@ func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 		}
 	}
 	return false
+}
+
+func checkAuthorityKeyIdentifiers(cred StoredCredential, values []string) bool {
+	certs, err := extractCredentialCertificates(cred)
+	if err != nil {
+		log.Printf("[DCQL]   trusted_authorities: failed to extract certificate chain: %v", err)
+		return false
+	}
+	if len(certs) == 0 {
+		log.Printf("[DCQL]   trusted_authorities: credential contains no certificate chain")
+		return false
+	}
+
+	allowed := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		allowed[v] = struct{}{}
+	}
+
+	for _, cert := range certs {
+		if len(cert.AuthorityKeyId) == 0 {
+			continue
+		}
+		if _, ok := allowed[format.EncodeBase64URL(cert.AuthorityKeyId)]; ok {
+			return true
+		}
+	}
+
+	log.Printf("[DCQL]   trusted_authorities: no certificate in credential chain matched any requested aki")
+	return false
+}
+
+func extractCredentialCertificates(cred StoredCredential) ([]*x509.Certificate, error) {
+	switch cred.Format {
+	case "dc+sd-jwt":
+		token, err := sdjwt.Parse(cred.Raw)
+		if err != nil {
+			return nil, err
+		}
+		return extractX5CCertificates(token.Header)
+	case "mso_mdoc":
+		doc, err := mdoc.Parse(cred.Raw)
+		if err != nil {
+			return nil, err
+		}
+		return extractMDOCX5Chain(doc)
+	default:
+		return nil, nil
+	}
+}
+
+func extractX5CCertificates(header map[string]any) ([]*x509.Certificate, error) {
+	x5cRaw, ok := header["x5c"].([]any)
+	if !ok || len(x5cRaw) == 0 {
+		return nil, nil
+	}
+
+	certs := make([]*x509.Certificate, 0, len(x5cRaw))
+	for _, entry := range x5cRaw {
+		b64, ok := entry.(string)
+		if !ok {
+			return nil, nil
+		}
+		der, err := format.DecodeBase64Std(b64)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+	return certs, nil
+}
+
+func extractMDOCX5Chain(doc *mdoc.Document) ([]*x509.Certificate, error) {
+	if doc.IssuerAuth == nil || doc.IssuerAuth.UnprotectedHeader == nil {
+		return nil, nil
+	}
+
+	x5chainRaw, ok := doc.IssuerAuth.UnprotectedHeader[int64(33)]
+	if !ok {
+		x5chainRaw, ok = doc.IssuerAuth.UnprotectedHeader[uint64(33)]
+		if !ok {
+			return nil, nil
+		}
+	}
+
+	var certDERs [][]byte
+	switch v := x5chainRaw.(type) {
+	case []byte:
+		certDERs = append(certDERs, v)
+	case []any:
+		for _, entry := range v {
+			b, ok := entry.([]byte)
+			if !ok {
+				return nil, nil
+			}
+			certDERs = append(certDERs, b)
+		}
+	default:
+		return nil, nil
+	}
+
+	certs := make([]*x509.Certificate, 0, len(certDERs))
+	for _, der := range certDERs {
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+	return certs, nil
 }
 
 // checkETSITrustList fetches an ETSI trust list and validates the credential's

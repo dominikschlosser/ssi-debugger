@@ -217,11 +217,19 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		s.log("  Request URI Method: %s", parsed.RequestURIMethod)
 	}
 
-	parsedResponseURI := parsed.ResponseURI
-	if parsedResponseURI == "" {
-		parsedResponseURI = parsed.RedirectURI
-	}
-	findings, err := ValidatePresentationRequest(s.wallet.ValidationMode, parsed.ClientID, parsed.RequestObject, parsedResponseURI)
+	findings, err := ValidateAuthorizationRequest(s.wallet.ValidationMode, &AuthorizationRequestParams{
+		ClientID:         parsed.ClientID,
+		ResponseType:     parsed.ResponseType,
+		ResponseMode:     parsed.ResponseMode,
+		Nonce:            parsed.Nonce,
+		State:            parsed.State,
+		RedirectURI:      parsed.RedirectURI,
+		ResponseURI:      parsed.ResponseURI,
+		RequestURIMethod: parsed.RequestURIMethod,
+		ClientMetadata:   parsed.ClientMetadata,
+		DCQLQuery:        parsed.DCQLQuery,
+		RequestObject:    parsed.RequestObject,
+	})
 	if err != nil {
 		s.log("  ERROR: %v", err)
 		s.wallet.AddLog("presentation", err.Error(), false)
@@ -238,15 +246,17 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authReq := &AuthorizationRequestParams{
-		ClientID:      parsed.ClientID,
-		ResponseType:  parsed.ResponseType,
-		ResponseMode:  parsed.ResponseMode,
-		Nonce:         parsed.Nonce,
-		State:         parsed.State,
-		RedirectURI:   parsed.RedirectURI,
-		ResponseURI:   parsed.ResponseURI,
-		DCQLQuery:     parsed.DCQLQuery,
-		RequestObject: parsed.RequestObject,
+		ClientID:         parsed.ClientID,
+		ResponseType:     parsed.ResponseType,
+		ResponseMode:     parsed.ResponseMode,
+		Nonce:            parsed.Nonce,
+		State:            parsed.State,
+		RedirectURI:      parsed.RedirectURI,
+		ResponseURI:      parsed.ResponseURI,
+		RequestURIMethod: parsed.RequestURIMethod,
+		ClientMetadata:   parsed.ClientMetadata,
+		DCQLQuery:        parsed.DCQLQuery,
+		RequestObject:    parsed.RequestObject,
 	}
 
 	s.handleAuthFlow(w, authReq)

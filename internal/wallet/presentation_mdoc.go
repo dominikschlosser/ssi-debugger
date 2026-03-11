@@ -91,7 +91,7 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 		mdocNonce = format.EncodeBase64URL(nonceBytes)
 	}
 
-	jwkThumbprint := extractJWKThumbprint(params.RequestObject)
+	jwkThumbprint := extractJWKThumbprint(params.RequestObject, params.ClientMetadata)
 	sessionTranscriptBytes, err := w.buildSessionTranscript(clientID, responseURI, nonce, mdocNonce, jwkThumbprint)
 	if err != nil {
 		return VPTokenResult{}, fmt.Errorf("building SessionTranscript: %w", err)

@@ -110,6 +110,74 @@ func TestAuthorize_StrictRejectsTransactionData(t *testing.T) {
 	}
 }
 
+func TestAuthorize_RejectsInvalidMDocAlgValuesSupported(t *testing.T) {
+	srv := newTestServer(t, true)
+	requestJWT := makeTestJWT(map[string]any{
+		"alg": "none",
+		"typ": "oauth-authz-req+jwt",
+	}, map[string]any{
+		"client_id":     "https://verifier.example",
+		"response_type": "vp_token",
+		"response_uri":  "https://verifier.example/response",
+		"nonce":         "nonce",
+		"dcql_query": map[string]any{
+			"credentials": []any{
+				map[string]any{
+					"id":     "pid_mdoc",
+					"format": "mso_mdoc",
+				},
+			},
+		},
+		"client_metadata": map[string]any{
+			"vp_formats_supported": map[string]any{
+				"mso_mdoc": map[string]any{
+					"alg_values_supported": []any{"ES256"},
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest("GET", "/authorize?request="+url.QueryEscape(requestJWT), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "COSE algorithm number") {
+		t.Fatalf("expected mdoc alg validation error, got %s", w.Body.String())
+	}
+}
+
+func TestAuthorize_RejectsInvalidOuterClientMetadata(t *testing.T) {
+	srv := newTestServer(t, true)
+	clientMetadata := `{"vp_formats_supported":{"mso_mdoc":{"alg_values_supported":["ES256"]}}}`
+	req := httptest.NewRequest("GET", "/authorize?client_id=https://verifier.example&response_type=vp_token&response_uri=https://verifier.example/response&client_metadata="+url.QueryEscape(clientMetadata), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "COSE algorithm number") {
+		t.Fatalf("expected mdoc alg validation error, got %s", w.Body.String())
+	}
+}
+
+func TestAuthorize_RejectsUnsupportedRequestURIMethod(t *testing.T) {
+	srv := newTestServer(t, true)
+	req := httptest.NewRequest("GET", "/authorize?client_id=https://verifier.example&response_type=vp_token&response_uri=https://verifier.example/response&request_uri=https://verifier.example/request.jwt&request_uri_method=put", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "request_uri_method") {
+		t.Fatalf("expected request_uri_method error, got %s", w.Body.String())
+	}
+}
+
 func TestImportCredentialAPI(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -1073,7 +1141,7 @@ func TestPresentationFlow_RequestURIMethodPost(t *testing.T) {
 		}
 		dcqlJSON, _ := json.Marshal(dcqlQuery)
 
-		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id":     "https://verifier.example",
 			"response_type": "vp_token",
 			"response_mode": "direct_post",
@@ -1083,6 +1151,7 @@ func TestPresentationFlow_RequestURIMethodPost(t *testing.T) {
 			"dcql_query":    json.RawMessage(dcqlJSON),
 			"wallet_nonce":  receivedWalletNonce,
 		})
+		rw.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		rw.Write([]byte(jwt))
 	}))
 	defer requestURIServer.Close()
@@ -1201,6 +1270,7 @@ func TestPresentationFlow_RequestURIMethodPost_Encrypted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encrypting request object: %v", err)
 		}
+		rw.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		rw.Write([]byte(jweStr))
 	}))
 	defer requestURIServer.Close()

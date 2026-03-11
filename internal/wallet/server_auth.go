@@ -31,15 +31,17 @@ import (
 
 // AuthorizationRequestParams holds the extracted fields from an authorization request.
 type AuthorizationRequestParams struct {
-	ClientID      string
-	ResponseType  string
-	ResponseMode  string
-	Nonce         string
-	State         string
-	RedirectURI   string
-	ResponseURI   string
-	DCQLQuery     map[string]any
-	RequestObject *oid4vc.RequestObjectJWT
+	ClientID         string
+	ResponseType     string
+	ResponseMode     string
+	Nonce            string
+	State            string
+	RedirectURI      string
+	ResponseURI      string
+	RequestURIMethod string
+	ClientMetadata   map[string]any
+	DCQLQuery        map[string]any
+	RequestObject    *oid4vc.RequestObjectJWT
 }
 
 // handleAuthFlow is the core OID4VP flow handler.
@@ -56,11 +58,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		return
 	}
 
-	responseURI := authReq.ResponseURI
-	if responseURI == "" {
-		responseURI = authReq.RedirectURI
-	}
-	findings, err := ValidatePresentationRequest(s.wallet.ValidationMode, authReq.ClientID, authReq.RequestObject, responseURI)
+	findings, err := ValidateAuthorizationRequest(s.wallet.ValidationMode, authReq)
 	if err != nil {
 		s.log("  ERROR: %v", err)
 		s.wallet.AddLog("presentation", err.Error(), false)
@@ -235,12 +233,13 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 	var err error
 	// Create VP tokens
 	params := PresentationParams{
-		Nonce:         authReq.Nonce,
-		ClientID:      authReq.ClientID,
-		ResponseURI:   responseURI,
-		RedirectURI:   authReq.RedirectURI,
-		ResponseMode:  authReq.ResponseMode,
-		RequestObject: authReq.RequestObject,
+		Nonce:          authReq.Nonce,
+		ClientID:       authReq.ClientID,
+		ResponseURI:    responseURI,
+		RedirectURI:    authReq.RedirectURI,
+		ResponseMode:   authReq.ResponseMode,
+		ClientMetadata: authReq.ClientMetadata,
+		RequestObject:  authReq.RequestObject,
 	}
 	var vpResult *VPTokenMapResult
 	if ResponseTypeContains(authReq.ResponseType, "vp_token") || authReq.ResponseType == "" {
@@ -314,13 +313,22 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 	}
 
 	params := &AuthorizationRequestParams{
-		ClientID:     get("client_id"),
-		ResponseType: get("response_type"),
-		ResponseMode: get("response_mode"),
-		Nonce:        get("nonce"),
-		State:        get("state"),
-		RedirectURI:  get("redirect_uri"),
-		ResponseURI:  get("response_uri"),
+		ClientID:         get("client_id"),
+		ResponseType:     get("response_type"),
+		ResponseMode:     get("response_mode"),
+		Nonce:            get("nonce"),
+		State:            get("state"),
+		RedirectURI:      get("redirect_uri"),
+		ResponseURI:      get("response_uri"),
+		RequestURIMethod: get("request_uri_method"),
+	}
+
+	if cm := get("client_metadata"); cm != "" {
+		var clientMetadata map[string]any
+		if err := json.Unmarshal([]byte(cm), &clientMetadata); err != nil {
+			return nil, fmt.Errorf("parsing client_metadata: %w", err)
+		}
+		params.ClientMetadata = clientMetadata
 	}
 
 	if td := get("transaction_data"); td != "" {
@@ -328,6 +336,12 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 			return nil, fmt.Errorf("transaction_data is not supported by this wallet")
 		}
 		log.Printf("[Wallet] WARNING: request contains transaction_data which is not processed (OID4VP §7.2)")
+	}
+	if method := get("request_uri_method"); method != "" && get("request_uri") == "" {
+		return nil, fmt.Errorf("request_uri_method requires request_uri")
+	}
+	if method := get("request_uri_method"); method != "" && method != "get" && method != "post" {
+		return nil, fmt.Errorf("unsupported request_uri_method %q", method)
 	}
 
 	// Parse dcql_query if present
@@ -361,6 +375,8 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 		params.ResponseURI = parsed.ResponseURI
 		params.RedirectURI = parsed.RedirectURI
 		params.ResponseMode = parsed.ResponseMode
+		params.RequestURIMethod = parsed.RequestURIMethod
+		params.ClientMetadata = parsed.ClientMetadata
 		params.DCQLQuery = parsed.DCQLQuery
 		params.RequestObject = parsed.RequestObject
 	}
@@ -378,6 +394,8 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 		params.ResponseURI = parsed.ResponseURI
 		params.RedirectURI = parsed.RedirectURI
 		params.ResponseMode = parsed.ResponseMode
+		params.RequestURIMethod = parsed.RequestURIMethod
+		params.ClientMetadata = parsed.ClientMetadata
 		params.DCQLQuery = parsed.DCQLQuery
 		params.RequestObject = parsed.RequestObject
 	}

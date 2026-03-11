@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -39,7 +40,7 @@ func BuildWalletMetadata(w *Wallet) map[string]any {
 				"alg_values_supported": []string{"ES256"},
 			},
 			"mso_mdoc": map[string]any{
-				"alg_values_supported": []string{"ES256"},
+				"alg_values_supported": []int{-7},
 			},
 		},
 		"request_object_signing_alg_values_supported": []string{"ES256"},
@@ -141,6 +142,9 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("POST to request_uri returned HTTP %d", resp.StatusCode)
 	}
+	if err := validateRequestURIResponse(resp.Header.Get("Content-Type")); err != nil {
+		return "", err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -148,6 +152,9 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 	}
 
 	result := strings.TrimSpace(string(body))
+	if !isJWT(result) && !isJWE(result) {
+		return "", fmt.Errorf("request_uri response must be a compact JWT or JWE")
+	}
 
 	// If response is JWE (5 parts), try to decrypt to get the JWT
 	if isJWE(result) {
@@ -163,29 +170,42 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 		}
 		result = decrypted
 	}
+	if !isJWT(result) {
+		return "", fmt.Errorf("request_uri response did not resolve to a compact JWT")
+	}
 
 	// Validate wallet_nonce in the response JWT
-	if isJWT(result) {
-		if _, payload, _, err := format.ParseJWTParts(result); err == nil {
-			if returnedNonce, ok := payload["wallet_nonce"].(string); ok {
-				if returnedNonce != walletNonce {
-					return "", fmt.Errorf("wallet_nonce mismatch in request object: expected %s, got %s", walletNonce, returnedNonce)
-				}
-				if logFn != nil {
-					logFn("  wallet_nonce validated in request object")
-				}
-			} else {
-				if w.ValidationMode == ValidationModeStrict {
-					return "", fmt.Errorf("request object does not contain wallet_nonce")
-				}
-				if logFn != nil {
-					logFn("  WARNING: request object does not contain wallet_nonce (verifier MUST include it per OID4VP 1.0 §5.10)")
-				}
+	if header, payload, _, err := format.ParseJWTParts(result); err == nil {
+		if alg, _ := header["alg"].(string); alg == "" || alg == "none" {
+			return "", fmt.Errorf("request_uri response must contain a signed request object JWT")
+		}
+		if returnedNonce, ok := payload["wallet_nonce"].(string); ok {
+			if returnedNonce != walletNonce {
+				return "", fmt.Errorf("wallet_nonce mismatch in request object: expected %s, got %s", walletNonce, returnedNonce)
 			}
+			if logFn != nil {
+				logFn("  wallet_nonce validated in request object")
+			}
+		} else {
+			return "", fmt.Errorf("request object does not contain wallet_nonce")
 		}
 	}
 
 	return result, nil
+}
+
+func validateRequestURIResponse(contentType string) error {
+	if contentType == "" {
+		return fmt.Errorf("request_uri response missing Content-Type application/oauth-authz-req+jwt")
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return fmt.Errorf("invalid request_uri response Content-Type: %w", err)
+	}
+	if mediaType != "application/oauth-authz-req+jwt" {
+		return fmt.Errorf("request_uri response Content-Type must be application/oauth-authz-req+jwt")
+	}
+	return nil
 }
 
 // isJWT checks if a string looks like a JWT (3 dot-separated parts).

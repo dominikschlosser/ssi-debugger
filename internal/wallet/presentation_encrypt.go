@@ -27,8 +27,8 @@ import (
 // extractJWKThumbprint extracts the encryption JWK from the request object
 // and computes its RFC 7638 thumbprint (SHA-256).
 // Returns nil if no encryption key is found.
-func extractJWKThumbprint(reqObj *oid4vc.RequestObjectJWT) []byte {
-	jwk := findEncryptionJWK(reqObj)
+func extractJWKThumbprint(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) []byte {
+	jwk := findEncryptionJWK(reqObj, clientMetadata)
 	if jwk == nil {
 		return nil
 	}
@@ -38,16 +38,14 @@ func extractJWKThumbprint(reqObj *oid4vc.RequestObjectJWT) []byte {
 // findEncryptionJWK locates the first encryption JWK from client_metadata.jwks
 // per OID4VP 1.0. No fallback to other locations — the wallet enforces strict
 // spec compliance so verifiers can detect misconfigurations.
-func findEncryptionJWK(reqObj *oid4vc.RequestObjectJWT) map[string]any {
-	if reqObj == nil || reqObj.Payload == nil {
-		return nil
+func findEncryptionJWK(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) map[string]any {
+	if reqObj != nil && reqObj.Payload != nil {
+		clientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any)
+		if ok {
+			return firstJWK(clientMeta["jwks"])
+		}
 	}
-
-	clientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	return firstJWK(clientMeta["jwks"])
+	return firstJWK(clientMetadata["jwks"])
 }
 
 // firstJWK extracts the first key from a JWKS value ({"keys": [...]}).
@@ -113,8 +111,8 @@ type encryptionKeyInfo struct {
 
 // extractEncryptionKey extracts the EC public key, kid, and alg from
 // client_metadata.jwks per OID4VP 1.0.
-func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*encryptionKeyInfo, error) {
-	jwk := findEncryptionJWK(reqObj)
+func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) (*encryptionKeyInfo, error) {
+	jwk := findEncryptionJWK(reqObj, clientMetadata)
 	if jwk == nil {
 		return nil, fmt.Errorf("no encryption JWK found in client_metadata.jwks")
 	}
@@ -141,7 +139,14 @@ func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*encryptionKeyInfo, 
 
 // HasEncryptionKey checks if the request object contains a valid encryption JWK.
 func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
-	_, err := extractEncryptionKey(reqObj)
+	_, err := extractEncryptionKey(reqObj, nil)
+	return err == nil
+}
+
+// HasEncryptionKeyForParams checks if the verifier metadata contains a valid
+// encryption JWK, preferring Request Object metadata when present.
+func HasEncryptionKeyForParams(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) bool {
+	_, err := extractEncryptionKey(reqObj, clientMetadata)
 	return err == nil
 }
 
@@ -163,17 +168,14 @@ func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce s
 		return "", nil, fmt.Errorf("marshaling response payload: %w", err)
 	}
 
-	keyInfo, err := extractEncryptionKey(params.RequestObject)
+	keyInfo, err := extractEncryptionKey(params.RequestObject, params.ClientMetadata)
 	if err != nil {
 		return "", nil, fmt.Errorf("extracting encryption key: %w", err)
 	}
 
 	// Determine enc algorithm from client_metadata
 	// OID4VP 1.0: encrypted_response_enc_values_supported (array)
-	enc := "A128GCM"
-	if params.RequestObject != nil && params.RequestObject.Payload != nil {
-		enc = detectEncAlgorithm(params.RequestObject.Payload, enc)
-	}
+	enc := detectEncAlgorithm(params.RequestObject, params.ClientMetadata, "A128GCM")
 
 	// For ISO mode with mdoc_generated_nonce, set apu
 	var apu []byte
@@ -187,9 +189,14 @@ func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce s
 // detectEncAlgorithm finds the content encryption algorithm from
 // client_metadata.encrypted_response_enc_values_supported per OID4VP 1.0.
 // No fallback to legacy field names — strict spec compliance.
-func detectEncAlgorithm(payload map[string]any, fallback string) string {
-	clientMeta, ok := payload["client_metadata"].(map[string]any)
-	if !ok {
+func detectEncAlgorithm(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any, fallback string) string {
+	clientMeta := clientMetadata
+	if reqObj != nil && reqObj.Payload != nil {
+		if reqClientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any); ok {
+			clientMeta = reqClientMeta
+		}
+	}
+	if len(clientMeta) == 0 {
 		return fallback
 	}
 

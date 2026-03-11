@@ -229,6 +229,22 @@ func TestSubmitDirectPostJWT_WithCEK(t *testing.T) {
 	}
 }
 
+func TestSubmitDirectPost_RejectsRelativeRedirectURI(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "/relative"})
+	}))
+	defer ts.Close()
+
+	_, err := SubmitDirectPost(ts.URL, "state123", map[string]string{"pid": "token1"}, "")
+	if err == nil {
+		t.Fatal("expected error for relative redirect_uri")
+	}
+	if !strings.Contains(err.Error(), "redirect_uri") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestBuildFragmentRedirect_WithIDTokenAndVPToken(t *testing.T) {
 	got, err := BuildFragmentRedirect("https://verifier.example/callback", "s1", map[string]string{"pid": "tok1"}, "eyJ.id.token")
 	if err != nil {

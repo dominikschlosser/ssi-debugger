@@ -58,18 +58,8 @@ func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*
 		StatusCode: resp.StatusCode,
 		Body:       string(body),
 	}
-
-	// Try to parse redirect_uri from response
-	var respJSON map[string]any
-	if err := json.Unmarshal(body, &respJSON); err == nil {
-		if redirectURI, ok := respJSON["redirect_uri"].(string); ok {
-			result.RedirectURI = redirectURI
-		}
-	}
-
-	// Also check Location header
-	if loc := resp.Header.Get("Location"); loc != "" {
-		result.RedirectURI = loc
+	if err := applyVerifierResponse(result, resp.Header, body); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -116,15 +106,8 @@ func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*D
 		StatusCode: resp.StatusCode,
 		Body:       string(body),
 	}
-
-	var respJSON map[string]any
-	if err := json.Unmarshal(body, &respJSON); err == nil {
-		if redirectURI, ok := respJSON["redirect_uri"].(string); ok {
-			result.RedirectURI = redirectURI
-		}
-	}
-	if loc := resp.Header.Get("Location"); loc != "" {
-		result.RedirectURI = loc
+	if err := applyVerifierResponse(result, resp.Header, body); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -159,4 +142,27 @@ func FormatDirectPostResult(result *DirectPostResult) string {
 		fmt.Fprintf(&sb, " → %s", result.RedirectURI)
 	}
 	return sb.String()
+}
+
+func applyVerifierResponse(result *DirectPostResult, headers http.Header, body []byte) error {
+	if len(body) > 0 {
+		var respJSON map[string]any
+		if err := json.Unmarshal(body, &respJSON); err == nil {
+			if redirectURI, ok := respJSON["redirect_uri"].(string); ok && redirectURI != "" {
+				if err := validateAbsoluteURI("redirect_uri", redirectURI); err != nil {
+					return err
+				}
+				result.RedirectURI = redirectURI
+			}
+		}
+	}
+
+	if loc := headers.Get("Location"); loc != "" {
+		if err := validateAbsoluteURI("Location", loc); err != nil {
+			return err
+		}
+		result.RedirectURI = loc
+	}
+
+	return nil
 }

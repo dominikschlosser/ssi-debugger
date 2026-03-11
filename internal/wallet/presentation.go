@@ -30,12 +30,13 @@ import (
 
 // PresentationParams holds parameters for VP token creation.
 type PresentationParams struct {
-	Nonce         string
-	ClientID      string
-	ResponseURI   string
-	RedirectURI   string                   // used for fragment response mode
-	ResponseMode  string                   // e.g. "direct_post.jwt", "direct_post", "fragment"
-	RequestObject *oid4vc.RequestObjectJWT // optional, used to extract JWK thumbprint for mDoc
+	Nonce          string
+	ClientID       string
+	ResponseURI    string
+	RedirectURI    string // used for fragment response mode
+	ResponseMode   string // e.g. "direct_post.jwt", "direct_post", "fragment"
+	ClientMetadata map[string]any
+	RequestObject  *oid4vc.RequestObjectJWT // optional, used to extract JWK thumbprint for mDoc
 }
 
 // VPTokenResult holds the result of VP token creation.
@@ -241,7 +242,7 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, 
 
 	switch params.ResponseMode {
 	case "direct_post.jwt":
-		if !HasEncryptionKey(params.RequestObject) {
+		if !HasEncryptionKeyForParams(params.RequestObject, params.ClientMetadata) {
 			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
 		}
 		jwe, cek, err := w.EncryptResponse(vpToken, idToken, state, mdocNonce, params)

@@ -43,6 +43,13 @@ func TestBuildWalletMetadata_Basic(t *testing.T) {
 	if meta["jwks"] != nil {
 		t.Error("should not include jwks without RequireEncryptedRequest")
 	}
+
+	vpFormats := meta["vp_formats_supported"].(map[string]any)
+	mdoc := vpFormats["mso_mdoc"].(map[string]any)
+	algValues := mdoc["alg_values_supported"].([]int)
+	if len(algValues) != 1 || algValues[0] != -7 {
+		t.Fatalf("expected mso_mdoc alg_values_supported [-7], got %v", algValues)
+	}
 }
 
 func TestBuildWalletMetadata_WithEncryption(t *testing.T) {
@@ -144,12 +151,13 @@ func TestMakeFetchRequestURI_POST(t *testing.T) {
 		receivedWalletMetadata = r.Form.Get("wallet_metadata")
 		receivedWalletNonce = r.Form.Get("wallet_nonce")
 
-		// Return JWT that includes the wallet_nonce
-		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		// Return signed-style JWT that includes the wallet_nonce
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id":     "test-client",
 			"response_type": "vp_token",
 			"wallet_nonce":  receivedWalletNonce,
 		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		w.Write([]byte(jwt))
 	}))
 	defer srv.Close()
@@ -190,10 +198,11 @@ func TestMakeFetchRequestURI_POST(t *testing.T) {
 func TestMakeFetchRequestURI_POST_WalletNonceMismatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return JWT with wrong wallet_nonce
-		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id":    "test-client",
 			"wallet_nonce": "wrong-nonce",
 		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		w.Write([]byte(jwt))
 	}))
 	defer srv.Close()
@@ -211,21 +220,83 @@ func TestMakeFetchRequestURI_POST_WalletNonceMismatch(t *testing.T) {
 
 func TestMakeFetchRequestURI_POST_StrictRequiresWalletNonce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id": "test-client",
 		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		w.Write([]byte(jwt))
 	}))
 	defer srv.Close()
 
-	wallet := &Wallet{ValidationMode: ValidationModeStrict}
+	wallet := &Wallet{}
 	fetch := MakeFetchRequestURI(wallet, nil)
 	_, err := fetch(srv.URL, "post")
 	if err == nil {
-		t.Fatal("expected error when wallet_nonce is missing in strict mode")
+		t.Fatal("expected error when wallet_nonce is missing")
 	}
 	if !contains(err.Error(), "wallet_nonce") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateClientMetadata_RejectsInvalidVPFormatsSupportedValue(t *testing.T) {
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"vp_formats_supported": []any{},
+			},
+		},
+	}
+
+	err := ValidateClientMetadata(reqObj.Payload["client_metadata"].(map[string]any))
+	if err == nil {
+		t.Fatal("expected error for non-object vp_formats_supported")
+	}
+	if !contains(err.Error(), "vp_formats_supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateClientMetadata_RejectsInvalidMDocAlgValuesSupported(t *testing.T) {
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"vp_formats_supported": map[string]any{
+					"mso_mdoc": map[string]any{
+						"alg_values_supported": []any{"ES256"},
+					},
+				},
+			},
+		},
+	}
+
+	err := ValidateClientMetadata(reqObj.Payload["client_metadata"].(map[string]any))
+	if err == nil {
+		t.Fatal("expected error for string mso_mdoc alg_values_supported entry")
+	}
+	if !contains(err.Error(), "COSE algorithm number") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateClientMetadata_AcceptsNumericMDocAlgValuesSupported(t *testing.T) {
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"vp_formats_supported": map[string]any{
+					"mso_mdoc": map[string]any{
+						"alg_values_supported": []any{-7.0},
+					},
+					"dc+sd-jwt": map[string]any{
+						"alg_values_supported": []any{"ES256"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := ValidateClientMetadata(reqObj.Payload["client_metadata"].(map[string]any)); err != nil {
+		t.Fatalf("expected valid client_metadata, got %v", err)
 	}
 }
 
@@ -304,6 +375,7 @@ func TestMakeFetchRequestURI_POST_Encrypted(t *testing.T) {
 			t.Fatalf("encrypting request object: %v", err)
 		}
 
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		w.Write([]byte(jweStr))
 	}))
 	defer srv.Close()
@@ -333,12 +405,13 @@ func TestParseWithOptionsRequestURIMethodPost(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		walletNonce := r.Form.Get("wallet_nonce")
-		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id":     "test-client",
 			"response_type": "vp_token",
 			"nonce":         "verifier-nonce",
 			"wallet_nonce":  walletNonce,
 		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 		w.Write([]byte(jwt))
 	}))
 	defer srv.Close()

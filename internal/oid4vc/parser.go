@@ -170,6 +170,12 @@ func parseVPParams(q url.Values, opts ParseOptions) (RequestType, any, error) {
 	req.ResponseURI = q.Get("response_uri")
 	req.Scope = q.Get("scope")
 	req.RequestURIMethod = q.Get("request_uri_method") // OID4VP 1.0 §5.10
+	if cm := q.Get("client_metadata"); cm != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(cm), &m); err == nil {
+			req.ClientMetadata = m
+		}
+	}
 
 	// Resolve request_uri (fetch and parse JWT)
 	if requestURI := q.Get("request_uri"); requestURI != "" {
@@ -246,6 +252,9 @@ func applyRequestObjectPayload(req *AuthorizationRequest, payload map[string]any
 
 	if dq, ok := payload["dcql_query"].(map[string]any); ok {
 		req.DCQLQuery = dq
+	}
+	if clientMetadata, ok := payload["client_metadata"].(map[string]any); ok {
+		req.ClientMetadata = clientMetadata
 	}
 
 	return nil
@@ -324,6 +333,9 @@ func buildVPFromJSON(m map[string]any) (RequestType, *AuthorizationRequest) {
 	req.RedirectURI = jsonutil.GetString(m, "redirect_uri")
 	req.ResponseURI = jsonutil.GetString(m, "response_uri")
 	req.Scope = jsonutil.GetString(m, "scope")
+	if cm := jsonutil.GetMap(m, "client_metadata"); cm != nil {
+		req.ClientMetadata = cm
+	}
 
 	if dq := jsonutil.GetMap(m, "dcql_query"); dq != nil {
 		req.DCQLQuery = dq

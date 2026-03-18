@@ -15,6 +15,7 @@
   const shareBtn = document.getElementById("share-btn");
   const themeBtn = document.getElementById("theme-btn");
   const rawView = document.getElementById("raw-view");
+  const EMPTY_OUTPUT_HTML = '<div class="placeholder">Paste a credential to see decoded output</div>';
 
   let debounceTimer = null;
   let lastData = null;
@@ -50,12 +51,8 @@
   // Clear
   clearBtn.addEventListener("click", () => {
     input.value = "";
-    outputEl.innerHTML = '<div class="placeholder">Paste a credential to see decoded output</div>';
-    formatBadge.className = "badge hidden";
+    resetOutput();
     history.replaceState(null, "", window.location.pathname);
-    lastData = null;
-    lastValidation = null;
-    hideColorized();
     input.focus();
   });
 
@@ -71,6 +68,42 @@
     }).catch(() => {
       showToast("Failed to copy link");
     });
+  }
+
+  function resetOutput() {
+    outputEl.innerHTML = EMPTY_OUTPUT_HTML;
+    formatBadge.className = "badge hidden";
+    lastData = null;
+    lastValidation = null;
+    hideColorized();
+  }
+
+  function buildCredentialURL(text) {
+    if (!text) return window.location.pathname;
+    return window.location.pathname + "?credential=" + encodeURIComponent(text);
+  }
+
+  function applyCredential(text) {
+    input.value = text;
+    if (colorized) updateRawView();
+    if (text.trim()) {
+      decode();
+      return;
+    }
+    resetOutput();
+  }
+
+  function navigateToEmbeddedCredential(text) {
+    const next = (text || "").trim();
+    if (!next) return;
+
+    const current = input.value.trim();
+    if (current === next) return;
+    if (current) {
+      history.replaceState({ credential: current }, "", buildCredentialURL(current));
+    }
+    history.pushState({ credential: next }, "", buildCredentialURL(next));
+    applyCredential(next);
   }
 
   // Colorized input view — overlaid behind transparent textarea
@@ -296,11 +329,7 @@
   function decode() {
     const text = input.value.trim();
     if (!text) {
-      outputEl.innerHTML = '<div class="placeholder">Paste a credential to see decoded output</div>';
-      formatBadge.className = "badge hidden";
-      lastData = null;
-      lastValidation = null;
-      hideColorized();
+      resetOutput();
       return;
     }
 
@@ -402,7 +431,7 @@
     } else if (fmt === "mso_mdoc") {
       renderMDOC(data);
     } else {
-      outputEl.innerHTML = renderJSON(data);
+      outputEl.appendChild(renderJSON(data));
     }
   }
 
@@ -610,10 +639,22 @@
         const name = d.isArrayEntry ? "(array element)" : d.name;
         const valStr = typeof d.value === "object" ? JSON.stringify(d.value) : String(d.value);
         const truncatedDigest = d.digest ? d.digest.substring(0, 16) + "\u2026" : "";
-        item.innerHTML =
-          '<span class="disclosure-name">' + escapeHtml(name) + '</span>: <span class="disclosure-value">' + escapeHtml(valStr) + "</span>" +
-          '<div class="disclosure-meta">salt: ' + escapeHtml(d.salt) +
-          ' | digest: <span class="digest-truncated" title="' + escapeHtml(d.digest) + '">' + escapeHtml(truncatedDigest) + "</span></div>";
+        const nameEl = document.createElement("span");
+        nameEl.className = "disclosure-name";
+        nameEl.textContent = name;
+        item.appendChild(nameEl);
+        item.appendChild(document.createTextNode(": "));
+        item.appendChild(renderInlineValue(valStr, "disclosure-value"));
+
+        const meta = document.createElement("div");
+        meta.className = "disclosure-meta";
+        meta.appendChild(document.createTextNode("salt: " + d.salt + " | digest: "));
+        const digest = document.createElement("span");
+        digest.className = "digest-truncated";
+        digest.title = d.digest;
+        digest.textContent = truncatedDigest;
+        meta.appendChild(digest);
+        item.appendChild(meta);
         disc.appendChild(item);
       });
       appendSection("Disclosures (" + data.disclosures.length + ")", disc, data.disclosures, "disclosures");
@@ -711,8 +752,12 @@
   function renderClaimCard(key, value, type) {
     const item = document.createElement("div");
     item.className = "claim-item" + (type === "disclosed" ? " claim-disclosed" : "");
-    item.innerHTML =
-      '<span class="claim-name">' + escapeHtml(key) + '</span>: <span class="claim-value">' + escapeHtml(value) + "</span>";
+    const name = document.createElement("span");
+    name.className = "claim-name";
+    name.textContent = key;
+    item.appendChild(name);
+    item.appendChild(document.createTextNode(": "));
+    item.appendChild(renderInlineValue(value, "claim-value"));
     return item;
   }
 
@@ -753,8 +798,12 @@
           const valStr = typeof val === "object" && val !== null ? JSON.stringify(val, null, 2) : String(val);
           const item = document.createElement("div");
           item.className = "claim-item";
-          item.innerHTML =
-            '<span class="claim-name">' + escapeHtml(k) + '</span>: <span class="claim-value">' + escapeHtml(valStr) + "</span>";
+          const name = document.createElement("span");
+          name.className = "claim-name";
+          name.textContent = k;
+          item.appendChild(name);
+          item.appendChild(document.createTextNode(": "));
+          item.appendChild(renderInlineValue(valStr, "claim-value"));
           el.appendChild(item);
         });
         appendSection(ns + " (" + keys.length + " claims)", el, claims);
@@ -866,16 +915,227 @@
   function renderKV(key, value) {
     const line = document.createElement("div");
     line.className = "json-line";
-    line.innerHTML = '<span class="json-key">' + escapeHtml(key) + '</span>: <span class="json-string">' + escapeHtml(String(value)) + "</span>";
+    const keyEl = document.createElement("span");
+    keyEl.className = "json-key";
+    keyEl.textContent = key;
+    line.appendChild(keyEl);
+    line.appendChild(document.createTextNode(": "));
+    line.appendChild(renderInlineValue(String(value), "json-string"));
     return line;
   }
 
   function renderJSONBlock(obj, opts) {
     const el = document.createElement("pre");
     el.className = "json-block";
-    const json = JSON.stringify(obj, null, 2);
-    el.innerHTML = syntaxHighlightFull(json, opts);
+    appendJSONValue(el, obj, 0, opts || {}, null);
     return el;
+  }
+
+  function appendJSONValue(parent, value, depth, opts, currentKey) {
+    if (Array.isArray(value)) {
+      parent.appendChild(document.createTextNode("["));
+      if (value.length > 0) {
+        parent.appendChild(document.createTextNode("\n"));
+        value.forEach((entry, index) => {
+          parent.appendChild(document.createTextNode("  ".repeat(depth + 1)));
+          appendJSONValue(parent, entry, depth + 1, opts, currentKey);
+          if (index < value.length - 1) {
+            parent.appendChild(document.createTextNode(","));
+          }
+          parent.appendChild(document.createTextNode("\n"));
+        });
+        parent.appendChild(document.createTextNode("  ".repeat(depth)));
+      }
+      parent.appendChild(document.createTextNode("]"));
+      return;
+    }
+
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value);
+      parent.appendChild(document.createTextNode("{"));
+      if (entries.length > 0) {
+        parent.appendChild(document.createTextNode("\n"));
+        entries.forEach(([key, entry], index) => {
+          parent.appendChild(document.createTextNode("  ".repeat(depth + 1)));
+          appendJSONToken(parent, "json-key", JSON.stringify(key));
+          parent.appendChild(document.createTextNode(": "));
+          appendJSONValue(parent, entry, depth + 1, opts, key);
+          if (index < entries.length - 1) {
+            parent.appendChild(document.createTextNode(","));
+          }
+          parent.appendChild(document.createTextNode("\n"));
+        });
+        parent.appendChild(document.createTextNode("  ".repeat(depth)));
+      }
+      parent.appendChild(document.createTextNode("}"));
+      return;
+    }
+
+    if (typeof value === "string") {
+      parent.appendChild(createEmbeddedValueElement(value, { quoted: true }));
+      return;
+    }
+
+    if (typeof value === "number") {
+      const title = timestampTitle(value, currentKey, opts);
+      appendJSONToken(parent, title ? "json-number timestamp-hover" : "json-number", String(value), title);
+      return;
+    }
+
+    if (typeof value === "boolean") {
+      appendJSONToken(parent, "json-bool", String(value));
+      return;
+    }
+
+    if (value === null) {
+      appendJSONToken(parent, "json-null", "null");
+      return;
+    }
+
+    appendJSONToken(parent, "json-null", JSON.stringify(value));
+  }
+
+  function appendJSONToken(parent, className, text, title) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    if (title) span.title = title;
+    parent.appendChild(span);
+  }
+
+  function timestampTitle(value, currentKey, opts) {
+    const tsKeys = opts && opts.timestampKeys;
+    if (!tsKeys || !currentKey || !tsKeys.has(currentKey)) {
+      return "";
+    }
+    if (value <= 1000000000 || value >= 4102444800) {
+      return "";
+    }
+
+    const date = new Date(value * 1000);
+    const iso = date.toISOString().replace(/\.\d+Z$/, "Z");
+    return iso + " (" + relativeTime(date) + ")";
+  }
+
+  function renderInlineValue(value, className) {
+    const wrap = document.createElement("span");
+    wrap.className = className;
+    if (typeof value === "string") {
+      wrap.appendChild(createEmbeddedValueElement(value, { quoted: false, plainStringClass: className }));
+    } else {
+      wrap.textContent = String(value);
+    }
+    return wrap;
+  }
+
+  function createEmbeddedValueElement(value, opts) {
+    const quoted = !!(opts && opts.quoted);
+    const token = quoted ? JSON.stringify(value) : value;
+    const info = detectEmbeddedCredential(value);
+    if (!info) {
+      const span = document.createElement("span");
+      span.className = quoted ? "json-string" : (opts && opts.plainStringClass) || "";
+      span.textContent = token;
+      return span;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "embedded-token" + (quoted ? " json-string" : "");
+    button.setAttribute("data-embedded-format", info.format);
+    button.title = "Open embedded " + info.label;
+    button.textContent = token;
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToEmbeddedCredential(value);
+    });
+    return button;
+  }
+
+  function detectEmbeddedCredential(value) {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (!text) return null;
+
+    if (looksLikeSDJWT(text)) {
+      return { format: "sd-jwt", label: "SD-JWT" };
+    }
+    if (looksLikeJWT(text)) {
+      return { format: "jwt", label: "JWT" };
+    }
+    if (looksLikeMDOC(text)) {
+      return { format: "mdoc", label: "mDOC" };
+    }
+
+    return null;
+  }
+
+  function looksLikeSDJWT(text) {
+    if (!text.includes("~")) return false;
+    return looksLikeJWT(text.split("~")[0]);
+  }
+
+  function looksLikeJWT(text) {
+    const parts = text.split(".");
+    if (parts.length !== 3 || !parts[0] || !parts[1]) {
+      return false;
+    }
+
+    const payload = decodeBase64URL(parts[1]);
+    if (!payload) {
+      return false;
+    }
+
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(payload));
+      return !!parsed && typeof parsed === "object";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function looksLikeMDOC(text) {
+    if (isHexString(text)) {
+      const bytes = hexToBytes(text);
+      return bytes.length > 0 && isCBORStart(bytes[0]);
+    }
+
+    const decoded = decodeBase64URL(text);
+    return !!decoded && decoded.length > 0 && isCBORStart(decoded[0]);
+  }
+
+  function isHexString(text) {
+    return text.length >= 2 && text.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(text);
+  }
+
+  function hexToBytes(text) {
+    const bytes = new Uint8Array(text.length / 2);
+    for (let i = 0; i < text.length; i += 2) {
+      bytes[i / 2] = parseInt(text.slice(i, i + 2), 16);
+    }
+    return bytes;
+  }
+
+  function decodeBase64URL(text) {
+    if (!text) return null;
+    try {
+      const normalized = text.replace(/-/g, "+").replace(/_/g, "/");
+      const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+      const binary = atob(normalized + padding);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function isCBORStart(b) {
+    const major = b >> 5;
+    return major === 4 || major === 5 || major === 6;
   }
 
   // JSON syntax highlighting regex — matches strings, keys, booleans, null, numbers
@@ -897,50 +1157,8 @@
     });
   }
 
-  // Enhanced syntax highlighting with timestamp hover
-  function syntaxHighlightFull(json, opts) {
-    if (!json) return "";
-    const tsKeys = (opts && opts.timestampKeys) || null;
-
-    // Process line by line for context-aware highlighting
-    const lines = json.split("\n");
-    return lines.map((line) => {
-      const keyMatch = line.match(/^\s*"([\w_]+)"\s*:/);
-      const currentKey = keyMatch ? keyMatch[1] : null;
-      return syntaxHighlightLineWithTimestamps(line, currentKey && tsKeys && tsKeys.has(currentKey) ? currentKey : null);
-    }).join("\n");
-  }
-
-  function syntaxHighlightLineWithTimestamps(line, tsKey) {
-    var escaped = escapeHtml(line);
-    return escaped.replace(JSON_TOKEN_RE, (match) => {
-      let cls = "json-number";
-      if (/^"/.test(match)) {
-        cls = /:$/.test(match) ? "json-key" : "json-string";
-      } else if (/true|false/.test(match)) {
-        cls = "json-bool";
-      } else if (/null/.test(match)) {
-        cls = "json-null";
-      }
-
-      // Timestamp hover: number value on a known timestamp key line
-      if (cls === "json-number" && tsKey) {
-        const num = parseFloat(match);
-        if (num > 1000000000 && num < 4102444800) {
-          const date = new Date(num * 1000);
-          const iso = date.toISOString().replace(/\.\d+Z$/, "Z");
-          const rel = relativeTime(date);
-          const title = iso + " (" + rel + ")";
-          return '<span class="' + cls + ' timestamp-hover" title="' + escapeHtml(title) + '">' + match + "</span>";
-        }
-      }
-
-      return '<span class="' + cls + '">' + match + "</span>";
-    });
-  }
-
   function renderJSON(obj) {
-    return '<pre style="margin:0">' + syntaxHighlight(JSON.stringify(obj, null, 2)) + "</pre>";
+    return renderJSONBlock(obj);
   }
 
   function escapeHtml(str) {
@@ -951,8 +1169,7 @@
 
   // Pre-fill: check ?credential= query param, then /api/prefill
   function prefill(credential) {
-    input.value = credential;
-    decode();
+    applyCredential(credential);
   }
 
   // Update keyboard shortcut hints for platform
@@ -968,13 +1185,22 @@
 
   const queryCredential = new URLSearchParams(window.location.search).get("credential");
 
+  window.addEventListener("popstate", (event) => {
+    const credential = event.state && typeof event.state.credential === "string"
+      ? event.state.credential
+      : (new URLSearchParams(window.location.search).get("credential") || "");
+    applyCredential(credential);
+  });
+
   if (queryCredential) {
+    history.replaceState({ credential: queryCredential }, "", buildCredentialURL(queryCredential));
     prefill(queryCredential);
   } else {
     fetch(basePath + "api/prefill")
       .then((res) => res.json())
       .then((data) => {
         if (data.credential) {
+          history.replaceState({ credential: data.credential }, "", window.location.pathname);
           prefill(data.credential);
         }
       })

@@ -315,6 +315,25 @@ textarea.colorized::placeholder {
   word-break: break-all;
 }
 
+.embedded-token {
+  appearance: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline dotted var(--text-dim);
+  text-underline-offset: 2px;
+}
+
+.embedded-token:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
 .disclosure-item,
 .claim-item {
   margin: 4px 0;

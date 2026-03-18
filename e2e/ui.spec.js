@@ -52,6 +52,24 @@ const TEST_SDJWT = makeSDJWT(
   ]
 );
 
+const EMBEDDED_REGISTRATION_JWT = makeJWT(
+  { alg: "none", typ: "JWT" },
+  { sub: "registration-cert", iss: "https://trust.example", cnf: { kid: "reg-key-1" } }
+);
+
+const OUTER_JWT_WITH_EMBEDDED = makeJWT(
+  { alg: "none", typ: "JWT" },
+  {
+    client_id: "https://verifier.example",
+    response_type: "vp_token",
+    verifier_info: {
+      registration: {
+        jwt: EMBEDDED_REGISTRATION_JWT,
+      },
+    },
+  }
+);
+
 test.describe("Page load", () => {
   test("shows OID4VC Dev title and empty state", async ({ page }) => {
     await page.goto("/");
@@ -103,6 +121,31 @@ test.describe("JWT decoding", () => {
     const banner = page.locator(".validity-banner");
     await expect(banner).toContainText("Invalid", { timeout: 3000 });
     await expect(banner).toHaveClass(/expired/);
+  });
+
+  test("clicking an embedded JWT navigates to it and browser back restores the parent", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.locator("#input").fill(OUTER_JWT_WITH_EMBEDDED);
+    await expect(page.locator("#format-badge")).toHaveText("JWT", {
+      timeout: 3000,
+    });
+
+    const embedded = page.locator('.embedded-token[data-embedded-format="jwt"]').first();
+    await expect(embedded).toBeVisible();
+
+    await embedded.click();
+    await expect(page.locator("#input")).toHaveValue(EMBEDDED_REGISTRATION_JWT);
+    await expect(page.locator('#output .section[data-section="payload"]')).toContainText(
+      "registration-cert"
+    );
+
+    await page.goBack();
+    await expect(page.locator("#input")).toHaveValue(OUTER_JWT_WITH_EMBEDDED);
+    await expect(page.locator('#output .section[data-section="payload"]')).toContainText(
+      "verifier_info"
+    );
   });
 });
 

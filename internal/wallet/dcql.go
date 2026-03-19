@@ -289,16 +289,8 @@ func claimKeyFromPath(cred StoredCredential, path []any) string {
 		return ""
 	}
 
-	if cred.Format == "mso_mdoc" && len(path) >= 2 {
-		ns, ok1 := path[0].(string)
-		elem, ok2 := path[1].(string)
-		if ok1 && ok2 {
-			key := ns + ":" + elem
-			if _, exists := cred.Claims[key]; exists {
-				return key
-			}
-		}
-		return ""
+	if cred.Format == "mso_mdoc" {
+		return mdocClaimKeyFromPath(cred, path)
 	}
 
 	// SD-JWT
@@ -311,42 +303,100 @@ func claimKeyFromPath(cred StoredCredential, path []any) string {
 		return ""
 	}
 
-	// Single-segment path: just check existence
-	if len(path) == 1 {
+	if claimPathExists(val, path[1:]) {
 		return key
 	}
 
-	// Multi-segment: validate nested structure
-	switch second := path[1].(type) {
-	case string:
-		// Nested object path like ["address", "street_address"]
-		obj, ok := val.(map[string]any)
-		if !ok {
-			return ""
-		}
-		if _, exists := obj[second]; !exists {
-			return ""
-		}
-		return key
-	case float64:
-		// Array index like ["nationalities", 0]
-		arr, ok := val.([]any)
-		if !ok {
-			return ""
-		}
-		idx := int(second)
-		if idx < 0 || idx >= len(arr) {
-			return ""
-		}
-		return key
-	case nil:
-		// Array wildcard like ["nationalities", null]
-		if _, ok := val.([]any); !ok {
-			return ""
-		}
-		return key
-	default:
+	return ""
+}
+
+func mdocClaimKeyFromPath(cred StoredCredential, path []any) string {
+	first, ok := path[0].(string)
+	if !ok {
 		return ""
+	}
+
+	// Standard mDoc DCQL form: ["namespace", "element", ...]
+	if len(path) >= 2 {
+		if elem, ok := path[1].(string); ok {
+			for _, candidate := range mdocElementCandidates(elem) {
+				key := first + ":" + candidate
+				if val, exists := cred.Claims[key]; exists && claimPathExists(val, path[2:]) {
+					return key
+				}
+			}
+		}
+	}
+
+	// Some verifiers send element-first paths for nested mDoc values, e.g.
+	// ["place_of_birth", "locality"] instead of ["ns", "place_of_birth", "locality"].
+	for key, val := range cred.Claims {
+		sep := strings.LastIndex(key, ":")
+		if sep < 0 {
+			continue
+		}
+		suffix := key[sep+1:]
+		for _, candidate := range mdocElementCandidates(first) {
+			if suffix == candidate && claimPathExists(val, path[1:]) {
+				return key
+			}
+		}
+	}
+
+	return ""
+}
+
+func mdocElementCandidates(name string) []string {
+	switch name {
+	case "place_of_birth":
+		return []string{"place_of_birth", "birth_place"}
+	default:
+		return []string{name}
+	}
+}
+
+func claimPathExists(value any, path []any) bool {
+	if len(path) == 0 {
+		return true
+	}
+
+	switch segment := path[0].(type) {
+	case string:
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		next, exists := obj[segment]
+		if !exists {
+			return false
+		}
+		return claimPathExists(next, path[1:])
+	case float64:
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		idx := int(segment)
+		if idx < 0 || idx >= len(arr) {
+			return false
+		}
+		return claimPathExists(arr[idx], path[1:])
+	case nil:
+		arr, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		if len(path) == 1 {
+			return true
+		}
+		for _, item := range arr {
+			if claimPathExists(item, path[1:]) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
 

@@ -238,6 +238,80 @@ func TestEvaluateDCQL_MultipleCredentialQueries(t *testing.T) {
 	}
 }
 
+func TestEvaluateDCQL_DefaultPIDMatchesVerifierQueries(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "cred1",
+				"format": "mso_mdoc",
+				"meta": map[string]any{
+					"doctype_value": "eu.europa.ec.eudi.pid.1",
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "family_name"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "birth_date"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_city"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "expiry_date"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "issuing_country"}},
+					map[string]any{"path": []any{"place_of_birth", "locality"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_street"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_country"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "issuing_authority"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_state"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "given_name"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_postal_code"}},
+				},
+			},
+			map[string]any{
+				"id":     "cred2",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+					map[string]any{"path": []any{"date_of_expiry"}},
+					map[string]any{"path": []any{"family_name"}},
+					map[string]any{"path": []any{"address", "street_address"}},
+					map[string]any{"path": []any{"place_of_birth", "locality"}},
+					map[string]any{"path": []any{"birthdate"}},
+					map[string]any{"path": []any{"address", "region"}},
+					map[string]any{"path": []any{"address", "postal_code"}},
+					map[string]any{"path": []any{"issuing_country"}},
+					map[string]any{"path": []any{"address", "locality"}},
+					map[string]any{"path": []any{"address", "country"}},
+					map[string]any{"path": []any{"issuing_authority"}},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matches))
+	}
+
+	for _, match := range matches {
+		switch match.QueryID {
+		case "cred1":
+			if _, ok := match.Claims["eu.europa.ec.eudi.pid.1:birth_place"]; !ok {
+				t.Error("expected mDoc match to include birth_place")
+			}
+		case "cred2":
+			if _, ok := match.Claims["place_of_birth"]; !ok {
+				t.Error("expected SD-JWT match to include place_of_birth")
+			}
+			if _, ok := match.Claims["date_of_expiry"]; !ok {
+				t.Error("expected SD-JWT match to include date_of_expiry")
+			}
+		default:
+			t.Errorf("unexpected query ID %q", match.QueryID)
+		}
+	}
+}
+
 func TestEvaluateDCQL_ClaimSets_StringIDs(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -552,6 +626,9 @@ func TestClaimKeyFromPath(t *testing.T) {
 				"street_address": "123 Main St",
 				"city":           "Berlin",
 			},
+			"place_of_birth": map[string]any{
+				"locality": "Berlin",
+			},
 			"nationalities": []any{"DE", "FR"},
 		},
 	}
@@ -559,6 +636,9 @@ func TestClaimKeyFromPath(t *testing.T) {
 		Format: "mso_mdoc",
 		Claims: map[string]any{
 			"eu.europa.ec.eudi.pid.1:given_name": "Max",
+			"eu.europa.ec.eudi.pid.1:birth_place": map[string]any{
+				"locality": "Berlin",
+			},
 		},
 	}
 
@@ -574,6 +654,7 @@ func TestClaimKeyFromPath(t *testing.T) {
 		{"sd-jwt nested object", sdCred, []any{"address", "street_address"}, "address"},
 		{"sd-jwt nested missing key", sdCred, []any{"address", "zipcode"}, ""},
 		{"sd-jwt nested non-map", sdCred, []any{"given_name", "sub"}, ""},
+		{"sd-jwt nested place_of_birth", sdCred, []any{"place_of_birth", "locality"}, "place_of_birth"},
 		{"sd-jwt array index", sdCred, []any{"nationalities", float64(0)}, "nationalities"},
 		{"sd-jwt array oob", sdCred, []any{"nationalities", float64(5)}, ""},
 		{"sd-jwt array negative", sdCred, []any{"nationalities", float64(-1)}, ""},
@@ -584,6 +665,10 @@ func TestClaimKeyFromPath(t *testing.T) {
 		{"sd-jwt unknown second type", sdCred, []any{"given_name", true}, ""},
 		{"mdoc valid", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "given_name"}, "eu.europa.ec.eudi.pid.1:given_name"},
 		{"mdoc missing", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "missing"}, ""},
+		{"mdoc nested namespaced alias", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "place_of_birth", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc nested namespaced native", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "birth_place", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc nested element-first alias", mdocCred, []any{"place_of_birth", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc nested element-first native", mdocCred, []any{"birth_place", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
 		{"mdoc short path", mdocCred, []any{"eu.europa.ec.eudi.pid.1"}, ""},
 		{"mdoc non-string ns", mdocCred, []any{42, "given_name"}, ""},
 	}

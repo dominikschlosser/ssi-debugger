@@ -27,9 +27,9 @@ import (
 // --- omitClaims unit tests ---
 
 func TestOmitClaims_RemovesSpecifiedClaims(t *testing.T) {
-	result := omitClaims(mock.SDJWTPIDClaims, []string{"birth_place", "address", "nationalities"})
+	result := omitClaims(mock.SDJWTPIDClaims, []string{"place_of_birth", "address", "nationalities"})
 
-	for _, name := range []string{"birth_place", "address", "nationalities"} {
+	for _, name := range []string{"place_of_birth", "address", "nationalities"} {
 		if _, ok := result[name]; ok {
 			t.Errorf("%s should have been omitted", name)
 		}
@@ -62,10 +62,10 @@ func TestOmitClaims_OmitNonexistentClaimIsNoOp(t *testing.T) {
 }
 
 func TestOmitClaims_TrimsWhitespace(t *testing.T) {
-	result := omitClaims(mock.SDJWTPIDClaims, []string{" birth_place ", " address"})
+	result := omitClaims(mock.SDJWTPIDClaims, []string{" place_of_birth ", " address"})
 
-	if _, ok := result["birth_place"]; ok {
-		t.Error("birth_place should have been omitted (with whitespace trimming)")
+	if _, ok := result["place_of_birth"]; ok {
+		t.Error("place_of_birth should have been omitted (with whitespace trimming)")
 	}
 	if _, ok := result["address"]; ok {
 		t.Error("address should have been omitted (with whitespace trimming)")
@@ -139,7 +139,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_MDOC(t *testing.T) {
 func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	issuePID = true
 	issueClaims = ""
-	issueOmit = []string{"birth_place", "gender"}
+	issueOmit = []string{"place_of_birth", "gender"}
 
 	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
@@ -150,8 +150,8 @@ func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	if len(claims) != expected {
 		t.Errorf("expected %d claims, got %d", expected, len(claims))
 	}
-	if _, ok := claims["birth_place"]; ok {
-		t.Error("birth_place should be omitted")
+	if _, ok := claims["place_of_birth"]; ok {
+		t.Error("place_of_birth should be omitted")
 	}
 	if _, ok := claims["gender"]; ok {
 		t.Error("gender should be omitted")
@@ -463,10 +463,10 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		"family_name", "given_name", "birthdate",
 		"age_over_18", "age_in_years", "age_birth_year",
 		"family_name_birth", "given_name_birth",
-		"birth_place", "birth_country", "birth_state", "birth_city",
+		"place_of_birth", "birth_country", "birth_state", "birth_city",
 		"address",
 		"gender", "nationalities",
-		"issuance_date", "expiry_date",
+		"issuance_date", "date_of_expiry", "expiry_date",
 		"issuing_authority",
 		"issuing_country", "issuing_jurisdiction",
 	}
@@ -476,8 +476,8 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		}
 	}
 
-	if len(mock.SDJWTPIDClaims) != 20 {
-		t.Errorf("expected 20 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
+	if len(mock.SDJWTPIDClaims) != 21 {
+		t.Errorf("expected 21 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
 	}
 
 	// address should be a nested object
@@ -489,6 +489,17 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		if _, ok := addr[field]; !ok {
 			t.Errorf("address missing subclaim %q", field)
 		}
+	}
+
+	pob, ok := mock.SDJWTPIDClaims["place_of_birth"].(map[string]any)
+	if !ok {
+		t.Fatal("place_of_birth should be a map")
+	}
+	if _, ok := pob["locality"]; !ok {
+		t.Error("place_of_birth missing subclaim \"locality\"")
+	}
+	if len(pob) != 1 {
+		t.Errorf("expected place_of_birth to only contain locality, got %d entries", len(pob))
 	}
 
 	// nationalities should be an array
@@ -530,6 +541,17 @@ func TestMDOCPIDClaims_HasExpectedFields(t *testing.T) {
 
 	if len(mock.MDOCPIDClaims) != 25 {
 		t.Errorf("expected 25 mDoc PID claims, got %d", len(mock.MDOCPIDClaims))
+	}
+
+	pob, ok := mock.MDOCPIDClaims["birth_place"].(map[string]any)
+	if !ok {
+		t.Fatal("birth_place should be a map")
+	}
+	if _, ok := pob["locality"]; !ok {
+		t.Error("birth_place missing subclaim \"locality\"")
+	}
+	if len(pob) != 1 {
+		t.Errorf("expected birth_place to only contain locality, got %d entries", len(pob))
 	}
 
 	// document_number and administrative_number should not be present

@@ -102,7 +102,7 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	// Build header
 	header := map[string]any{
 		"alg": "ES256",
-		"typ": "vc+sd-jwt",
+		"typ": "dc+sd-jwt",
 	}
 
 	if len(cfg.CertChain) > 0 {

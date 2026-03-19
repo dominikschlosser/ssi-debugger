@@ -56,8 +56,8 @@ func TestGenerateSDJWT_DefaultClaims(t *testing.T) {
 	if alg, _ := token.Header["alg"].(string); alg != "ES256" {
 		t.Errorf("expected alg ES256, got %s", alg)
 	}
-	if typ, _ := token.Header["typ"].(string); typ != "vc+sd-jwt" {
-		t.Errorf("expected typ vc+sd-jwt, got %s", typ)
+	if typ, _ := token.Header["typ"].(string); typ != "dc+sd-jwt" {
+		t.Errorf("expected typ dc+sd-jwt, got %s", typ)
 	}
 
 	// Check payload fields
@@ -116,14 +116,19 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 		t.Fatalf("sdjwt.Parse: %v", err)
 	}
 
-	// SD-JWT PID claims: top-level disclosures + address subclaim disclosures (5) + nationalities element disclosures (1)
-	expectedTopLevel := len(SDJWTPIDClaims)
-	expectedAddressSubs := len(SDJWTPIDClaims["address"].(map[string]any))
-	expectedNationalitiesElems := len(SDJWTPIDClaims["nationalities"].([]any))
-	expectedTotal := expectedTopLevel + expectedAddressSubs + expectedNationalitiesElems
+	// SD-JWT PID claims: one disclosure per top-level claim plus disclosures for
+	// nested object properties and array elements.
+	expectedTotal := len(SDJWTPIDClaims)
+	for _, value := range SDJWTPIDClaims {
+		switch v := value.(type) {
+		case map[string]any:
+			expectedTotal += len(v)
+		case []any:
+			expectedTotal += len(v)
+		}
+	}
 	if len(token.Disclosures) != expectedTotal {
-		t.Errorf("expected %d disclosures (top=%d + address=%d + nationalities=%d), got %d",
-			expectedTotal, expectedTopLevel, expectedAddressSubs, expectedNationalitiesElems, len(token.Disclosures))
+		t.Errorf("expected %d disclosures, got %d", expectedTotal, len(token.Disclosures))
 	}
 
 	// Check that resolved claims contain address subclaims
@@ -135,6 +140,44 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 		if _, ok := addr[field]; !ok {
 			t.Errorf("address missing subclaim %q", field)
 		}
+	}
+
+	pob, ok := token.ResolvedClaims["place_of_birth"].(map[string]any)
+	if !ok {
+		t.Fatal("expected place_of_birth to be a map in resolved claims")
+	}
+	if pob["locality"] != "BERLIN" {
+		t.Errorf("expected place_of_birth.locality BERLIN, got %v", pob["locality"])
+	}
+	if len(pob) != 1 {
+		t.Errorf("expected place_of_birth to only contain locality, got %d entries", len(pob))
+	}
+
+	var foundPOB bool
+	var foundLocality bool
+	for _, disclosure := range token.Disclosures {
+		switch disclosure.Name {
+		case "place_of_birth":
+			foundPOB = true
+			value, ok := disclosure.Value.(map[string]any)
+			if !ok {
+				t.Fatalf("place_of_birth disclosure should contain an object, got %T", disclosure.Value)
+			}
+			sdEntries, ok := value["_sd"].([]any)
+			if !ok || len(sdEntries) != 1 {
+				t.Fatalf("place_of_birth disclosure should contain a single _sd digest for locality, got %v", value["_sd"])
+			}
+		case "locality":
+			if disclosure.Value == "BERLIN" {
+				foundLocality = true
+			}
+		}
+	}
+	if !foundPOB {
+		t.Fatal("expected a place_of_birth disclosure")
+	}
+	if !foundLocality {
+		t.Fatal("expected a locality disclosure for place_of_birth")
 	}
 
 	// Check that nationalities is resolved as array

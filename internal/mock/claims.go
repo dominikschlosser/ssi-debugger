@@ -26,7 +26,7 @@ var DefaultClaims = map[string]any{
 }
 
 // SDJWTPIDClaims returns claims following the EUDI PID Rulebook for SD-JWT format.
-// address is a nested object with individually disclosable subclaims.
+// address and place_of_birth are nested objects with individually disclosable subclaims.
 // nationalities is an array with individually disclosable elements.
 // document_number and administrative_number are omitted (not present in German PIDs).
 var SDJWTPIDClaims = map[string]any{
@@ -38,10 +38,12 @@ var SDJWTPIDClaims = map[string]any{
 	"age_birth_year":    1984,
 	"family_name_birth": "GABLER",
 	"given_name_birth":  "ERIKA",
-	"birth_place":       "BERLIN",
-	"birth_country":     "DE",
-	"birth_state":       "BE",
-	"birth_city":        "BERLIN",
+	"place_of_birth": map[string]any{
+		"locality": "BERLIN",
+	},
+	"birth_country": "DE",
+	"birth_state":   "BE",
+	"birth_city":    "BERLIN",
 	"address": map[string]any{
 		"street_address": "HEIDESTRAẞE 17",
 		"locality":       "KÖLN",
@@ -52,6 +54,7 @@ var SDJWTPIDClaims = map[string]any{
 	"gender":               1,
 	"nationalities":        []any{"DE"},
 	"issuance_date":        "2024-01-15",
+	"date_of_expiry":       "2029-01-15",
 	"expiry_date":          "2029-01-15",
 	"issuing_authority":    "DE",
 	"issuing_country":      "DE",
@@ -59,18 +62,21 @@ var SDJWTPIDClaims = map[string]any{
 }
 
 // MDOCPIDClaims returns claims following the EUDI PID Rulebook for mDoc format.
-// Uses flat data elements per ISO 18013-5 / eu.europa.ec.eudi.pid.1 namespace.
+// Most elements are flat ISO 18013-5 data elements in the eu.europa.ec.eudi.pid.1
+// namespace; birth_place is structured per the current PID Rulebook.
 // document_number and administrative_number are omitted (not present in German PIDs).
 var MDOCPIDClaims = map[string]any{
-	"family_name":          "MUSTERMANN",
-	"given_name":           "ERIKA",
-	"birth_date":           "1984-08-12",
-	"age_over_18":          true,
-	"age_in_years":         41,
-	"age_birth_year":       1984,
-	"family_name_birth":    "GABLER",
-	"given_name_birth":     "ERIKA",
-	"birth_place":          "BERLIN",
+	"family_name":       "MUSTERMANN",
+	"given_name":        "ERIKA",
+	"birth_date":        "1984-08-12",
+	"age_over_18":       true,
+	"age_in_years":      41,
+	"age_birth_year":    1984,
+	"family_name_birth": "GABLER",
+	"given_name_birth":  "ERIKA",
+	"birth_place": map[string]any{
+		"locality": "BERLIN",
+	},
 	"birth_country":        "DE",
 	"birth_state":          "BE",
 	"birth_city":           "BERLIN",

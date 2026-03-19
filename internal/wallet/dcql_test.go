@@ -420,11 +420,11 @@ func TestEvaluateDCQL_ClaimSets_FallbackToSecond(t *testing.T) {
 				"claims": []any{
 					map[string]any{"id": "family", "path": []any{"family_name"}},
 					map[string]any{"id": "given", "path": []any{"given_name"}},
-					map[string]any{"id": "email", "path": []any{"email"}}, // not in PID
+					map[string]any{"id": "nickname", "path": []any{"nickname"}}, // not in PID
 				},
 				"claim_sets": []any{
-					[]any{"family", "email"}, // unsatisfiable (no email claim)
-					[]any{"family", "given"}, // satisfiable
+					[]any{"family", "nickname"}, // unsatisfiable
+					[]any{"family", "given"},    // satisfiable
 				},
 			},
 		},
@@ -454,12 +454,12 @@ func TestEvaluateDCQL_ClaimSets_NoneMatchable(t *testing.T) {
 					"vct_values": []any{mock.DefaultPIDVCT},
 				},
 				"claims": []any{
-					map[string]any{"id": "email", "path": []any{"email"}},
-					map[string]any{"id": "phone", "path": []any{"phone_number"}},
+					map[string]any{"id": "nickname", "path": []any{"nickname"}},
+					map[string]any{"id": "website", "path": []any{"website"}},
 				},
 				"claim_sets": []any{
-					[]any{"email"},
-					[]any{"phone"},
+					[]any{"nickname"},
+					[]any{"website"},
 				},
 			},
 		},

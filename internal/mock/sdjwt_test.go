@@ -136,7 +136,7 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 	if !ok {
 		t.Fatal("expected address to be a map in resolved claims")
 	}
-	for _, field := range []string{"street_address", "locality", "postal_code", "country", "region"} {
+	for _, field := range []string{"formatted", "street_address", "house_number", "locality", "postal_code", "country", "region"} {
 		if _, ok := addr[field]; !ok {
 			t.Errorf("address missing subclaim %q", field)
 		}

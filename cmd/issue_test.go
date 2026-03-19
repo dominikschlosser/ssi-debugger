@@ -139,7 +139,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_MDOC(t *testing.T) {
 func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	issuePID = true
 	issueClaims = ""
-	issueOmit = []string{"place_of_birth", "gender"}
+	issueOmit = []string{"place_of_birth", "sex"}
 
 	claims, err := resolveIssueClaimsForFormat("sdjwt")
 	if err != nil {
@@ -153,8 +153,8 @@ func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	if _, ok := claims["place_of_birth"]; ok {
 		t.Error("place_of_birth should be omitted")
 	}
-	if _, ok := claims["gender"]; ok {
-		t.Error("gender should be omitted")
+	if _, ok := claims["sex"]; ok {
+		t.Error("sex should be omitted")
 	}
 }
 
@@ -276,7 +276,7 @@ func TestIssueSDJWT_WithPIDAndOmit(t *testing.T) {
 	issueClaims = ""
 	issueKeyPath = ""
 
-	rootCmd.SetArgs([]string{"issue", "sdjwt", "--pid", "--omit", "birth_place,gender"})
+	rootCmd.SetArgs([]string{"issue", "sdjwt", "--pid", "--omit", "place_of_birth,sex"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("issue sdjwt --pid --omit: %v", err)
 	}
@@ -461,14 +461,17 @@ func TestDefaultClaims_HasExpectedFields(t *testing.T) {
 func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 	required := []string{
 		"family_name", "given_name", "birthdate",
-		"age_over_18", "age_in_years", "age_birth_year",
-		"family_name_birth", "given_name_birth",
-		"place_of_birth", "birth_country", "birth_state", "birth_city",
+		"age_equal_or_over", "age_in_years", "age_birth_year",
+		"birth_family_name", "birth_given_name",
+		"place_of_birth",
 		"address",
-		"gender", "nationalities",
-		"issuance_date", "date_of_expiry", "expiry_date",
+		"sex", "nationalities",
+		"email", "phone_number", "picture",
+		"date_of_issuance", "date_of_expiry",
+		"personal_administrative_number",
 		"issuing_authority",
-		"issuing_country", "issuing_jurisdiction",
+		"issuing_country", "document_number", "issuing_jurisdiction",
+		"trust_anchor",
 	}
 	for _, name := range required {
 		if _, ok := mock.SDJWTPIDClaims[name]; !ok {
@@ -476,8 +479,8 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		}
 	}
 
-	if len(mock.SDJWTPIDClaims) != 21 {
-		t.Errorf("expected 21 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
+	if len(mock.SDJWTPIDClaims) != 23 {
+		t.Errorf("expected 23 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
 	}
 
 	// address should be a nested object
@@ -485,10 +488,18 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 	if !ok {
 		t.Fatal("address should be a map")
 	}
-	for _, field := range []string{"street_address", "locality", "postal_code", "country", "region"} {
+	for _, field := range []string{"formatted", "street_address", "house_number", "locality", "postal_code", "country", "region"} {
 		if _, ok := addr[field]; !ok {
 			t.Errorf("address missing subclaim %q", field)
 		}
+	}
+
+	ageEqualOrOver, ok := mock.SDJWTPIDClaims["age_equal_or_over"].(map[string]any)
+	if !ok {
+		t.Fatal("age_equal_or_over should be a map")
+	}
+	if v, ok := ageEqualOrOver["18"].(bool); !ok || !v {
+		t.Errorf("expected age_equal_or_over.18=true, got %v", ageEqualOrOver["18"])
 	}
 
 	pob, ok := mock.SDJWTPIDClaims["place_of_birth"].(map[string]any)
@@ -511,10 +522,6 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		t.Error("nationalities should not be empty")
 	}
 
-	// document_number and administrative_number should not be present
-	if _, ok := mock.SDJWTPIDClaims["document_number"]; ok {
-		t.Error("document_number should not be present in SD-JWT PID claims")
-	}
 	if _, ok := mock.SDJWTPIDClaims["administrative_number"]; ok {
 		t.Error("administrative_number should not be present in SD-JWT PID claims")
 	}
@@ -525,13 +532,16 @@ func TestMDOCPIDClaims_HasExpectedFields(t *testing.T) {
 		"family_name", "given_name", "birth_date",
 		"age_over_18", "age_in_years", "age_birth_year",
 		"family_name_birth", "given_name_birth",
-		"birth_place", "birth_country", "birth_state", "birth_city",
+		"birth_place",
 		"resident_address", "resident_country", "resident_state", "resident_city",
-		"resident_postal_code", "resident_street",
-		"gender", "nationality",
+		"resident_postal_code", "resident_street", "resident_house_number",
+		"personal_administrative_number",
+		"sex", "nationality",
+		"email_address", "mobile_phone_number",
 		"issuance_date", "expiry_date",
 		"issuing_authority",
-		"issuing_country", "issuing_jurisdiction",
+		"issuing_country", "document_number", "issuing_jurisdiction",
+		"trust_anchor",
 	}
 	for _, name := range required {
 		if _, ok := mock.MDOCPIDClaims[name]; !ok {
@@ -539,37 +549,34 @@ func TestMDOCPIDClaims_HasExpectedFields(t *testing.T) {
 		}
 	}
 
-	if len(mock.MDOCPIDClaims) != 25 {
-		t.Errorf("expected 25 mDoc PID claims, got %d", len(mock.MDOCPIDClaims))
+	if len(mock.MDOCPIDClaims) != 28 {
+		t.Errorf("expected 28 mDoc PID claims, got %d", len(mock.MDOCPIDClaims))
 	}
 
-	birthPlace, ok := mock.MDOCPIDClaims["birth_place"].(string)
+	birthPlace, ok := mock.MDOCPIDClaims["birth_place"].(map[string]any)
 	if !ok {
-		t.Fatal("birth_place should be a string")
+		t.Fatal("birth_place should be a map")
 	}
-	if birthPlace != "BERLIN" {
-		t.Errorf("expected birth_place BERLIN, got %q", birthPlace)
+	if birthPlace["locality"] != "BERLIN" {
+		t.Errorf("expected birth_place.locality BERLIN, got %v", birthPlace["locality"])
 	}
 
-	// document_number and administrative_number should not be present
-	if _, ok := mock.MDOCPIDClaims["document_number"]; ok {
-		t.Error("document_number should not be present in mDoc PID claims")
-	}
 	if _, ok := mock.MDOCPIDClaims["administrative_number"]; ok {
 		t.Error("administrative_number should not be present in mDoc PID claims")
 	}
 }
 
 func TestPIDClaims_TypesAreCorrect(t *testing.T) {
-	// Boolean
-	if v, ok := mock.SDJWTPIDClaims["age_over_18"].(bool); !ok || !v {
-		t.Error("age_over_18 should be bool true")
+	ageEqualOrOver, ok := mock.SDJWTPIDClaims["age_equal_or_over"].(map[string]any)
+	if !ok {
+		t.Fatal("age_equal_or_over should be a map")
 	}
-	// Integer
-	if v, ok := mock.SDJWTPIDClaims["gender"].(int); !ok || v != 1 {
-		t.Errorf("gender should be int 1, got %T %v", mock.SDJWTPIDClaims["gender"], mock.SDJWTPIDClaims["gender"])
+	if v, ok := ageEqualOrOver["18"].(bool); !ok || !v {
+		t.Error("age_equal_or_over.18 should be bool true")
 	}
-	// String
+	if v, ok := mock.SDJWTPIDClaims["sex"].(int); !ok || v != 2 {
+		t.Errorf("sex should be int 2, got %T %v", mock.SDJWTPIDClaims["sex"], mock.SDJWTPIDClaims["sex"])
+	}
 	if v, ok := mock.SDJWTPIDClaims["family_name"].(string); !ok || !strings.Contains(v, "MUSTERMANN") {
 		t.Errorf("family_name should be string containing MUSTERMANN, got %v", v)
 	}

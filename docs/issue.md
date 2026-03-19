@@ -5,7 +5,7 @@ Generate test SD-JWT, JWT, or mDOC credentials for development and testing. Prod
 ```bash
 oid4vc-dev issue sdjwt
 oid4vc-dev issue sdjwt --pid
-oid4vc-dev issue sdjwt --pid --omit resident_address,birth_place,administrative_number
+oid4vc-dev issue sdjwt --pid --omit place_of_birth,sex,personal_administrative_number
 oid4vc-dev issue sdjwt --claims '{"name":"Test","age":30}'
 oid4vc-dev issue sdjwt --iss https://my-issuer.example --vct my-type --exp 48h --nbf 2025-06-01T00:00:00Z
 oid4vc-dev issue sdjwt --key signing-key.pem

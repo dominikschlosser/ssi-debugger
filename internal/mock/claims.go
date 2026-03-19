@@ -25,72 +25,81 @@ var DefaultClaims = map[string]any{
 	"birthdate":   "1984-08-12",
 }
 
-// SDJWTPIDClaims returns claims following the EUDI PID Rulebook for SD-JWT format.
-// address and place_of_birth are nested objects with individually disclosable subclaims.
-// nationalities is an array with individually disclosable elements.
-// document_number and administrative_number are omitted (not present in German PIDs).
+// SDJWTPIDClaims returns claims aligned with the current PID Rulebook's
+// SD-JWT claim identifiers and the real German PID samples used in preprod.
+// address, place_of_birth, and age_equal_or_over are nested objects with
+// individually disclosable subclaims. nationalities is an array.
 var SDJWTPIDClaims = map[string]any{
-	"family_name":       "MUSTERMANN",
-	"given_name":        "ERIKA",
-	"birthdate":         "1984-08-12",
-	"age_over_18":       true,
+	"family_name": "MUSTERMANN",
+	"given_name":  "ERIKA",
+	"birthdate":   "1984-08-12",
+	"age_equal_or_over": map[string]any{
+		"18": true,
+	},
 	"age_in_years":      41,
 	"age_birth_year":    1984,
-	"family_name_birth": "GABLER",
-	"given_name_birth":  "ERIKA",
+	"birth_family_name": "GABLER",
+	"birth_given_name":  "ERIKA",
 	"place_of_birth": map[string]any{
 		"locality": "BERLIN",
 	},
-	"birth_country": "DE",
-	"birth_state":   "BE",
-	"birth_city":    "BERLIN",
 	"address": map[string]any{
+		"formatted":      "HEIDESTRAẞE 17, 51147 KÖLN, DE",
 		"street_address": "HEIDESTRAẞE 17",
+		"house_number":   "17",
 		"locality":       "KÖLN",
 		"postal_code":    "51147",
 		"country":        "DE",
 		"region":         "NW",
 	},
-	"gender":               1,
-	"nationalities":        []any{"DE"},
-	"issuance_date":        "2024-01-15",
-	"date_of_expiry":       "2029-01-15",
-	"expiry_date":          "2029-01-15",
-	"issuing_authority":    "DE",
-	"issuing_country":      "DE",
-	"issuing_jurisdiction": "DE-NW",
+	"nationalities":                  []any{"DE"},
+	"sex":                            2,
+	"email":                          "erika.mustermann@example.de",
+	"phone_number":                   "+491701234567",
+	"picture":                        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==",
+	"date_of_issuance":               "2024-01-15",
+	"date_of_expiry":                 "2029-01-15",
+	"personal_administrative_number": "L01X00T47",
+	"issuing_authority":              "DE",
+	"issuing_country":                "DE",
+	"document_number":                "TEST-PID-123456",
+	"issuing_jurisdiction":           "DE-BE",
+	"trust_anchor":                   "https://preprod.pid-provider.bundesdruckerei.de",
 }
 
-// MDOCPIDClaims returns claims following the default wallet's mDoc PID shape.
-// Most elements are flat ISO 18013-5 data elements in the eu.europa.ec.eudi.pid.1
-// namespace, including birth_place as a plain string value.
-// document_number and administrative_number are omitted (not present in German PIDs).
+// MDOCPIDClaims returns claims aligned with the PID Rulebook's ISO 18013-5
+// element identifiers and the real German PID samples used in preprod.
+// mDoc claims stay flat at the namespace/element level, but individual element
+// values such as birth_place can still be structured according to the rulebook.
 var MDOCPIDClaims = map[string]any{
-	"family_name":          "MUSTERMANN",
-	"given_name":           "ERIKA",
-	"birth_date":           "1984-08-12",
-	"age_over_18":          true,
-	"age_in_years":         41,
-	"age_birth_year":       1984,
-	"family_name_birth":    "GABLER",
-	"given_name_birth":     "ERIKA",
-	"birth_place":          "BERLIN",
-	"birth_country":        "DE",
-	"birth_state":          "BE",
-	"birth_city":           "BERLIN",
-	"resident_address":     "HEIDESTRAẞE 17, 51147 KÖLN",
-	"resident_country":     "DE",
-	"resident_state":       "NW",
-	"resident_city":        "KÖLN",
-	"resident_postal_code": "51147",
-	"resident_street":      "HEIDESTRAẞE 17",
-	"gender":               1,
-	"nationality":          "DE",
-	"issuance_date":        "2024-01-15",
-	"expiry_date":          "2029-01-15",
-	"issuing_authority":    "DE",
-	"issuing_country":      "DE",
-	"issuing_jurisdiction": "DE-NW",
+	"family_name":                    "MUSTERMANN",
+	"given_name":                     "ERIKA",
+	"birth_date":                     "1984-08-12",
+	"age_over_18":                    true,
+	"age_in_years":                   41,
+	"age_birth_year":                 1984,
+	"family_name_birth":              "GABLER",
+	"given_name_birth":               "ERIKA",
+	"birth_place":                    map[string]any{"locality": "BERLIN"},
+	"nationality":                    []any{"DE"},
+	"resident_address":               "HEIDESTRAẞE 17, 51147 KÖLN, DE",
+	"resident_country":               "DE",
+	"resident_state":                 "NW",
+	"resident_city":                  "KÖLN",
+	"resident_postal_code":           "51147",
+	"resident_street":                "HEIDESTRAẞE 17",
+	"resident_house_number":          "17",
+	"personal_administrative_number": "L01X00T47",
+	"sex":                            2,
+	"email_address":                  "erika.mustermann@example.de",
+	"mobile_phone_number":            "+491701234567",
+	"expiry_date":                    "2029-01-15T00:00:00Z",
+	"issuance_date":                  "2024-01-15T00:00:00Z",
+	"issuing_authority":              "DE",
+	"issuing_country":                "DE",
+	"document_number":                "TEST-PID-123456",
+	"issuing_jurisdiction":           "DE-BE",
+	"trust_anchor":                   "https://preprod.pid-provider.bundesdruckerei.de",
 }
 
 // PIDClaims is an alias for SDJWTPIDClaims for backward compatibility.

@@ -129,6 +129,30 @@ func TestPrintDecodeHintWithDashboardPort(t *testing.T) {
 	}
 }
 
+func TestPrintEntryWithDashboardPortRendersDecodeLinkPerCredential(t *testing.T) {
+	entry := &TrafficEntry{
+		Method:           "POST",
+		URL:              "http://example.com/response",
+		StatusCode:       200,
+		Class:            ClassVPAuthResponse,
+		ClassLabel:       "VP Auth Response",
+		Credentials:      []string{"cred-a", "cred-b"},
+		CredentialLabels: []string{"vp_token.pid[0]", "vp_token.mdl[0]"},
+	}
+
+	output := captureOutput(t, func() { PrintEntry(entry, 9091) })
+
+	if strings.Count(output, "http://localhost:9091/decode?credential=") != 2 {
+		t.Errorf("expected 2 decode links, got %q", output)
+	}
+	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-a") {
+		t.Errorf("expected decode link for cred-a, got %q", output)
+	}
+	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-b") {
+		t.Errorf("expected decode link for cred-b, got %q", output)
+	}
+}
+
 func TestTruncateURL(t *testing.T) {
 	tests := []struct {
 		url    string

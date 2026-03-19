@@ -439,6 +439,26 @@ func hasBodyField(body, field string) bool {
 
 func parseFormOrJSON(body string) map[string]string {
 	result := make(map[string]string)
+	trimmed := strings.TrimSpace(body)
+
+	// Prefer JSON when the body is actually JSON. url.ParseQuery is permissive
+	// enough to treat arbitrary JSON text as a single query key.
+	if strings.HasPrefix(trimmed, "{") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &m); err == nil {
+			for k, v := range m {
+				switch val := v.(type) {
+				case string:
+					result[k] = val
+				default:
+					if b, err := json.Marshal(v); err == nil {
+						result[k] = string(b)
+					}
+				}
+			}
+			return result
+		}
+	}
 
 	// Try URL-encoded form first
 	values, err := url.ParseQuery(body)
@@ -548,8 +568,9 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 	case ClassVPAuthResponse:
 		fields := parseFormOrJSON(e.RequestBody)
 		if vp, ok := fields["vp_token"]; ok && vp != "" {
-			creds = append(creds, vp)
-			labels = append(labels, "vp_token")
+			vpCreds, vpLabels := extractVPTokenCredentials(vp)
+			creds = append(creds, vpCreds...)
+			labels = append(labels, vpLabels...)
 		}
 		if id, ok := fields["id_token"]; ok && id != "" {
 			creds = append(creds, id)
@@ -605,6 +626,49 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 				}
 			}
 		}
+	}
+
+	return creds, labels
+}
+
+// extractVPTokenCredentials normalizes vp_token values for direct_post responses.
+// vp_token can be a raw credential string or a JSON object keyed by query ID.
+func extractVPTokenCredentials(vpToken string) ([]string, []string) {
+	var payload any
+	if err := json.Unmarshal([]byte(vpToken), &payload); err != nil {
+		return []string{vpToken}, []string{"vp_token"}
+	}
+
+	var creds []string
+	var labels []string
+
+	switch v := payload.(type) {
+	case string:
+		if v != "" {
+			creds = append(creds, v)
+			labels = append(labels, "vp_token")
+		}
+	case map[string]any:
+		for queryID, val := range v {
+			switch item := val.(type) {
+			case string:
+				if item != "" {
+					creds = append(creds, item)
+					labels = append(labels, fmt.Sprintf("vp_token.%s", queryID))
+				}
+			case []any:
+				for i, entry := range item {
+					if s, ok := entry.(string); ok && s != "" {
+						creds = append(creds, s)
+						labels = append(labels, fmt.Sprintf("vp_token.%s[%d]", queryID, i))
+					}
+				}
+			}
+		}
+	}
+
+	if len(creds) == 0 {
+		return []string{vpToken}, []string{"vp_token"}
 	}
 
 	return creds, labels

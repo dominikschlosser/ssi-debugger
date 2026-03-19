@@ -94,6 +94,9 @@ func TestGenerateDefaultCredentials(t *testing.T) {
 	if len(creds[1].Claims) == 0 {
 		t.Error("expected mDoc to have claims")
 	}
+	if got := creds[1].Claims["eu.europa.ec.eudi.pid.1:birth_place"]; got != "BERLIN" {
+		t.Errorf("expected mDoc birth_place BERLIN, got %v", got)
+	}
 }
 
 func TestGenerateDefaultCredentials_Overwrite(t *testing.T) {

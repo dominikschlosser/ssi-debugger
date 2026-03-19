@@ -313,7 +313,7 @@ func TestEvaluateDCQL_DefaultPIDMatchesVerifierQueries(t *testing.T) {
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_city"}},
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "expiry_date"}},
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "issuing_country"}},
-					map[string]any{"path": []any{"place_of_birth", "locality"}},
+					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "birth_place"}},
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_street"}},
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "resident_country"}},
 					map[string]any{"path": []any{"eu.europa.ec.eudi.pid.1", "issuing_authority"}},
@@ -694,10 +694,8 @@ func TestClaimKeyFromPath(t *testing.T) {
 	mdocCred := StoredCredential{
 		Format: "mso_mdoc",
 		Claims: map[string]any{
-			"eu.europa.ec.eudi.pid.1:given_name": "Max",
-			"eu.europa.ec.eudi.pid.1:birth_place": map[string]any{
-				"locality": "Berlin",
-			},
+			"eu.europa.ec.eudi.pid.1:given_name":  "Max",
+			"eu.europa.ec.eudi.pid.1:birth_place": "Berlin",
 		},
 	}
 
@@ -724,10 +722,11 @@ func TestClaimKeyFromPath(t *testing.T) {
 		{"sd-jwt unknown second type", sdCred, []any{"given_name", true}, ""},
 		{"mdoc valid", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "given_name"}, "eu.europa.ec.eudi.pid.1:given_name"},
 		{"mdoc missing", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "missing"}, ""},
-		{"mdoc nested namespaced alias", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "place_of_birth", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
-		{"mdoc nested namespaced native", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "birth_place", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
-		{"mdoc nested element-first alias", mdocCred, []any{"place_of_birth", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
-		{"mdoc nested element-first native", mdocCred, []any{"birth_place", "locality"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc alias", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "place_of_birth"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc native", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "birth_place"}, "eu.europa.ec.eudi.pid.1:birth_place"},
+		{"mdoc nested alias unsupported", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "place_of_birth", "locality"}, ""},
+		{"mdoc nested native unsupported", mdocCred, []any{"eu.europa.ec.eudi.pid.1", "birth_place", "locality"}, ""},
+		{"mdoc element-first unsupported", mdocCred, []any{"birth_place"}, ""},
 		{"mdoc short path", mdocCred, []any{"eu.europa.ec.eudi.pid.1"}, ""},
 		{"mdoc non-string ns", mdocCred, []any{42, "given_name"}, ""},
 	}

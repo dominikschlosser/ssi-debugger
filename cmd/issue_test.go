@@ -543,15 +543,12 @@ func TestMDOCPIDClaims_HasExpectedFields(t *testing.T) {
 		t.Errorf("expected 25 mDoc PID claims, got %d", len(mock.MDOCPIDClaims))
 	}
 
-	pob, ok := mock.MDOCPIDClaims["birth_place"].(map[string]any)
+	birthPlace, ok := mock.MDOCPIDClaims["birth_place"].(string)
 	if !ok {
-		t.Fatal("birth_place should be a map")
+		t.Fatal("birth_place should be a string")
 	}
-	if _, ok := pob["locality"]; !ok {
-		t.Error("birth_place missing subclaim \"locality\"")
-	}
-	if len(pob) != 1 {
-		t.Errorf("expected birth_place to only contain locality, got %d entries", len(pob))
+	if birthPlace != "BERLIN" {
+		t.Errorf("expected birth_place BERLIN, got %q", birthPlace)
 	}
 
 	// document_number and administrative_number should not be present

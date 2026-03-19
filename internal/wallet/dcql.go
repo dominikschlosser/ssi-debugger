@@ -371,29 +371,14 @@ func mdocClaimKeyFromPath(cred StoredCredential, path []any) string {
 		return ""
 	}
 
-	// Standard mDoc DCQL form: ["namespace", "element", ...]
+	// mDoc claims are flat elements in a namespace: ["namespace", "element"]
 	if len(path) >= 2 {
 		if elem, ok := path[1].(string); ok {
 			for _, candidate := range mdocElementCandidates(elem) {
 				key := first + ":" + candidate
-				if val, exists := cred.Claims[key]; exists && claimPathExists(val, path[2:]) {
+				if _, exists := cred.Claims[key]; exists && len(path) == 2 {
 					return key
 				}
-			}
-		}
-	}
-
-	// Some verifiers send element-first paths for nested mDoc values, e.g.
-	// ["place_of_birth", "locality"] instead of ["ns", "place_of_birth", "locality"].
-	for key, val := range cred.Claims {
-		sep := strings.LastIndex(key, ":")
-		if sep < 0 {
-			continue
-		}
-		suffix := key[sep+1:]
-		for _, candidate := range mdocElementCandidates(first) {
-			if suffix == candidate && claimPathExists(val, path[1:]) {
-				return key
 			}
 		}
 	}

@@ -61,22 +61,20 @@ var SDJWTPIDClaims = map[string]any{
 	"issuing_jurisdiction": "DE-NW",
 }
 
-// MDOCPIDClaims returns claims following the EUDI PID Rulebook for mDoc format.
+// MDOCPIDClaims returns claims following the default wallet's mDoc PID shape.
 // Most elements are flat ISO 18013-5 data elements in the eu.europa.ec.eudi.pid.1
-// namespace; birth_place is structured per the current PID Rulebook.
+// namespace, including birth_place as a plain string value.
 // document_number and administrative_number are omitted (not present in German PIDs).
 var MDOCPIDClaims = map[string]any{
-	"family_name":       "MUSTERMANN",
-	"given_name":        "ERIKA",
-	"birth_date":        "1984-08-12",
-	"age_over_18":       true,
-	"age_in_years":      41,
-	"age_birth_year":    1984,
-	"family_name_birth": "GABLER",
-	"given_name_birth":  "ERIKA",
-	"birth_place": map[string]any{
-		"locality": "BERLIN",
-	},
+	"family_name":          "MUSTERMANN",
+	"given_name":           "ERIKA",
+	"birth_date":           "1984-08-12",
+	"age_over_18":          true,
+	"age_in_years":         41,
+	"age_birth_year":       1984,
+	"family_name_birth":    "GABLER",
+	"given_name_birth":     "ERIKA",
+	"birth_place":          "BERLIN",
 	"birth_country":        "DE",
 	"birth_state":          "BE",
 	"birth_city":           "BERLIN",

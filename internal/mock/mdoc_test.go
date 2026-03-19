@@ -120,6 +120,16 @@ func TestGenerateMDOC_PIDClaims(t *testing.T) {
 	if len(ns) != len(MDOCPIDClaims) {
 		t.Errorf("expected %d claims, got %d", len(MDOCPIDClaims), len(ns))
 	}
+	var birthPlace any
+	for _, item := range ns {
+		if item.ElementIdentifier == "birth_place" {
+			birthPlace = item.ElementValue
+			break
+		}
+	}
+	if birthPlace != "BERLIN" {
+		t.Errorf("expected birth_place BERLIN, got %v", birthPlace)
+	}
 
 	verifyResult := mdoc.Verify(doc, &key.PublicKey)
 	if !verifyResult.SignatureValid {

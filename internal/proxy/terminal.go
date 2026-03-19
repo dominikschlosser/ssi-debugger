@@ -17,6 +17,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/fatih/color"
@@ -114,7 +115,7 @@ func printDecodedField(key string, val any, depth int) {
 
 func printDecodeHint(credential, label string, dashboardPort int) {
 	if dashboardPort > 0 {
-		url := fmt.Sprintf("http://localhost:%d/decode?credential=%s", dashboardPort, credential)
+		url := fmt.Sprintf("http://localhost:%d/decode?credential=%s", dashboardPort, url.QueryEscape(credential))
 		if label != "" {
 			dimColor.Printf("  → %s: ", label)
 		} else {

@@ -17,6 +17,7 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -150,6 +151,16 @@ func TestPrintEntryWithDashboardPortRendersDecodeLinkPerCredential(t *testing.T)
 	}
 	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-b") {
 		t.Errorf("expected decode link for cred-b, got %q", output)
+	}
+}
+
+func TestPrintDecodeHintEscapesCredentialQueryParam(t *testing.T) {
+	credential := `{"cred1":["mdoc-credential"],"cred2":"jwt-credential"}`
+
+	output := captureOutput(t, func() { printDecodeHint(credential, "vp_token", 9091) })
+
+	if !strings.Contains(output, "http://localhost:9091/decode?credential="+url.QueryEscape(credential)) {
+		t.Errorf("expected escaped decode URL in output, got %q", output)
 	}
 }
 

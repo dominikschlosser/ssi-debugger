@@ -622,6 +622,56 @@ func TestExtractCredentialsVPTokenMap(t *testing.T) {
 	}
 }
 
+func TestExtractCredentialsVPTokenMapFormEncoded(t *testing.T) {
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: `state=s1&vp_token={"cred1":["mdoc-credential"],"cred2":"jwt-credential"}`,
+		StatusCode:  200,
+	}
+	Classify(e)
+
+	if len(e.Credentials) != 2 {
+		t.Fatalf("expected 2 extracted credentials, got %d: %v", len(e.Credentials), e.Credentials)
+	}
+
+	seen := make(map[string]string)
+	for i, cred := range e.Credentials {
+		seen[cred] = e.CredentialLabels[i]
+	}
+	if seen["mdoc-credential"] != "vp_token.cred1[0]" {
+		t.Errorf("expected mdoc label vp_token.cred1[0], got %q", seen["mdoc-credential"])
+	}
+	if seen["jwt-credential"] != "vp_token.cred2" {
+		t.Errorf("expected jwt label vp_token.cred2, got %q", seen["jwt-credential"])
+	}
+}
+
+func TestExtractCredentialsVPTokenStringifiedMap(t *testing.T) {
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: `{"vp_token":"{\"cred1\":[\"mdoc-credential\"],\"cred2\":\"jwt-credential\"}","state":"s1"}`,
+		StatusCode:  200,
+	}
+	Classify(e)
+
+	if len(e.Credentials) != 2 {
+		t.Fatalf("expected 2 extracted credentials, got %d: %v", len(e.Credentials), e.Credentials)
+	}
+
+	seen := make(map[string]string)
+	for i, cred := range e.Credentials {
+		seen[cred] = e.CredentialLabels[i]
+	}
+	if seen["mdoc-credential"] != "vp_token.cred1[0]" {
+		t.Errorf("expected mdoc label vp_token.cred1[0], got %q", seen["mdoc-credential"])
+	}
+	if seen["jwt-credential"] != "vp_token.cred2" {
+		t.Errorf("expected jwt label vp_token.cred2, got %q", seen["jwt-credential"])
+	}
+}
+
 func TestExtractCredentialsUnknown(t *testing.T) {
 	e := &TrafficEntry{
 		Method:     "GET",

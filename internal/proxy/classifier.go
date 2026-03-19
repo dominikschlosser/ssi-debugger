@@ -639,6 +639,15 @@ func extractVPTokenCredentials(vpToken string) ([]string, []string) {
 		return []string{vpToken}, []string{"vp_token"}
 	}
 
+	// Some clients send vp_token as a JSON string whose content is itself
+	// the DCQL query_id -> credential map. Unwrap one layer and parse again.
+	if s, ok := payload.(string); ok {
+		trimmed := strings.TrimSpace(s)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			return extractVPTokenCredentials(trimmed)
+		}
+	}
+
 	var creds []string
 	var labels []string
 

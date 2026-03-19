@@ -10,7 +10,7 @@ Status of implemented features against the relevant specifications.
 | `request_uri` (GET) | Implemented | Fetches and parses signed request objects |
 | `request_uri_method=post` | Implemented | Sends `wallet_metadata` and `wallet_nonce`; strict mode rejects missing `wallet_nonce` in the response |
 | Encrypted request objects (JWE) | Implemented | `--require-encrypted-request` flag |
-| DCQL query evaluation | Implemented | Including `credential_sets` constraints |
+| DCQL query evaluation | Implemented | Including `credential_sets` constraints; debug mode warns and continues when some required claim paths are missing from an otherwise matching credential, while strict mode treats that credential as non-matching |
 | `direct_post` response mode | Implemented | |
 | `direct_post.jwt` response mode | Implemented | JARM-encrypted responses |
 | JAR (signed request objects) | Implemented | Strict mode verifies the JWS signature with the leaf `x5c` key and rejects failures; debug mode logs findings and continues |

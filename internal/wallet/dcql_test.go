@@ -15,14 +15,34 @@
 package wallet
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
+
+func captureTestLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	origWriter := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+
+	t.Cleanup(func() {
+		log.SetOutput(origWriter)
+		log.SetFlags(origFlags)
+	})
+
+	return &buf
+}
 
 func TestEvaluateDCQL_MatchesSDJWTByVCT(t *testing.T) {
 	w := generateTestWalletWithPID(t)
@@ -184,6 +204,44 @@ func TestEvaluateDCQL_ClaimNotFound(t *testing.T) {
 	matches := w.EvaluateDCQL(query)
 	if len(matches) != 0 {
 		t.Errorf("expected 0 matches when required claim not found, got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_MissingRequiredClaim_DebugModeWarnsAndMatches(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+	logs := captureTestLogs(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "partial",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+					map[string]any{"path": []any{"nonexistent_claim"}},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match in debug mode, got %d", len(matches))
+	}
+	if len(matches[0].SelectedKeys) != 1 || matches[0].SelectedKeys[0] != "given_name" {
+		t.Fatalf("expected selected keys [given_name], got %v", matches[0].SelectedKeys)
+	}
+	if _, ok := matches[0].Claims["given_name"]; !ok {
+		t.Fatal("expected given_name claim in matched credential")
+	}
+	if strings.Contains(logs.String(), "Warning:") == false {
+		t.Fatalf("expected warning log, got %q", logs.String())
+	}
+	if strings.Contains(logs.String(), "nonexistent_claim") == false {
+		t.Fatalf("expected missing claim path in logs, got %q", logs.String())
 	}
 }
 
@@ -517,11 +575,12 @@ func TestEvaluateDCQL_CredentialSets_RequiredUnsatisfiable(t *testing.T) {
 	}
 }
 
-func TestEvaluateDCQL_PartialClaimMatch_Rejected(t *testing.T) {
+func TestEvaluateDCQL_PartialClaimMatch_StrictModeRejected(t *testing.T) {
 	w := generateTestWalletWithPID(t)
+	w.ValidationMode = ValidationModeStrict
 
 	// Request given_name (exists in SD-JWT) and a nonexistent claim.
-	// The credential should NOT match because the missing claim is required by default.
+	// In strict mode, the credential should NOT match because the missing claim is required by default.
 	query := map[string]any{
 		"credentials": []any{
 			map[string]any{
@@ -540,7 +599,7 @@ func TestEvaluateDCQL_PartialClaimMatch_Rejected(t *testing.T) {
 
 	matches := w.EvaluateDCQL(query)
 	if len(matches) != 0 {
-		t.Errorf("expected 0 matches for partial claim match, got %d", len(matches))
+		t.Errorf("expected 0 matches for partial claim match in strict mode, got %d", len(matches))
 	}
 }
 

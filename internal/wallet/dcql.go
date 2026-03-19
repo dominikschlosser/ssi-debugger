@@ -18,6 +18,7 @@ import (
 	"crypto/x509"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
@@ -61,9 +62,19 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 				continue
 			}
 
-			selectedKeys := selectClaims(cred, cqMap)
-			if selectedKeys == nil {
-				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found", queryID, typeLabel, cred.Format)
+			selection := selectClaims(cred, cqMap)
+			if len(selection.missingRequired) > 0 {
+				if w.ValidationMode == ValidationModeDebug && len(selection.selectedKeys) > 0 {
+					log.Printf("[DCQL] Warning: query=%s: credential %s (%s) missing required claims %v in debug mode; continuing with selected claims %v",
+						queryID, typeLabel, cred.Format, selection.missingRequired, selection.selectedKeys)
+				} else {
+					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
+						queryID, typeLabel, cred.Format, selection.missingRequired)
+					continue
+				}
+			}
+			if !selection.match {
+				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
 				continue
 			}
 
@@ -74,15 +85,15 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 				}
 			}
 
-			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selectedKeys)
+			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
 			matches = append(matches, CredentialMatch{
 				QueryID:      queryID,
 				CredentialID: cred.ID,
 				Format:       cred.Format,
 				VCT:          cred.VCT,
 				DocType:      cred.DocType,
-				Claims:       filterClaims(cred.Claims, selectedKeys),
-				SelectedKeys: selectedKeys,
+				Claims:       filterClaims(cred.Claims, selection.selectedKeys),
+				SelectedKeys: selection.selectedKeys,
 			})
 		}
 	}
@@ -110,6 +121,12 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 
 	log.Printf("[DCQL] Result: %d matches", len(matches))
 	return matches
+}
+
+type claimSelection struct {
+	selectedKeys    []string
+	missingRequired []string
+	match           bool
 }
 
 // matchesFormat checks if a credential matches the requested format.
@@ -155,8 +172,7 @@ func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
 }
 
 // selectClaims determines which claims to disclose based on the query.
-// Returns claim keys to disclose, or nil if the credential can't satisfy the query.
-func selectClaims(cred StoredCredential, cqMap map[string]any) []string {
+func selectClaims(cred StoredCredential, cqMap map[string]any) claimSelection {
 	claimsQuery, ok := cqMap["claims"].([]any)
 	if !ok || len(claimsQuery) == 0 {
 		// No specific claims requested, include all
@@ -164,12 +180,16 @@ func selectClaims(cred StoredCredential, cqMap map[string]any) []string {
 		for k := range cred.Claims {
 			all = append(all, k)
 		}
-		return all
+		return claimSelection{selectedKeys: all, match: true}
 	}
 
 	// Check claim_sets first (preference ordering)
 	if claimSets, ok := cqMap["claim_sets"].([]any); ok && len(claimSets) > 0 {
-		return selectFromClaimSets(cred, claimsQuery, claimSets)
+		selected := selectFromClaimSets(cred, claimsQuery, claimSets)
+		return claimSelection{
+			selectedKeys: selected,
+			match:        len(selected) > 0,
+		}
 	}
 
 	// No claim_sets: include all requested claims that exist
@@ -244,9 +264,10 @@ func buildClaimByID(claimsQuery []any) map[string][]any {
 // selectAllRequestedClaims returns all requested claims that exist in the credential.
 // Per DCQL (OID4VP 1.0 Section 6), claims without claim_sets are required by default
 // unless the individual claim entry has "required": false.
-// Returns nil if any required claim is missing.
-func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string {
+// Returns the selected claims plus any missing required claim paths.
+func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) claimSelection {
 	var selected []string
+	var missingRequired []string
 	for _, cq := range claimsQuery {
 		cqMap, ok := cq.(map[string]any)
 		if !ok {
@@ -267,13 +288,47 @@ func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string
 		if key != "" {
 			selected = append(selected, key)
 		} else if required {
-			return nil
+			missingRequired = append(missingRequired, claimPathString(path))
 		}
 	}
+
 	if len(selected) == 0 {
-		return nil
+		return claimSelection{missingRequired: missingRequired}
 	}
-	return selected
+	return claimSelection{
+		selectedKeys:    selected,
+		missingRequired: missingRequired,
+		match:           true,
+	}
+}
+
+func claimPathString(path []any) string {
+	if len(path) == 0 {
+		return "<empty>"
+	}
+
+	var b strings.Builder
+	for i, segment := range path {
+		switch v := segment.(type) {
+		case string:
+			if i > 0 {
+				b.WriteByte('.')
+			}
+			b.WriteString(v)
+		case float64:
+			b.WriteString("[")
+			b.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+			b.WriteString("]")
+		case nil:
+			b.WriteString("[*]")
+		default:
+			if i > 0 {
+				b.WriteByte('.')
+			}
+			b.WriteString("?")
+		}
+	}
+	return b.String()
 }
 
 // claimKeyFromPath resolves a DCQL claim path to a credential claim key.

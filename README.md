@@ -85,7 +85,7 @@ oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 > **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
 
 Use `--preferred-format dc+sd-jwt`, `--preferred-format mso_mdoc`, or `--preferred-format jwt_vc_json` to control which credential format is selected when multiple match a DCQL query.
-Use `wallet --mode debug` (default) to keep processing requests with non-fatal spec findings for debugging, or `wallet --mode strict` to enforce final-spec wallet behavior.
+Use `wallet --mode debug` (default) to keep processing requests with non-fatal spec findings for debugging. During DCQL evaluation, debug mode warns and keeps a credential match when some required claim paths are missing but the credential still matches the rest of the query. Use `wallet --mode strict` to enforce final-spec wallet behavior instead.
 
 ![Wallet UI](docs/wallet-ui.png)
 

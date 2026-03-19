@@ -3,7 +3,7 @@
 A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.oid4vc-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations.
 
 The wallet has two validation modes:
-- `debug` (default) keeps processing requests when possible and logs spec findings for debugging
+- `debug` (default) keeps processing requests when possible and logs spec findings for debugging; during DCQL evaluation it warns and keeps a credential match when some required claim paths are missing but other requested claims still match
 - `strict` rejects requests that violate the latest final specs
 
 For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.md).
@@ -146,6 +146,8 @@ Auto-detects the URI type and dispatches to the appropriate flow:
 - `openid-credential-offer://`, `haip-vci://` → OID4VCI credential issuance (fetches credential from issuer)
 
 In interactive mode (default), OID4VP requests start a temporary consent UI server and auto-open it in the browser. With `--auto-accept`, auto-selects and submits the first matching credentials.
+
+When DCQL is present, `debug` mode is intentionally forgiving for troubleshooting verifier queries: if a credential matches the requested format and metadata and at least one requested claim, the wallet logs a warning and still keeps that credential as a match even when other required claim paths are missing. `strict` mode treats the same query as non-matching.
 
 ```bash
 oid4vc-dev wallet accept 'openid4vp://authorize?...' --auto-accept

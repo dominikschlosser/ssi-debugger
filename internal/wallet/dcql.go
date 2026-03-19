@@ -92,7 +92,7 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 				Format:       cred.Format,
 				VCT:          cred.VCT,
 				DocType:      cred.DocType,
-				Claims:       filterClaims(cred.Claims, selection.selectedKeys),
+				Claims:       filterClaims(cred, selection.selectedKeys),
 				SelectedKeys: selection.selectedKeys,
 			})
 		}
@@ -224,12 +224,12 @@ func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []a
 				break
 			}
 
-			key := claimKeyFromPath(cred, path)
-			if key == "" {
+			selector := claimSelectorFromPath(cred, path)
+			if selector == "" {
 				satisfiable = false
 				break
 			}
-			selected = append(selected, key)
+			selected = append(selected, selector)
 		}
 
 		if satisfiable && len(selected) > 0 {
@@ -284,9 +284,9 @@ func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) claimSel
 			required = r
 		}
 
-		key := claimKeyFromPath(cred, path)
-		if key != "" {
-			selected = append(selected, key)
+		selector := claimSelectorFromPath(cred, path)
+		if selector != "" {
+			selected = append(selected, selector)
 		} else if required {
 			missingRequired = append(missingRequired, claimPathString(path))
 		}
@@ -300,6 +300,23 @@ func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) claimSel
 		missingRequired: missingRequired,
 		match:           true,
 	}
+}
+
+func claimSelectorFromPath(cred StoredCredential, path []any) string {
+	if len(path) == 0 {
+		return ""
+	}
+
+	if cred.Format == "mso_mdoc" {
+		return claimKeyFromPath(cred, path)
+	}
+
+	key := claimKeyFromPath(cred, path)
+	if key == "" {
+		return ""
+	}
+
+	return claimPathString(path)
 }
 
 func claimPathString(path []any) string {
@@ -440,15 +457,140 @@ func claimPathExists(value any, path []any) bool {
 	}
 }
 
-// filterClaims returns only the claims with the given keys.
-func filterClaims(claims map[string]any, selectedKeys []string) map[string]any {
+// filterClaims returns only the selected claims, keyed by their exact selector.
+func filterClaims(cred StoredCredential, selectedKeys []string) map[string]any {
 	filtered := make(map[string]any, len(selectedKeys))
 	for _, k := range selectedKeys {
-		if v, ok := claims[k]; ok {
+		if v, ok := claimValueBySelector(cred, k); ok {
 			filtered[k] = v
 		}
 	}
 	return filtered
+}
+
+func claimValueBySelector(cred StoredCredential, selector string) (any, bool) {
+	if cred.Format == "mso_mdoc" {
+		v, ok := cred.Claims[selector]
+		return v, ok
+	}
+
+	path, ok := parseSDJWTSelector(selector)
+	if !ok || len(path) == 0 {
+		return nil, false
+	}
+
+	key, ok := path[0].(string)
+	if !ok {
+		return nil, false
+	}
+	value, ok := cred.Claims[key]
+	if !ok {
+		return nil, false
+	}
+	return claimValueAtPath(value, path[1:])
+}
+
+func parseSDJWTSelector(selector string) ([]any, bool) {
+	if selector == "" {
+		return nil, false
+	}
+
+	var path []any
+	var name strings.Builder
+
+	flushName := func() bool {
+		if name.Len() == 0 {
+			return false
+		}
+		path = append(path, name.String())
+		name.Reset()
+		return true
+	}
+
+	for i := 0; i < len(selector); {
+		switch selector[i] {
+		case '.':
+			if name.Len() == 0 {
+				if len(path) == 0 {
+					return nil, false
+				}
+				i++
+				continue
+			}
+			if !flushName() {
+				return nil, false
+			}
+			i++
+		case '[':
+			flushName()
+			end := strings.IndexByte(selector[i:], ']')
+			if end <= 1 {
+				return nil, false
+			}
+			content := selector[i+1 : i+end]
+			if content == "*" {
+				path = append(path, nil)
+			} else {
+				idx, err := strconv.Atoi(content)
+				if err != nil {
+					return nil, false
+				}
+				path = append(path, idx)
+			}
+			i += end + 1
+		default:
+			name.WriteByte(selector[i])
+			i++
+		}
+	}
+
+	if name.Len() > 0 {
+		path = append(path, name.String())
+	}
+
+	return path, len(path) > 0
+}
+
+func claimValueAtPath(value any, path []any) (any, bool) {
+	if len(path) == 0 {
+		return value, true
+	}
+
+	switch segment := path[0].(type) {
+	case string:
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := obj[segment]
+		if !ok {
+			return nil, false
+		}
+		return claimValueAtPath(next, path[1:])
+	case int:
+		arr, ok := value.([]any)
+		if !ok || segment < 0 || segment >= len(arr) {
+			return nil, false
+		}
+		return claimValueAtPath(arr[segment], path[1:])
+	case nil:
+		arr, ok := value.([]any)
+		if !ok {
+			return nil, false
+		}
+		if len(path) == 1 {
+			return arr, true
+		}
+		var out []any
+		for _, item := range arr {
+			if v, ok := claimValueAtPath(item, path[1:]); ok {
+				out = append(out, v)
+			}
+		}
+		return out, len(out) > 0
+	default:
+		return nil, false
+	}
 }
 
 // applyCredentialSets filters matches to satisfy credential_sets constraints.

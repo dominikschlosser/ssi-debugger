@@ -358,8 +358,8 @@ func TestEvaluateDCQL_DefaultPIDMatchesVerifierQueries(t *testing.T) {
 				t.Error("expected mDoc match to include birth_place")
 			}
 		case "cred2":
-			if _, ok := match.Claims["place_of_birth"]; !ok {
-				t.Error("expected SD-JWT match to include place_of_birth")
+			if _, ok := match.Claims["place_of_birth.locality"]; !ok {
+				t.Error("expected SD-JWT match to include place_of_birth.locality")
 			}
 			if _, ok := match.Claims["date_of_expiry"]; !ok {
 				t.Error("expected SD-JWT match to include date_of_expiry")
@@ -658,18 +658,27 @@ func TestMatchesFormat(t *testing.T) {
 }
 
 func TestFilterClaims(t *testing.T) {
-	claims := map[string]any{
-		"given_name":  "Erika",
-		"family_name": "Mustermann",
-		"birth_date":  "1984-08-12",
+	cred := StoredCredential{
+		Format: "dc+sd-jwt",
+		Claims: map[string]any{
+			"given_name":  "Erika",
+			"family_name": "Mustermann",
+			"birth_date":  "1984-08-12",
+			"address": map[string]any{
+				"postal_code": "10115",
+			},
+		},
 	}
 
-	filtered := filterClaims(claims, []string{"given_name", "birth_date"})
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 filtered claims, got %d", len(filtered))
+	filtered := filterClaims(cred, []string{"given_name", "birth_date", "address.postal_code"})
+	if len(filtered) != 3 {
+		t.Fatalf("expected 3 filtered claims, got %d", len(filtered))
 	}
 	if filtered["given_name"] != "Erika" {
 		t.Errorf("expected given_name Erika, got %v", filtered["given_name"])
+	}
+	if filtered["address.postal_code"] != "10115" {
+		t.Errorf("expected address.postal_code 10115, got %v", filtered["address.postal_code"])
 	}
 	if _, ok := filtered["family_name"]; ok {
 		t.Error("family_name should not be in filtered claims")

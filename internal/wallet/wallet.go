@@ -128,7 +128,7 @@ type CredentialMatch struct {
 	VCT          string         `json:"vct,omitempty"`
 	DocType      string         `json:"doctype,omitempty"`
 	Claims       map[string]any `json:"claims"`
-	SelectedKeys []string       `json:"selected_keys"` // claim names to disclose
+	SelectedKeys []string       `json:"selected_keys"` // exact claim selectors to disclose
 }
 
 // ConsentResult is returned by the consent flow.

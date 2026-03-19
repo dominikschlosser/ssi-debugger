@@ -26,6 +26,7 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 // PresentationParams holds parameters for VP token creation.
@@ -90,30 +91,44 @@ func (w *Wallet) createSDJWTPresentation(cred StoredCredential, selectedKeys []s
 	}
 	issuerJWT := parts[0]
 
-	// Build set of selected claim names for filtering
-	selected := make(map[string]bool, len(selectedKeys))
-	for _, k := range selectedKeys {
-		selected[k] = true
+	payload, err := parseIssuerJWTPayload(issuerJWT)
+	if err != nil {
+		return "", fmt.Errorf("parsing issuer JWT payload: %w", err)
 	}
 
-	// Collect digests of array entries referenced by selected disclosures.
-	// When a disclosure's value contains {"...": digest} entries (array element
-	// references), those digests identify which array entry disclosures to include.
-	referencedArrayDigests := make(map[string]bool)
-	for _, d := range cred.Disclosures {
-		if !d.IsArrayEntry && selected[d.Name] {
-			collectArrayDigests(d.Value, referencedArrayDigests)
+	digestMap := make(map[string]*sdjwt.Disclosure, len(cred.Disclosures))
+	for i := range cred.Disclosures {
+		digestMap[cred.Disclosures[i].Digest] = &cred.Disclosures[i]
+	}
+
+	topLevel := topLevelDisclosureMap(payload, digestMap)
+	includedDigests := make(map[string]bool)
+
+	for _, selector := range selectedKeys {
+		path, ok := parseSDJWTSelector(selector)
+		if !ok || len(path) == 0 {
+			continue
 		}
+		root, ok := path[0].(string)
+		if !ok {
+			continue
+		}
+		disc := topLevel[root]
+		if disc == nil {
+			continue
+		}
+		includedDigests[disc.Digest] = true
+		if len(path) == 1 {
+			collectAllNestedDisclosureDigests(disc.Value, digestMap, includedDigests)
+			continue
+		}
+		collectPathDisclosureDigests(disc.Value, path[1:], digestMap, includedDigests)
 	}
 
-	// Filter disclosures to only include selected claims and their array entries
+	// Preserve the original disclosure order from the credential.
 	var selectedDisclosures []string
 	for _, d := range cred.Disclosures {
-		if d.IsArrayEntry {
-			if referencedArrayDigests[d.Digest] {
-				selectedDisclosures = append(selectedDisclosures, d.Raw)
-			}
-		} else if selected[d.Name] {
+		if includedDigests[d.Digest] {
 			selectedDisclosures = append(selectedDisclosures, d.Raw)
 		}
 	}
@@ -272,17 +287,153 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, 
 	}
 }
 
-// collectArrayDigests walks a disclosure value and collects digests from
-// array element references ({"...": digest} objects).
-func collectArrayDigests(value any, digests map[string]bool) {
+func parseIssuerJWTPayload(issuerJWT string) (map[string]any, error) {
+	parts := strings.Split(issuerJWT, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid issuer JWT format")
+	}
+
+	rawPayload, err := format.DecodeBase64URL(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decoding payload: %w", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		return nil, fmt.Errorf("unmarshaling payload: %w", err)
+	}
+
+	return payload, nil
+}
+
+func topLevelDisclosureMap(payload map[string]any, digestMap map[string]*sdjwt.Disclosure) map[string]*sdjwt.Disclosure {
+	topLevel := make(map[string]*sdjwt.Disclosure)
+	sdArr, _ := payload["_sd"].([]any)
+	for _, rawDigest := range sdArr {
+		digest, ok := rawDigest.(string)
+		if !ok {
+			continue
+		}
+		disc := digestMap[digest]
+		if disc == nil || disc.IsArrayEntry || disc.Name == "" {
+			continue
+		}
+		topLevel[disc.Name] = disc
+	}
+	return topLevel
+}
+
+func collectAllNestedDisclosureDigests(value any, digestMap map[string]*sdjwt.Disclosure, digests map[string]bool) {
 	switch v := value.(type) {
+	case map[string]any:
+		if sdArr, ok := v["_sd"].([]any); ok {
+			for _, item := range sdArr {
+				digest, ok := item.(string)
+				if !ok {
+					continue
+				}
+				digests[digest] = true
+				if disc := digestMap[digest]; disc != nil {
+					collectAllNestedDisclosureDigests(disc.Value, digestMap, digests)
+				}
+			}
+		}
+		for k, item := range v {
+			if k == "_sd" {
+				continue
+			}
+			collectAllNestedDisclosureDigests(item, digestMap, digests)
+		}
 	case []any:
 		for _, item := range v {
 			if obj, ok := item.(map[string]any); ok {
 				if digest, ok := obj["..."].(string); ok {
 					digests[digest] = true
+					if disc := digestMap[digest]; disc != nil {
+						collectAllNestedDisclosureDigests(disc.Value, digestMap, digests)
+					}
+					continue
 				}
 			}
+			collectAllNestedDisclosureDigests(item, digestMap, digests)
 		}
 	}
+}
+
+// collectArrayDigests extracts array entry digests from {"...": digest} objects.
+// It is kept as a narrow helper for tests.
+func collectArrayDigests(value any, digests map[string]bool) {
+	arr, ok := value.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range arr {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if digest, ok := obj["..."].(string); ok {
+			digests[digest] = true
+		}
+	}
+}
+
+func collectPathDisclosureDigests(value any, path []any, digestMap map[string]*sdjwt.Disclosure, digests map[string]bool) {
+	if len(path) == 0 {
+		collectAllNestedDisclosureDigests(value, digestMap, digests)
+		return
+	}
+
+	switch segment := path[0].(type) {
+	case string:
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		if next, ok := obj[segment]; ok {
+			collectPathDisclosureDigests(next, path[1:], digestMap, digests)
+			return
+		}
+		if sdArr, ok := obj["_sd"].([]any); ok {
+			for _, item := range sdArr {
+				digest, ok := item.(string)
+				if !ok {
+					continue
+				}
+				disc := digestMap[digest]
+				if disc == nil || disc.IsArrayEntry || disc.Name != segment {
+					continue
+				}
+				digests[digest] = true
+				collectPathDisclosureDigests(disc.Value, path[1:], digestMap, digests)
+			}
+		}
+	case int:
+		arr, ok := value.([]any)
+		if !ok || segment < 0 || segment >= len(arr) {
+			return
+		}
+		collectArrayItemDisclosureDigests(arr[segment], path[1:], digestMap, digests)
+	case nil:
+		arr, ok := value.([]any)
+		if !ok {
+			return
+		}
+		for _, item := range arr {
+			collectArrayItemDisclosureDigests(item, path[1:], digestMap, digests)
+		}
+	}
+}
+
+func collectArrayItemDisclosureDigests(item any, path []any, digestMap map[string]*sdjwt.Disclosure, digests map[string]bool) {
+	if ref, ok := item.(map[string]any); ok {
+		if digest, ok := ref["..."].(string); ok {
+			digests[digest] = true
+			if disc := digestMap[digest]; disc != nil {
+				collectPathDisclosureDigests(disc.Value, path, digestMap, digests)
+			}
+			return
+		}
+	}
+	collectPathDisclosureDigests(item, path, digestMap, digests)
 }

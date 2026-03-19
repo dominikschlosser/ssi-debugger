@@ -161,6 +161,57 @@ func TestCreateVPToken_SDJWT_SelectiveDisclosure(t *testing.T) {
 	}
 }
 
+func TestCreateVPToken_SDJWT_NestedSelectiveDisclosure(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	var sdCred StoredCredential
+	for _, c := range w.GetCredentials() {
+		if c.Format == "dc+sd-jwt" {
+			sdCred = c
+			break
+		}
+	}
+	if sdCred.ID == "" {
+		t.Fatal("no SD-JWT credential found")
+	}
+
+	match := CredentialMatch{
+		QueryID:      "test",
+		CredentialID: sdCred.ID,
+		Format:       "dc+sd-jwt",
+		SelectedKeys: []string{"given_name", "address.postal_code", "address.region"},
+	}
+
+	result, err := w.CreateVPToken(match, PresentationParams{Nonce: "n", ClientID: "client", ResponseURI: "response"})
+	if err != nil {
+		t.Fatalf("CreateVPToken error: %v", err)
+	}
+
+	parsed, err := sdjwt.Parse(result.Token)
+	if err != nil {
+		t.Fatalf("parsing VP token: %v", err)
+	}
+
+	got := make(map[string]bool)
+	for _, d := range parsed.Disclosures {
+		if d.IsArrayEntry {
+			continue
+		}
+		got[d.Name] = true
+	}
+
+	for _, name := range []string{"given_name", "address", "postal_code", "region"} {
+		if !got[name] {
+			t.Errorf("expected disclosure %q in VP token", name)
+		}
+	}
+	for _, name := range []string{"country", "locality", "street_address", "formatted", "house_number"} {
+		if got[name] {
+			t.Errorf("did not expect disclosure %q in VP token", name)
+		}
+	}
+}
+
 func TestCreateVPToken_PlainJWT(t *testing.T) {
 	w := generateTestWallet(t)
 

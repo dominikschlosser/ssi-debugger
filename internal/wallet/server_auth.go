@@ -179,7 +179,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 				if selectedKeys, ok := result.SelectedClaims[m.CredentialID]; ok {
 					matches[i].SelectedKeys = selectedKeys
 					cred, _ := s.wallet.GetCredential(m.CredentialID)
-					matches[i].Claims = filterClaims(cred.Claims, selectedKeys)
+					matches[i].Claims = filterClaims(cred, selectedKeys)
 					s.log("    - %s: disclosing %v", m.CredentialID[:8], selectedKeys)
 				}
 			}

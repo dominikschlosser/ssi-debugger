@@ -21,6 +21,7 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
 func walletGeneratePIDCmd() *cobra.Command {
@@ -60,6 +61,17 @@ func walletGeneratePIDCmd() *cobra.Command {
 					}
 				}
 				w.BaseURL = baseURL
+			}
+			if baseURL != "" {
+				issuerURL, err := wallet.IssuerURLFromBaseURL(baseURL, config.DefaultWalletPort+1)
+				if err != nil {
+					return err
+				}
+				w.IssuerURL = issuerURL
+			} else if docker {
+				w.IssuerURL = wallet.LocalIssuerURL(config.DefaultWalletPort+1, true)
+			} else if w.IssuerURL == "" {
+				w.IssuerURL = wallet.LocalIssuerURL(config.DefaultWalletPort+1, false)
 			}
 
 			overrides, err := parseClaimsOverrides(claimsFlag)

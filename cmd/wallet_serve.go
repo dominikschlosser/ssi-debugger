@@ -151,15 +151,26 @@ so the wallet automatically receives incoming protocol requests.`,
 			cyan := color.New(color.FgCyan, color.Bold)
 			dim := color.New(color.Faint)
 			yellow := color.New(color.FgYellow)
+			publicHTTPURL := fmt.Sprintf("http://localhost:%d", port)
+			if baseURL != "" {
+				publicHTTPURL = baseURL
+			} else if docker {
+				publicHTTPURL = fmt.Sprintf("http://host.docker.internal:%d", port)
+			}
+			httpsURL := w.IssuerURL
 
 			cyan.Printf("OID4VC Dev Wallet %s\n", Version)
 			dim.Println("───────────────────────────────────────")
 			fmt.Printf("  Server:      http://localhost:%d\n", port)
-			fmt.Printf("  Authorize:   http://localhost:%d/authorize\n", port)
-			fmt.Printf("  Trust List:  http://localhost:%d/api/trustlist\n", port)
-			dim.Printf("               http://host.docker.internal:%d/api/trustlist\n", port)
-			fmt.Printf("  Issuer:      %s\n", w.IssuerURL)
-			fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", w.IssuerURL)
+			if publicHTTPURL != fmt.Sprintf("http://localhost:%d", port) {
+				dim.Printf("               %s\n", publicHTTPURL)
+			}
+			fmt.Printf("  HTTPS:       %s\n", httpsURL)
+			fmt.Printf("  Authorize:   %s/authorize\n", publicHTTPURL)
+			dim.Printf("               %s/authorize\n", httpsURL)
+			fmt.Printf("  Trust List:  %s/api/trustlist\n", publicHTTPURL)
+			dim.Printf("               %s/api/trustlist\n", httpsURL)
+			fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", httpsURL)
 			fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
 			fmt.Printf("  Storage:     %s\n", store.Dir)
 			fmt.Printf("  Validation:  %s\n", w.ValidationMode)
@@ -173,7 +184,8 @@ so the wallet automatically receives incoming protocol requests.`,
 				fmt.Printf("  Preferred:   %s\n", w.PreferredFormat)
 			}
 			if w.BaseURL != "" {
-				fmt.Printf("  Status List: %s/api/statuslist\n", w.BaseURL)
+				fmt.Printf("  Status List: %s/api/statuslist\n", publicHTTPURL)
+				dim.Printf("               %s/api/statuslist\n", httpsURL)
 			}
 			if w.RequireEncryptedRequest {
 				fmt.Printf("  Encrypted:   request object encryption required\n")
@@ -245,8 +257,8 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().BoolVar(&register, "register", false, "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)")
 	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip URL scheme registration (overrides --register)")
 	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
-	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")
-	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for --base-url")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for the wallet's HTTP endpoints; its host is also reused for HTTPS wallet endpoints")
+	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for both HTTP and HTTPS wallet endpoint URLs")
 	cmd.Flags().StringVar(&preferredFormat, "preferred-format", "", "Preferred credential format when multiple match: 'dc+sd-jwt', 'mso_mdoc', or 'jwt_vc_json'")
 	cmd.Flags().BoolVar(&requireEncryptedRequest, "require-encrypted-request", false, "Require verifiers to encrypt request objects (sends encryption key in wallet_metadata)")
 	cmd.Flags().BoolVar(&haip, "haip", false, "Enforce HAIP 1.0 compliance (x509_hash, direct_post.jwt, DCQL, JAR, ES256)")

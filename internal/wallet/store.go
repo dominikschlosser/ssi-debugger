@@ -78,13 +78,21 @@ func (s *WalletStore) issuerKeyPath() string {
 	return filepath.Join(s.Dir, "issuer.pem")
 }
 
-// issuerTLSCertPath returns the path to the issuer HTTPS certificate.
+// issuerTLSCertPath returns the path to the wallet HTTPS certificate.
 func (s *WalletStore) issuerTLSCertPath() string {
+	return filepath.Join(s.Dir, "wallet-tls-cert.pem")
+}
+
+// issuerTLSKeyPath returns the path to the wallet HTTPS private key.
+func (s *WalletStore) issuerTLSKeyPath() string {
+	return filepath.Join(s.Dir, "wallet-tls-key.pem")
+}
+
+func (s *WalletStore) legacyIssuerTLSCertPath() string {
 	return filepath.Join(s.Dir, "issuer-tls-cert.pem")
 }
 
-// issuerTLSKeyPath returns the path to the issuer HTTPS private key.
-func (s *WalletStore) issuerTLSKeyPath() string {
+func (s *WalletStore) legacyIssuerTLSKeyPath() string {
 	return filepath.Join(s.Dir, "issuer-tls-key.pem")
 }
 
@@ -226,6 +234,21 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 
 	certPEM, certErr := os.ReadFile(s.issuerTLSCertPath())
 	keyPEM, keyErr := os.ReadFile(s.issuerTLSKeyPath())
+	if os.IsNotExist(certErr) && os.IsNotExist(keyErr) {
+		certPEM, certErr = os.ReadFile(s.legacyIssuerTLSCertPath())
+		keyPEM, keyErr = os.ReadFile(s.legacyIssuerTLSKeyPath())
+		if certErr == nil && keyErr == nil {
+			if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName) {
+				if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
+					return nil, nil, fmt.Errorf("migrating wallet TLS certificate: %w", err)
+				}
+				if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
+					return nil, nil, fmt.Errorf("migrating wallet TLS key: %w", err)
+				}
+				return certPEM, keyPEM, nil
+			}
+		}
+	}
 	if certErr == nil && keyErr == nil {
 		if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName) {
 			return certPEM, keyPEM, nil
@@ -233,10 +256,10 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 	}
 
 	if certErr != nil && !os.IsNotExist(certErr) {
-		return nil, nil, fmt.Errorf("reading issuer TLS certificate: %w", certErr)
+		return nil, nil, fmt.Errorf("reading wallet TLS certificate: %w", certErr)
 	}
 	if keyErr != nil && !os.IsNotExist(keyErr) {
-		return nil, nil, fmt.Errorf("reading issuer TLS key: %w", keyErr)
+		return nil, nil, fmt.Errorf("reading wallet TLS key: %w", keyErr)
 	}
 
 	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM(serverName)
@@ -244,10 +267,10 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 		return nil, nil, err
 	}
 	if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
-		return nil, nil, fmt.Errorf("saving issuer TLS certificate: %w", err)
+		return nil, nil, fmt.Errorf("saving wallet TLS certificate: %w", err)
 	}
 	if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
-		return nil, nil, fmt.Errorf("saving issuer TLS key: %w", err)
+		return nil, nil, fmt.Errorf("saving wallet TLS key: %w", err)
 	}
 
 	return certPEM, keyPEM, nil

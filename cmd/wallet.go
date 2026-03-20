@@ -58,7 +58,7 @@ func init() {
 	walletCmd.AddCommand(walletRegisterCmd())
 	walletCmd.AddCommand(walletUnregisterCmd())
 	walletCmd.AddCommand(walletTrustListCmd())
-	walletCmd.AddCommand(walletIssuerTLSCertCmd())
+	walletCmd.AddCommand(walletTLSCertCmd())
 
 	// Deprecated aliases (hidden from help)
 	presentAlias := &cobra.Command{
@@ -366,7 +366,7 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 	return cmd
 }
 
-func walletIssuerTLSCertCmd() *cobra.Command {
+func walletTLSCertCmd() *cobra.Command {
 	var (
 		port    int
 		baseURL string
@@ -375,10 +375,10 @@ func walletIssuerTLSCertCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "issuer-tls-cert",
-		Short: "Print or export the issuer TLS certificate used by wallet metadata",
-		Long: `Loads or creates the HTTPS certificate used by the wallet's issuer metadata server.
-Use this to add the local issuer certificate to verifier trust stores in automated tests.`,
+		Use:   "tls-cert",
+		Short: "Print or export the wallet TLS certificate used by HTTPS wallet endpoints",
+		Long: `Loads or creates the HTTPS certificate used by the wallet's HTTPS endpoints.
+Use this to add the local wallet certificate to verifier trust stores in automated tests.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := loadStore()
 			issuerURL, err := deriveWalletIssuerURL(port, baseURL, docker)
@@ -387,12 +387,12 @@ Use this to add the local issuer certificate to verifier trust stores in automat
 			}
 			certPEM, err := store.LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL)
 			if err != nil {
-				return fmt.Errorf("loading issuer TLS certificate: %w", err)
+				return fmt.Errorf("loading wallet TLS certificate: %w", err)
 			}
 
 			if outPath != "" {
 				if err := os.WriteFile(outPath, certPEM, 0644); err != nil {
-					return fmt.Errorf("writing issuer certificate: %w", err)
+					return fmt.Errorf("writing wallet TLS certificate: %w", err)
 				}
 				fmt.Println(outPath)
 				return nil
@@ -403,10 +403,10 @@ Use this to add the local issuer certificate to verifier trust stores in automat
 		},
 	}
 
-	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (certificate will match issuer metadata on port+1)")
-	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL used to derive the issuer HTTPS host")
-	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost when deriving the issuer host")
-	cmd.Flags().StringVar(&outPath, "out", "", "Write the issuer certificate PEM to a file instead of stdout")
+	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (certificate will match HTTPS wallet endpoints on port+1)")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL used to derive the HTTPS wallet host")
+	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost when deriving the HTTPS wallet host")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the wallet TLS certificate PEM to a file instead of stdout")
 	return cmd
 }
 

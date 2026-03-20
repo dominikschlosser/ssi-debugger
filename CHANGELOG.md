@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-03-20
+
+### Changed
+
+- wallet-generated PID credentials now use the HTTPS wallet status list endpoint on `port+1`
+- `wallet issuer-tls-cert` was renamed to `wallet tls-cert` to reflect that the exported certificate covers all HTTPS wallet endpoints
+- persisted HTTPS wallet certificate files were renamed to `wallet-tls-cert.pem` / `wallet-tls-key.pem` with legacy migration from the old issuer-prefixed names
+- `wallet serve` now prints both HTTP and HTTPS endpoint URLs where both are available
+
+### Documentation
+
+- clarified that `/api/trustlist` and `/api/statuslist` are also exposed via HTTPS
+- updated wallet, validate, docker, and README docs for `wallet tls-cert` and HTTPS status-list resolution
+
 ## [1.5.0] - 2026-03-20
 
 ### Added

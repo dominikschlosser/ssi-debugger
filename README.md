@@ -78,15 +78,15 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 ```bash
 oid4vc-dev wallet generate-pid          # Generate PID credentials
 oid4vc-dev wallet serve                 # Start web UI + OID4VP endpoints
-oid4vc-dev wallet issuer-tls-cert --out issuer-tls-cert.pem
+oid4vc-dev wallet tls-cert --out wallet-tls-cert.pem
 oid4vc-dev wallet accept 'openid4vp://authorize?...'
 oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 ```
 
 > **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
 
-`wallet serve` also starts an HTTPS issuer endpoint on `port+1` exposing `/.well-known/jwt-vc-issuer` for wallet-generated SD-JWT credentials. The issuer host follows the same `--docker` / `--base-url` host-selection mechanism used for status list URLs.
-The HTTPS certificate for that issuer endpoint is persisted in the wallet directory and can be exported with `wallet issuer-tls-cert` so automated verifier tests can trust it explicitly.
+`wallet serve` also starts HTTPS wallet endpoints on `port+1`, including `/.well-known/jwt-vc-issuer`, `/api/trustlist`, and `/api/statuslist`. Wallet-generated credentials use those HTTPS URLs for issuer metadata and status-list resolution, while HTTP URLs remain available where the wallet serves them.
+The HTTPS certificate for those wallet endpoints is persisted in the wallet directory and can be exported with `wallet tls-cert` so automated verifier tests can trust it explicitly.
 
 Use `--preferred-format dc+sd-jwt`, `--preferred-format mso_mdoc`, or `--preferred-format jwt_vc_json` to control which credential format is selected when multiple match a DCQL query.
 Use `wallet --mode debug` (default) to keep processing requests with non-fatal spec findings for debugging. During DCQL evaluation, debug mode warns and keeps a credential match when some required claim paths are missing but the credential still matches the rest of the query. Use `wallet --mode strict` to enforce final-spec wallet behavior instead.

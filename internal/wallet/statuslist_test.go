@@ -128,6 +128,7 @@ func TestBuildStatusBitstring_MinimumSize(t *testing.T) {
 func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
+	w.IssuerURL = "https://localhost:8086"
 
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("GenerateDefaultCredentials: %v", err)
@@ -162,7 +163,7 @@ func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
 	if !ok {
 		t.Fatal("expected status_list in status claim")
 	}
-	if sl["uri"] != "http://localhost:8085/api/statuslist" {
+	if sl["uri"] != "https://localhost:8086/api/statuslist" {
 		t.Errorf("expected status list URI, got %v", sl["uri"])
 	}
 	if sl["idx"] != float64(0) {
@@ -209,6 +210,7 @@ func TestGenerateDefaultCredentials_WithoutStatusList(t *testing.T) {
 func TestGenerateDefaultCredentials_StatusIndexIncrement(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
+	w.IssuerURL = "https://localhost:8086"
 
 	// Generate first batch
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
@@ -268,6 +270,7 @@ func TestStatusListAPI(t *testing.T) {
 func TestStatusListAPI_WithRevokedCredential(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
+	w.IssuerURL = "https://localhost:8086"
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("generating credentials: %v", err)
 	}
@@ -295,6 +298,12 @@ func TestStatusListAPI_WithRevokedCredential(t *testing.T) {
 	}
 	if _, ok := sl["lst"].(string); !ok {
 		t.Fatal("missing lst")
+	}
+	if payload["sub"] != "https://localhost:8086/api/statuslist" {
+		t.Errorf("expected sub=https://localhost:8086/api/statuslist, got %v", payload["sub"])
+	}
+	if payload["iss"] != "https://localhost:8086" {
+		t.Errorf("expected iss=https://localhost:8086, got %v", payload["iss"])
 	}
 }
 

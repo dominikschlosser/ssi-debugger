@@ -70,18 +70,18 @@ func TestWalletGeneratePID_SetsIssuerURLForSDJWT(t *testing.T) {
 	if !ok {
 		t.Fatal("expected generated SD-JWT to contain status_list reference")
 	}
-	if got := statusList["uri"]; got != "http://localhost:8085/api/statuslist" {
-		t.Fatalf("expected status list uri http://localhost:8085/api/statuslist, got %v", got)
+	if got := statusList["uri"]; got != "https://localhost:8086/api/statuslist" {
+		t.Fatalf("expected status list uri https://localhost:8086/api/statuslist, got %v", got)
 	}
 	if len(w.StatusEntries) != 2 {
 		t.Fatalf("expected generated PID credentials to register 2 status entries, got %d", len(w.StatusEntries))
 	}
 }
 
-func TestWalletIssuerTLSCert_ExportsPersistentCertificate(t *testing.T) {
+func TestWalletTLSCert_ExportsPersistentCertificate(t *testing.T) {
 	tmpDir := t.TempDir()
 	wDir := filepath.Join(tmpDir, "wallet")
-	outPath := filepath.Join(tmpDir, "issuer-tls-cert.pem")
+	outPath := filepath.Join(tmpDir, "wallet-tls-cert.pem")
 	if err := os.MkdirAll(wDir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -90,9 +90,9 @@ func TestWalletIssuerTLSCert_ExportsPersistentCertificate(t *testing.T) {
 	rootCmd.SetOut(buf)
 	walletDir = wDir
 
-	rootCmd.SetArgs([]string{"wallet", "issuer-tls-cert", "--out", outPath})
+	rootCmd.SetArgs([]string{"wallet", "tls-cert", "--out", outPath})
 	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("wallet issuer-tls-cert: %v", err)
+		t.Fatalf("wallet tls-cert: %v", err)
 	}
 
 	data, err := os.ReadFile(outPath)

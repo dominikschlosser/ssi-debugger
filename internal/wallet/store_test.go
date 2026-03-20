@@ -142,10 +142,10 @@ func TestWalletStore_PathHelpers(t *testing.T) {
 	if store.issuerKeyPath() != "/tmp/test-wallet/issuer.pem" {
 		t.Errorf("wrong issuer key path: %s", store.issuerKeyPath())
 	}
-	if store.issuerTLSCertPath() != "/tmp/test-wallet/issuer-tls-cert.pem" {
+	if store.issuerTLSCertPath() != "/tmp/test-wallet/wallet-tls-cert.pem" {
 		t.Errorf("wrong issuer TLS cert path: %s", store.issuerTLSCertPath())
 	}
-	if store.issuerTLSKeyPath() != "/tmp/test-wallet/issuer-tls-key.pem" {
+	if store.issuerTLSKeyPath() != "/tmp/test-wallet/wallet-tls-key.pem" {
 		t.Errorf("wrong issuer TLS key path: %s", store.issuerTLSKeyPath())
 	}
 }
@@ -179,11 +179,41 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_Persists(t *testing.T) {
 	if !bytes.Equal(cert1.Certificate[0], cert2.Certificate[0]) {
 		t.Fatal("expected issuer TLS certificate to persist across loads")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "issuer-tls-cert.pem")); err != nil {
-		t.Fatalf("expected issuer-tls-cert.pem to exist: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-cert.pem")); err != nil {
+		t.Fatalf("expected wallet-tls-cert.pem to exist: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "issuer-tls-key.pem")); err != nil {
-		t.Fatalf("expected issuer-tls-key.pem to exist: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-key.pem")); err != nil {
+		t.Fatalf("expected wallet-tls-key.pem to exist: %v", err)
+	}
+}
+
+func TestWalletStore_LoadOrCreateIssuerTLSCertificate_MigratesLegacyPaths(t *testing.T) {
+	dir := t.TempDir()
+	store := NewWalletStore(dir)
+
+	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM("localhost")
+	if err != nil {
+		t.Fatalf("generateIssuerTLSCertificatePEM: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "issuer-tls-cert.pem"), certPEM, 0644); err != nil {
+		t.Fatalf("write legacy cert: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "issuer-tls-key.pem"), keyPEM, 0600); err != nil {
+		t.Fatalf("write legacy key: %v", err)
+	}
+
+	cert, err := store.LoadOrCreateIssuerTLSCertificate("localhost")
+	if err != nil {
+		t.Fatalf("LoadOrCreateIssuerTLSCertificate: %v", err)
+	}
+	if len(cert.Certificate) == 0 {
+		t.Fatal("expected migrated wallet TLS certificate")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-cert.pem")); err != nil {
+		t.Fatalf("expected wallet-tls-cert.pem to exist after migration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-key.pem")); err != nil {
+		t.Fatalf("expected wallet-tls-key.pem to exist after migration: %v", err)
 	}
 }
 

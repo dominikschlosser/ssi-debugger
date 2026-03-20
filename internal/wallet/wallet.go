@@ -88,6 +88,32 @@ type Wallet struct {
 	lastError               *WalletError
 }
 
+// StatusListURL returns the preferred status list URL for generated credentials.
+// It prefers the wallet's HTTPS issuer endpoint when available.
+func (w *Wallet) StatusListURL() string {
+	if w == nil {
+		return ""
+	}
+	if issuer := strings.TrimRight(w.IssuerURL, "/"); issuer != "" {
+		return issuer + "/api/statuslist"
+	}
+	if base := strings.TrimRight(w.BaseURL, "/"); base != "" {
+		return base + "/api/statuslist"
+	}
+	return ""
+}
+
+// StatusListIssuer returns the issuer value used in generated status list JWTs.
+func (w *Wallet) StatusListIssuer() string {
+	if w == nil {
+		return ""
+	}
+	if issuer := strings.TrimRight(w.IssuerURL, "/"); issuer != "" {
+		return issuer
+	}
+	return strings.TrimRight(w.BaseURL, "/")
+}
+
 // WalletError is an error event that can be displayed in the UI.
 type WalletError struct {
 	Message string `json:"message"`
@@ -245,8 +271,9 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	// Assign status list indices if enabled
 	var sdStatusIdx, mdocStatusIdx int
 	if w.BaseURL != "" {
+		statusListURL := w.StatusListURL()
 		sdStatusIdx = w.nextStatusIndex()
-		sdConfig.StatusListURI = w.BaseURL + "/api/statuslist"
+		sdConfig.StatusListURI = statusListURL
 		sdConfig.StatusListIdx = sdStatusIdx
 	}
 
@@ -275,8 +302,9 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	}
 
 	if w.BaseURL != "" {
+		statusListURL := w.StatusListURL()
 		mdocStatusIdx = w.nextStatusIndex()
-		mdocConfig.StatusListURI = w.BaseURL + "/api/statuslist"
+		mdocConfig.StatusListURI = statusListURL
 		mdocConfig.StatusListIdx = mdocStatusIdx
 	}
 

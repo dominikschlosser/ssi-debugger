@@ -584,10 +584,10 @@ func (s *Server) handleJWTVCIssuerMetadata(w http.ResponseWriter, r *http.Reques
 // handleStatusList generates and serves a status list JWT.
 func (s *Server) handleStatusList(w http.ResponseWriter, r *http.Request) {
 	bitstring := s.wallet.BuildStatusBitstring()
-	statusListURI := s.wallet.BaseURL + "/api/statuslist"
+	statusListURI := s.wallet.StatusListURL()
 	jwt, err := statuslist.GenerateStatusListJWT(bitstring, s.wallet.IssuerKey, statuslist.StatusListConfig{
 		URI:       statusListURI,
-		Issuer:    s.wallet.BaseURL,
+		Issuer:    s.wallet.StatusListIssuer(),
 		CertChain: s.wallet.CertChain,
 	})
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/config"
@@ -105,12 +106,12 @@ func TestWalletTLSCert_ExportsPersistentCertificate(t *testing.T) {
 	}
 
 	store := wallet.NewWalletStore(wDir)
-	want, err := store.LoadOrCreateIssuerTLSCertificatePEM("localhost")
+	want, err := store.LoadOrCreateIssuerTLSLeafCertificatePEM("localhost")
 	if err != nil {
-		t.Fatalf("LoadOrCreateIssuerTLSCertificatePEM: %v", err)
+		t.Fatalf("LoadOrCreateIssuerTLSLeafCertificatePEM: %v", err)
 	}
 	if !bytes.Equal(data, want) {
-		t.Fatal("expected exported certificate to match persisted issuer TLS certificate")
+		t.Fatal("expected exported certificate to match persisted issuer TLS leaf certificate")
 	}
 }
 
@@ -147,5 +148,75 @@ func TestWalletCACert_ExportsSharedCertificate(t *testing.T) {
 	}
 	if !bytes.Equal(data, want) {
 		t.Fatal("expected exported certificate to match persisted shared wallet CA certificate")
+	}
+}
+
+func TestWalletTLSCert_PrintsSingleLeafCertificateToStdout(t *testing.T) {
+	tmpDir := t.TempDir()
+	wDir := filepath.Join(tmpDir, "wallet")
+	if err := os.MkdirAll(wDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	walletDir = wDir
+
+	rootCmd.SetArgs([]string{"wallet", "tls-cert", "--out="})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("wallet tls-cert: %v", err)
+	}
+
+	out := buf.String()
+	block, rest := pem.Decode([]byte(out))
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("expected PEM CERTIFICATE on stdout, got %q", out)
+	}
+	if len(strings.TrimSpace(string(rest))) != 0 {
+		t.Fatalf("expected exactly one PEM certificate on stdout, got trailing data %q", string(rest))
+	}
+
+	store := wallet.NewWalletStore(wDir)
+	want, err := store.LoadOrCreateIssuerTLSLeafCertificatePEM("localhost")
+	if err != nil {
+		t.Fatalf("LoadOrCreateIssuerTLSLeafCertificatePEM: %v", err)
+	}
+	if out != string(want) {
+		t.Fatal("expected stdout to contain only the wallet TLS leaf certificate")
+	}
+}
+
+func TestWalletCACert_PrintsSingleCertificateToStdout(t *testing.T) {
+	tmpDir := t.TempDir()
+	wDir := filepath.Join(tmpDir, "wallet")
+	if err := os.MkdirAll(wDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	walletDir = wDir
+
+	rootCmd.SetArgs([]string{"wallet", "ca-cert", "--out="})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("wallet ca-cert: %v", err)
+	}
+
+	out := buf.String()
+	block, rest := pem.Decode([]byte(out))
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("expected PEM CERTIFICATE on stdout, got %q", out)
+	}
+	if len(strings.TrimSpace(string(rest))) != 0 {
+		t.Fatalf("expected exactly one PEM certificate on stdout, got trailing data %q", string(rest))
+	}
+
+	store := wallet.NewWalletStore(wDir)
+	want, err := store.LoadOrCreateSharedCACertificatePEM()
+	if err != nil {
+		t.Fatalf("LoadOrCreateSharedCACertificatePEM: %v", err)
+	}
+	if out != string(want) {
+		t.Fatal("expected stdout to contain only the shared wallet CA certificate")
 	}
 }

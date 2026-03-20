@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the shared CA now anchors wallet trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet certificates
 - HTTPS wallet certificates are now signed by the shared CA instead of being self-signed
 - no wallet API endpoint paths or response formats changed; only the trust model and certificate material changed
+- `wallet tls-cert` now prints exactly one leaf PEM certificate; `wallet ca-cert` prints exactly one CA PEM certificate
 
 ## [1.5.1] - 2026-03-20
 

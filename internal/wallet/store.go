@@ -297,10 +297,26 @@ func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEM(serverName string) ([]
 	return certPEM, nil
 }
 
+// LoadOrCreateIssuerTLSLeafCertificatePEM returns only the leaf PEM certificate
+// for the wallet HTTPS server.
+func (s *WalletStore) LoadOrCreateIssuerTLSLeafCertificatePEM(serverName string) ([]byte, error) {
+	certPEM, err := s.LoadOrCreateIssuerTLSCertificatePEM(serverName)
+	if err != nil {
+		return nil, err
+	}
+	return firstCertificatePEM(certPEM)
+}
+
 // LoadOrCreateIssuerTLSCertificatePEMForURL resolves the host from the issuer URL and
 // returns the matching persisted issuer HTTPS certificate PEM.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL string) ([]byte, error) {
 	return s.LoadOrCreateIssuerTLSCertificatePEM(parseIssuerHost(issuerURL))
+}
+
+// LoadOrCreateIssuerTLSLeafCertificatePEMForURL resolves the host from the issuer URL and
+// returns only the leaf PEM certificate for the wallet HTTPS server.
+func (s *WalletStore) LoadOrCreateIssuerTLSLeafCertificatePEMForURL(issuerURL string) ([]byte, error) {
+	return s.LoadOrCreateIssuerTLSLeafCertificatePEM(parseIssuerHost(issuerURL))
 }
 
 func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) {
@@ -459,4 +475,12 @@ func saveKeyPEM(path string, key *ecdsa.PrivateKey) error {
 
 func saveCertPEM(path string, cert *x509.Certificate) error {
 	return os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0644)
+}
+
+func firstCertificatePEM(data []byte) ([]byte, error) {
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("no PEM CERTIFICATE block found")
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: block.Bytes}), nil
 }

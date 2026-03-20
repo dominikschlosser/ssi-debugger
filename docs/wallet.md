@@ -218,7 +218,7 @@ oid4vc-dev wallet trust-list --url --docker           # http://host.docker.inter
 
 ## `wallet ca-cert`
 
-Loads or creates the shared wallet CA certificate and prints it as PEM. All wallets under the same wallet base directory use this CA for trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet endpoints.
+Loads or creates the shared wallet CA certificate and prints exactly one PEM certificate. All wallets under the same wallet base directory use this CA for trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet endpoints.
 
 ```bash
 oid4vc-dev wallet ca-cert
@@ -231,7 +231,7 @@ oid4vc-dev wallet ca-cert --out wallet-ca-cert.pem
 
 ## `wallet tls-cert`
 
-Loads or creates the HTTPS certificate used by the wallet's HTTPS endpoints and prints it as PEM. Use `--out` to write the certificate to a file for verifier trust stores in automated tests.
+Loads or creates the HTTPS leaf certificate used by the wallet's HTTPS endpoints and prints exactly one PEM certificate. Use `--out` to write the certificate to a file for verifier trust stores in automated tests. Use `wallet ca-cert` when you want the shared trust root instead of the leaf.
 
 ```bash
 oid4vc-dev wallet tls-cert

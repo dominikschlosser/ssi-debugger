@@ -386,10 +386,14 @@ status list x5c chains, issuer-metadata x5c chains, and HTTPS wallet endpoints.`
 				if err := os.WriteFile(outPath, certPEM, 0644); err != nil {
 					return fmt.Errorf("writing wallet CA certificate: %w", err)
 				}
-				fmt.Println(outPath)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), outPath); err != nil {
+					return fmt.Errorf("writing wallet CA certificate path: %w", err)
+				}
 				return nil
 			}
-			fmt.Print(string(certPEM))
+			if _, err := fmt.Fprint(cmd.OutOrStdout(), string(certPEM)); err != nil {
+				return fmt.Errorf("writing wallet CA certificate: %w", err)
+			}
 			return nil
 		},
 	}
@@ -408,16 +412,17 @@ func walletTLSCertCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "tls-cert",
-		Short: "Print or export the wallet TLS certificate used by HTTPS wallet endpoints",
-		Long: `Loads or creates the HTTPS certificate used by the wallet's HTTPS endpoints.
-Use this to add the local wallet certificate to verifier trust stores in automated tests.`,
+		Short: "Print or export the wallet TLS leaf certificate used by HTTPS wallet endpoints",
+		Long: `Loads or creates the HTTPS leaf certificate used by the wallet's HTTPS endpoints.
+Use this to inspect or export the exact server certificate presented by the wallet.
+Use 'wallet ca-cert' when you want one trust root for all spawned wallets.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := loadStore()
 			issuerURL, err := deriveWalletIssuerURL(port, baseURL, docker)
 			if err != nil {
 				return err
 			}
-			certPEM, err := store.LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL)
+			certPEM, err := store.LoadOrCreateIssuerTLSLeafCertificatePEMForURL(issuerURL)
 			if err != nil {
 				return fmt.Errorf("loading wallet TLS certificate: %w", err)
 			}
@@ -426,11 +431,15 @@ Use this to add the local wallet certificate to verifier trust stores in automat
 				if err := os.WriteFile(outPath, certPEM, 0644); err != nil {
 					return fmt.Errorf("writing wallet TLS certificate: %w", err)
 				}
-				fmt.Println(outPath)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), outPath); err != nil {
+					return fmt.Errorf("writing wallet TLS certificate path: %w", err)
+				}
 				return nil
 			}
 
-			fmt.Print(string(certPEM))
+			if _, err := fmt.Fprint(cmd.OutOrStdout(), string(certPEM)); err != nil {
+				return fmt.Errorf("writing wallet TLS certificate: %w", err)
+			}
 			return nil
 		},
 	}

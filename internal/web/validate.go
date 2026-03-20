@@ -224,6 +224,13 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 
 	result, source, err := validate.VerifyJWTSignature(token, pubKeys, tlCerts)
 	if err != nil {
+		if len(pubKeys) == 0 && len(tlCerts) == 0 && validate.CanResolveJWTIssuerMetadata(token) {
+			return CheckResult{
+				Name:   "signature",
+				Status: "skipped",
+				Detail: fmt.Sprintf("Issuer metadata lookup failed: %v", err),
+			}
+		}
 		return CheckResult{
 			Name:   "signature",
 			Status: "fail",

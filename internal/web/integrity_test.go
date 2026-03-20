@@ -19,8 +19,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
@@ -621,6 +623,37 @@ func TestValidate_SignatureSkippedNoKey(t *testing.T) {
 	}
 	if result.Detail != "No key provided" {
 		t.Errorf("expected 'No key provided', got %q", result.Detail)
+	}
+}
+
+func TestValidate_SignatureSkippedWhenIssuerMetadataLookupFails(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    "https://localhost:1",
+		VCT:       "urn:test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"given_name": "Erika"},
+		Key:       key,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	token, err := sdjwt.Parse(raw)
+	if err != nil {
+		t.Fatalf("sdjwt.Parse: %v", err)
+	}
+
+	result := checkSDJWTSignature(token, ValidateOpts{})
+	if result.Status != "skipped" {
+		t.Fatalf("expected skipped when issuer metadata lookup fails, got %s (%s)", result.Status, result.Detail)
+	}
+	if result.Detail == "" || result.Detail == "No key provided" {
+		t.Fatalf("expected issuer metadata lookup detail, got %q", result.Detail)
 	}
 }
 

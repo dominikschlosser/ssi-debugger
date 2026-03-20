@@ -523,11 +523,29 @@
 
     banner.classList.add(cls);
 
-    // Build summary detail from first relevant check
+    // Build summary detail from the most relevant check so the banner explains
+    // what actually passed/failed instead of always defaulting to expiry.
     let detail = "";
-    const expiryCheck = checks.find((c) => c.name === "expiry");
-    if (expiryCheck && expiryCheck.status !== "skipped") {
-      detail = expiryCheck.detail;
+    const firstFailed = checks.find((c) => c.status === "fail");
+    if (firstFailed) {
+      detail = firstFailed.name + ": " + firstFailed.detail;
+    } else if (sigCheck && sigCheck.status !== "skipped") {
+      detail = "signature: " + sigCheck.detail;
+    } else {
+      const expiryCheck = checks.find((c) => c.name === "expiry" && c.status !== "skipped");
+      if (expiryCheck) {
+        detail = "expiry: " + expiryCheck.detail;
+      } else {
+        const firstRelevant = checks.find((c) => c.status !== "skipped" && c.detail);
+        if (firstRelevant) {
+          detail = firstRelevant.name + ": " + firstRelevant.detail;
+        } else {
+          const firstSkipped = checks.find((c) => c.detail);
+          if (firstSkipped) {
+            detail = firstSkipped.name + ": " + firstSkipped.detail;
+          }
+        }
+      }
     }
 
     let html = '<span class="validity-banner-text">' + icon + " " + label;

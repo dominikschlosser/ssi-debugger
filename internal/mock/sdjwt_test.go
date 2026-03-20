@@ -15,6 +15,7 @@
 package mock
 
 import (
+	"crypto/x509"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,9 @@ func TestGenerateSDJWT_DefaultClaims(t *testing.T) {
 	}
 	if typ, _ := token.Header["typ"].(string); typ != "dc+sd-jwt" {
 		t.Errorf("expected typ dc+sd-jwt, got %s", typ)
+	}
+	if kid, _ := token.Header["kid"].(string); kid != KeyIDForPublicKey(&key.PublicKey) {
+		t.Errorf("expected kid %s, got %s", KeyIDForPublicKey(&key.PublicKey), kid)
 	}
 
 	// Check payload fields
@@ -480,5 +484,49 @@ func TestGenerateSDJWT_WithoutNotBefore(t *testing.T) {
 
 	if _, ok := token.Payload["nbf"]; ok {
 		t.Error("nbf should not be present when NotBefore is nil")
+	}
+}
+
+func TestGenerateSDJWT_WithCertChainOmitsSelfSignedTrustAnchor(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	caKey, err := GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey CA: %v", err)
+	}
+	caCert, err := GenerateCACert(caKey)
+	if err != nil {
+		t.Fatalf("GenerateCACert: %v", err)
+	}
+	leafCert, err := GenerateLeafCert(caKey, caCert, &key.PublicKey)
+	if err != nil {
+		t.Fatalf("GenerateLeafCert: %v", err)
+	}
+
+	result, err := GenerateSDJWT(SDJWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       "test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"name": "test"},
+		Key:       key,
+		CertChain: []*x509.Certificate{leafCert, caCert},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	token, err := sdjwt.Parse(result)
+	if err != nil {
+		t.Fatalf("sdjwt.Parse: %v", err)
+	}
+
+	x5c, ok := token.Header["x5c"].([]any)
+	if !ok {
+		t.Fatal("expected x5c in header")
+	}
+	if len(x5c) != 1 {
+		t.Fatalf("expected only leaf certificate in x5c, got %d entries", len(x5c))
 	}
 }

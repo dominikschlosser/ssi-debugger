@@ -38,6 +38,7 @@ Status of implemented features against the relevant specifications.
 | Credential endpoint | Implemented | Uses OID4VCI 1.0 final `proofs.jwt` and sends `credential_identifier` or `credential_configuration_id` as required |
 | Batch credential issuance | Not implemented | Optional per spec |
 | Deferred credential issuance | Not implemented | Optional per spec |
+| HTTPS JWT VC issuer metadata publication | Implemented | Wallet serves `/.well-known/jwt-vc-issuer` with JWKS for wallet-issued SD-JWTs |
 
 ## HAIP 1.0 (High Assurance Interoperability Profile, OID4VP subset only)
 
@@ -63,6 +64,8 @@ The repository does not yet implement the full HAIP 1.0 profile for issuance, Wa
 | Signature verification (RS256/384/512, PS256) | Implemented | |
 | SHA-256/384/512 disclosure digests | Implemented | |
 | Disclosure digest integrity check | Implemented | Verifies each disclosure hash appears in `_sd` arrays |
+| `kid` header on generated SD-JWTs | Implemented | Deterministic RFC 7638 thumbprint of the signing key |
+| X.509 trust-chain based issuer key publication | Implemented | Generated SD-JWTs carry leaf `x5c`; trust anchor remains in wallet trust list |
 
 ## mDOC / ISO 18013-5
 

@@ -40,7 +40,7 @@ go build -o oid4vc-dev .
 
 ```bash
 docker pull ghcr.io/dominikschlosser/oid4vc-dev:latest
-docker run -p 8085:8085 ghcr.io/dominikschlosser/oid4vc-dev
+docker run -p 8085:8085 -p 8086:8086 ghcr.io/dominikschlosser/oid4vc-dev
 ```
 
 The default CMD starts the wallet server with pre-loaded PID credentials in headless mode — ready for automated verifier testing out of the box.
@@ -83,6 +83,8 @@ oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 ```
 
 > **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
+
+`wallet serve` also starts an HTTPS issuer endpoint on `port+1` exposing `/.well-known/jwt-vc-issuer` for wallet-generated SD-JWT credentials. The issuer host follows the same `--docker` / `--base-url` host-selection mechanism used for status list URLs.
 
 Use `--preferred-format dc+sd-jwt`, `--preferred-format mso_mdoc`, or `--preferred-format jwt_vc_json` to control which credential format is selected when multiple match a DCQL query.
 Use `wallet --mode debug` (default) to keep processing requests with non-fatal spec findings for debugging. During DCQL evaluation, debug mode warns and keeps a credential match when some required claim paths are missing but the credential still matches the rest of the query. Use `wallet --mode strict` to enforce final-spec wallet behavior instead.

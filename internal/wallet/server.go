@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +39,8 @@ type Server struct {
 	onConsentRequest func(req *ConsentRequest)
 	logFunc          func(format string, args ...any)
 	httpSrv          *http.Server
+	issuerSrv        *http.Server
+	issuerPort       int
 	parseOpts        oid4vc.ParseOptions
 }
 
@@ -45,6 +48,11 @@ type Server struct {
 // onSave is called after credential-changing operations (import, delete, issuance).
 func NewServer(w *Wallet, port int, onSave func()) *Server {
 	s := &Server{wallet: w, port: port, onSave: onSave}
+	if p := parseIssuerPort(w.IssuerURL); p > 0 {
+		s.issuerPort = p
+	} else if port > 0 {
+		s.issuerPort = port + 1
+	}
 	s.mux = http.NewServeMux()
 	s.setupRoutes()
 	// Set up ParseOptions with wallet-aware request_uri fetcher.
@@ -86,6 +94,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/statuslist", s.handleStatusList)
 	s.mux.HandleFunc("POST /api/credentials/{id}/status", s.handleSetCredentialStatus)
 
+	// SD-JWT VC issuer metadata
+	s.mux.HandleFunc("GET /.well-known/jwt-vc-issuer", s.handleJWTVCIssuerMetadata)
+
 	// API: testing overrides
 	s.mux.HandleFunc("POST /api/next-error", s.handleSetNextError)
 	s.mux.HandleFunc("DELETE /api/next-error", s.handleClearNextError)
@@ -111,6 +122,9 @@ func (s *Server) ListenAndServe() error {
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+	if err := s.startIssuerTLSServer(); err != nil {
+		return err
+	}
 	return s.httpSrv.ListenAndServe()
 }
 
@@ -126,6 +140,10 @@ func (s *Server) ListenAndServeBackground() (string, error) {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
+	}
+	if err := s.startIssuerTLSServer(); err != nil {
+		ln.Close()
+		return "", err
 	}
 	go func() { _ = s.httpSrv.Serve(ln) }()
 	return addr, nil
@@ -147,10 +165,46 @@ func (s *Server) log(format string, args ...any) {
 	}
 }
 
+func (s *Server) startIssuerTLSServer() error {
+	if s.issuerPort <= 0 || s.issuerSrv != nil {
+		return nil
+	}
+
+	cert, err := generateIssuerTLSCertificate(parseIssuerHost(s.wallet.IssuerURL))
+	if err != nil {
+		return fmt.Errorf("generating issuer TLS certificate: %w", err)
+	}
+
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", s.issuerPort))
+	if err != nil {
+		return fmt.Errorf("listening for issuer HTTPS server: %w", err)
+	}
+
+	s.issuerSrv = &http.Server{
+		Handler:      s.mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	go func() {
+		tlsListener := tls.NewListener(ln, &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		})
+		_ = s.issuerSrv.Serve(tlsListener)
+	}()
+
+	return nil
+}
+
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown() {
 	if s.httpSrv != nil {
 		s.httpSrv.Close()
+	}
+	if s.issuerSrv != nil {
+		s.issuerSrv.Close()
 	}
 }
 
@@ -482,6 +536,25 @@ func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/jwt")
 	w.Write([]byte(jwt))
+}
+
+func (s *Server) handleJWTVCIssuerMetadata(w http.ResponseWriter, r *http.Request) {
+	issuer := strings.TrimRight(s.wallet.IssuerURL, "/")
+	if issuer == "" {
+		http.Error(w, "wallet issuer URL is not configured", http.StatusNotFound)
+		return
+	}
+	jwk := buildIssuerSigningJWK(s.wallet)
+	if jwk == nil {
+		http.Error(w, "wallet has no issuer signing key", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issuer": issuer,
+		"jwks": map[string]any{
+			"keys": []any{jwk},
+		},
+	})
 }
 
 // handleStatusList generates and serves a status list JWT.

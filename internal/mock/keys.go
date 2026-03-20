@@ -15,9 +15,11 @@
 package mock
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -44,6 +46,29 @@ func PublicKeyJWKMap(key *ecdsa.PublicKey) map[string]string {
 		"crv": "P-256",
 		"x":   format.EncodeBase64URL(xBytes),
 		"y":   format.EncodeBase64URL(yBytes),
+	}
+}
+
+// KeyIDForPublicKey computes the RFC 7638 JWK thumbprint for a P-256 public key.
+func KeyIDForPublicKey(key *ecdsa.PublicKey) string {
+	jwk := PublicKeyJWKMap(key)
+	canonical := fmt.Sprintf(`{"crv":"%s","kty":"%s","x":"%s","y":"%s"}`,
+		jwk["crv"], jwk["kty"], jwk["x"], jwk["y"])
+	sum := sha256.Sum256([]byte(canonical))
+	return format.EncodeBase64URL(sum[:])
+}
+
+// SigningJWKMap returns a public JWK suitable for issuer metadata/JWKS publishing.
+func SigningJWKMap(key *ecdsa.PublicKey) map[string]any {
+	jwk := PublicKeyJWKMap(key)
+	return map[string]any{
+		"kty": jwk["kty"],
+		"crv": jwk["crv"],
+		"x":   jwk["x"],
+		"y":   jwk["y"],
+		"kid": KeyIDForPublicKey(key),
+		"use": "sig",
+		"alg": "ES256",
 	}
 }
 
@@ -117,6 +142,21 @@ func GenerateLeafCert(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, leafPub
 	}
 
 	return x509.ParseCertificate(der)
+}
+
+// WithoutSelfSignedTrustAnchor removes a terminal self-signed root certificate from
+// a certificate chain before publishing it in JOSE headers or JWK metadata.
+func WithoutSelfSignedTrustAnchor(chain []*x509.Certificate) []*x509.Certificate {
+	if len(chain) == 0 {
+		return nil
+	}
+	out := make([]*x509.Certificate, len(chain))
+	copy(out, chain)
+	last := out[len(out)-1]
+	if bytes.Equal(last.RawSubject, last.RawIssuer) && last.CheckSignatureFrom(last) == nil {
+		return out[:len(out)-1]
+	}
+	return out
 }
 
 // PrivateKeyJWK returns the JSON JWK representation of a P-256 private key (includes d).

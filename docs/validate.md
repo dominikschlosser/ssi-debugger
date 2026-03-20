@@ -36,6 +36,8 @@ When a trust list is provided and the credential contains an x5c (SD-JWT/JWT) or
 
 This matches the Bundesdruckerei PID provider setup where the trust list contains CA certificates like "PIDP Preprod CA" and credentials carry a leaf certificate signed by that CA.
 
+Wallet-generated SD-JWT credentials follow the same model: the SD-JWT header carries a deterministic `kid` plus the leaf signing certificate in `x5c`, while the wallet trust list exposes the CA trust anchor separately. The wallet also publishes HTTPS JWT VC issuer metadata at `/.well-known/jwt-vc-issuer` for ecosystems that resolve issuer keys via metadata/JWKS.
+
 ```bash
 # Validate a wallet-issued credential against the wallet's trust list
 oid4vc-dev validate --trust-list http://localhost:8085/api/trustlist credential.txt

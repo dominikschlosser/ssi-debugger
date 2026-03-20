@@ -122,6 +122,15 @@ so the wallet automatically receives incoming protocol requests.`,
 				w.BaseURL = baseURL
 			}
 
+			w.IssuerURL = wallet.LocalIssuerURL(port+1, docker)
+			if baseURL != "" {
+				issuerURL, err := wallet.IssuerURLFromBaseURL(baseURL, port+1)
+				if err != nil {
+					return err
+				}
+				w.IssuerURL = issuerURL
+			}
+
 			if pid {
 				if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 					return fmt.Errorf("generating PID credentials: %w", err)
@@ -153,6 +162,8 @@ so the wallet automatically receives incoming protocol requests.`,
 			fmt.Printf("  Authorize:   http://localhost:%d/authorize\n", port)
 			fmt.Printf("  Trust List:  http://localhost:%d/api/trustlist\n", port)
 			dim.Printf("               http://host.docker.internal:%d/api/trustlist\n", port)
+			fmt.Printf("  Issuer:      %s\n", w.IssuerURL)
+			fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", w.IssuerURL)
 			fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
 			fmt.Printf("  Storage:     %s\n", store.Dir)
 			fmt.Printf("  Validation:  %s\n", w.ValidationMode)

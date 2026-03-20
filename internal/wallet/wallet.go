@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +75,7 @@ type Wallet struct {
 	StatusEntries           map[string]StatusEntry // credential ID → status entry
 	StatusListCounter       int                    // next available status list index
 	BaseURL                 string                 // base URL for status list endpoint
+	IssuerURL               string                 // HTTPS issuer URL for JWT VC issuer metadata/JWKS
 	Requests                map[string]*ConsentRequest
 	TxCode                  string `json:"-"` // one-shot tx_code for OID4VCI token request
 	Log                     []LogEntry
@@ -199,6 +201,10 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	}
 	log.Printf("[Wallet] Generating default PID credentials: vct=%s overrides=%d", vct, len(claimOverrides))
 	issuerKey := w.IssuerKey
+	issuer := strings.TrimRight(w.IssuerURL, "/")
+	if issuer == "" {
+		issuer = "https://issuer.example"
+	}
 
 	sdClaims := make(map[string]any, len(mock.SDJWTPIDClaims))
 	for k, v := range mock.SDJWTPIDClaims {
@@ -227,7 +233,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	}
 
 	sdConfig := mock.SDJWTConfig{
-		Issuer:    "https://issuer.example",
+		Issuer:    issuer,
 		VCT:       vct,
 		ExpiresIn: 30 * 24 * time.Hour,
 		Claims:    sdClaims,

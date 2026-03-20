@@ -16,6 +16,8 @@ package wallet
 
 import (
 	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -27,7 +29,9 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
 
 func newTestServer(t *testing.T, autoAccept bool) *Server {
@@ -947,6 +951,100 @@ func TestTrustListAPI_ParseableByTrustlistParser(t *testing.T) {
 	}
 	if len(revocationSvc.Certificates) != 1 {
 		t.Fatalf("expected 1 certificate in revocation service, got %d", len(revocationSvc.Certificates))
+	}
+}
+
+func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://localhost:8443"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	metaResp := serverRequest(t, srv, "GET", "/.well-known/jwt-vc-issuer", "")
+	if metaResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", metaResp.Code, metaResp.Body.String())
+	}
+	meta := decodeJSON(t, metaResp)
+	if meta["issuer"] != w.IssuerURL {
+		t.Fatalf("expected issuer %s, got %v", w.IssuerURL, meta["issuer"])
+	}
+
+	jwks, ok := meta["jwks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected jwks object in metadata")
+	}
+	keys, ok := jwks["keys"].([]any)
+	if !ok || len(keys) != 1 {
+		t.Fatalf("expected a single JWK, got %v", jwks["keys"])
+	}
+	jwk, ok := keys[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected JWK object, got %T", keys[0])
+	}
+	wantKid := mock.KeyIDForPublicKey(&w.IssuerKey.PublicKey)
+	if jwk["kid"] != wantKid {
+		t.Fatalf("expected metadata kid %s, got %v", wantKid, jwk["kid"])
+	}
+
+	x5c, ok := jwk["x5c"].([]any)
+	if !ok || len(x5c) != 1 {
+		t.Fatalf("expected single leaf certificate in JWK x5c, got %v", jwk["x5c"])
+	}
+	leafB64, ok := x5c[0].(string)
+	if !ok {
+		t.Fatalf("expected string x5c leaf, got %T", x5c[0])
+	}
+	leafDER, err := base64.StdEncoding.DecodeString(leafB64)
+	if err != nil {
+		t.Fatalf("decoding x5c leaf: %v", err)
+	}
+	leafCert, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatalf("parsing x5c leaf: %v", err)
+	}
+
+	tlResp := serverRequest(t, srv, "GET", "/api/trustlist", "")
+	if tlResp.Code != http.StatusOK {
+		t.Fatalf("expected trust list 200, got %d: %s", tlResp.Code, tlResp.Body.String())
+	}
+	tl, err := trustlist.Parse(strings.TrimSpace(tlResp.Body.String()))
+	if err != nil {
+		t.Fatalf("parsing trust list: %v", err)
+	}
+	tlCerts := trustlist.ExtractPublicKeys(tl)
+	validatedKey, err := validate.ValidateCertChain([]*x509.Certificate{leafCert}, tlCerts)
+	if err != nil {
+		t.Fatalf("validating issuer metadata x5c against trust list: %v", err)
+	}
+	issuerPub, ok := validatedKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected ECDSA public key, got %T", validatedKey)
+	}
+	if !issuerPub.Equal(&w.IssuerKey.PublicKey) {
+		t.Fatal("issuer metadata leaf certificate does not contain the wallet issuer key")
+	}
+
+	var rawSDJWT string
+	for _, cred := range w.GetCredentials() {
+		if cred.Format == "dc+sd-jwt" {
+			rawSDJWT = cred.Raw
+			break
+		}
+	}
+	if rawSDJWT == "" {
+		t.Fatal("expected generated SD-JWT credential")
+	}
+	token, err := sdjwt.Parse(rawSDJWT)
+	if err != nil {
+		t.Fatalf("parsing generated SD-JWT: %v", err)
+	}
+	if token.Payload["iss"] != w.IssuerURL {
+		t.Fatalf("expected SD-JWT iss %s, got %v", w.IssuerURL, token.Payload["iss"])
+	}
+	if token.Header["kid"] != wantKid {
+		t.Fatalf("expected SD-JWT kid %s, got %v", wantKid, token.Header["kid"])
 	}
 }
 

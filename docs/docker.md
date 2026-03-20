@@ -6,7 +6,7 @@ The primary use case for the Docker image is **automated integration testing of 
 
 ```bash
 docker pull ghcr.io/dominikschlosser/oid4vc-dev:latest
-docker run -p 8085:8085 ghcr.io/dominikschlosser/oid4vc-dev
+docker run -p 8085:8085 -p 8086:8086 ghcr.io/dominikschlosser/oid4vc-dev
 ```
 
 The default CMD starts the wallet server with pre-loaded PID credentials in headless mode — ready for automated verifier testing out of the box.
@@ -30,6 +30,7 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 |----------|--------|---------|
 | `/authorize` | GET/POST | OID4VP authorization endpoint — accepts standard OID4VP query parameters (`client_id`, `response_type`, `dcql_query`, `nonce`, `state`, `response_uri`, `response_mode`, `request_uri`) |
 | `/api/trustlist` | GET | Returns the wallet's ETSI trust list JWT — use this to validate the signatures of credentials issued by the wallet |
+| `https://<wallet>:8086/.well-known/jwt-vc-issuer` | GET | JWT VC issuer metadata for wallet-issued SD-JWTs; exposes the signing key by `kid` and leaf `x5c` chain |
 | `/api/credentials` | GET/POST | List all credentials / import a credential |
 | `/api/credentials/<id>/status` | POST | Set revocation status for a credential |
 | `/api/statuslist` | GET | Status list JWT (requires `--status-list`) |
@@ -52,12 +53,15 @@ services:
     image: ghcr.io/dominikschlosser/oid4vc-dev:latest
     ports:
       - "8085:8085"
+      - "8086:8086"
   verifier:
     build: .
     environment:
       WALLET_URL: http://wallet:8085
       # Use the wallet's trust list to validate received VP tokens
       TRUST_LIST_URL: http://wallet:8085/api/trustlist
+      # Optional: use the wallet's issuer metadata for SD-JWT key discovery
+      ISSUER_METADATA_URL: https://wallet:8086/.well-known/jwt-vc-issuer
 ```
 
 ## Testcontainers (Java)
@@ -161,7 +165,9 @@ curl -X POST http://localhost:8085/api/credentials -d 'eyJhbGci...'
 
 Enable with `--status-list`. Generated credentials will include a status list reference pointing to the wallet's `/api/statuslist` endpoint.
 
-**Important:** The status list URI is baked into the credential at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--docker` (or `--base-url` for a custom URL) so the URI is reachable from both sides:
+The wallet also derives its HTTPS issuer URL from the same host-selection mechanism. By default that issuer runs on `https://<host>:<port+1>` and serves `/.well-known/jwt-vc-issuer`.
+
+**Important:** The status list URI and SD-JWT issuer host are baked into generated credentials at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--docker` (or `--base-url` for a custom URL) so both the status list URL and the issuer metadata host are reachable from both sides:
 
 ```bash
 # Wallet on host, verifier in Docker
@@ -177,6 +183,7 @@ services:
               "--status-list", "--base-url", "http://wallet:8085"]
     ports:
       - "8085:8085"
+      - "8086:8086"
 ```
 
 Toggle revocation at runtime:

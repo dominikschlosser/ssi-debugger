@@ -46,6 +46,10 @@ type SDJWTConfig struct {
 // Map values produce nested disclosures (subclaims with their own _sd array).
 // Slice values produce array element disclosures ({"...": digest} entries).
 func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
+	if cfg.Key == nil {
+		return "", fmt.Errorf("signing key is required")
+	}
+
 	now := time.Now()
 
 	// Generate disclosures and compute digests
@@ -103,14 +107,17 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	header := map[string]any{
 		"alg": "ES256",
 		"typ": "dc+sd-jwt",
+		"kid": KeyIDForPublicKey(&cfg.Key.PublicKey),
 	}
 
 	if len(cfg.CertChain) > 0 {
 		var x5c []string
-		for _, cert := range cfg.CertChain {
+		for _, cert := range WithoutSelfSignedTrustAnchor(cfg.CertChain) {
 			x5c = append(x5c, base64.StdEncoding.EncodeToString(cert.Raw))
 		}
-		header["x5c"] = x5c
+		if len(x5c) > 0 {
+			header["x5c"] = x5c
+		}
 	}
 
 	// Encode header and payload

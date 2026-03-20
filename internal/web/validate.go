@@ -224,17 +224,34 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 
 	result, source, err := validate.VerifyJWTSignature(token, pubKeys, tlCerts)
 	if err != nil {
-		if len(pubKeys) == 0 && len(tlCerts) == 0 && validate.CanResolveJWTIssuerMetadata(token) {
+		if len(pubKeys) == 0 && len(tlCerts) == 0 {
+			if localResult, localSource := verifyWithLocalWalletIssuerKey(token); localResult != nil {
+				result = localResult
+				source = localSource
+				err = nil
+			}
+		}
+		if err != nil && len(pubKeys) == 0 && len(tlCerts) == 0 && validate.CanResolveJWTIssuerMetadata(token) {
 			return CheckResult{
 				Name:   "signature",
 				Status: "skipped",
 				Detail: fmt.Sprintf("Issuer metadata lookup failed: %v", err),
 			}
 		}
-		return CheckResult{
-			Name:   "signature",
-			Status: "fail",
-			Detail: err.Error(),
+		if err != nil {
+			return CheckResult{
+				Name:   "signature",
+				Status: "fail",
+				Detail: err.Error(),
+			}
+		}
+	}
+	if result == nil {
+		if len(pubKeys) == 0 && len(tlCerts) == 0 {
+			if localResult, localSource := verifyWithLocalWalletIssuerKey(token); localResult != nil {
+				result = localResult
+				source = localSource
+			}
 		}
 	}
 	if result == nil {

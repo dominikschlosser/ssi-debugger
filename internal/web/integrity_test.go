@@ -18,12 +18,15 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
 func TestCheckSDJWTIntegrity_AllMatch(t *testing.T) {
@@ -654,6 +657,43 @@ func TestValidate_SignatureSkippedWhenIssuerMetadataLookupFails(t *testing.T) {
 	}
 	if result.Detail == "" || result.Detail == "No key provided" {
 		t.Fatalf("expected issuer metadata lookup detail, got %q", result.Detail)
+	}
+}
+
+func TestValidate_SignatureUsesLocalWalletFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	walletDir := filepath.Join(home, ".oid4vc-dev", "wallet")
+	if err := os.MkdirAll(walletDir, 0700); err != nil {
+		t.Fatalf("mkdir wallet dir: %v", err)
+	}
+
+	store := wallet.NewWalletStore("")
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+
+	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    "https://localhost:1",
+		VCT:       "urn:test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"given_name": "Erika"},
+		Key:       w.IssuerKey,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	token, err := sdjwt.Parse(raw)
+	if err != nil {
+		t.Fatalf("sdjwt.Parse: %v", err)
+	}
+
+	result := checkSDJWTSignature(token, ValidateOpts{})
+	if result.Status != "pass" {
+		t.Fatalf("expected local wallet fallback pass, got %s (%s)", result.Status, result.Detail)
 	}
 }
 

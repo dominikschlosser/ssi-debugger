@@ -78,6 +78,22 @@ func (s *WalletStore) issuerKeyPath() string {
 	return filepath.Join(s.Dir, "issuer.pem")
 }
 
+func (s *WalletStore) sharedStateDir() string {
+	parent := filepath.Dir(s.Dir)
+	if parent == "." || parent == "" {
+		return s.Dir
+	}
+	return parent
+}
+
+func (s *WalletStore) sharedCAKeyPath() string {
+	return filepath.Join(s.sharedStateDir(), "wallet-ca-key.pem")
+}
+
+func (s *WalletStore) sharedCACertPath() string {
+	return filepath.Join(s.sharedStateDir(), "wallet-ca-cert.pem")
+}
+
 // issuerTLSCertPath returns the path to the wallet HTTPS certificate.
 func (s *WalletStore) issuerTLSCertPath() string {
 	return filepath.Join(s.Dir, "wallet-tls-cert.pem")
@@ -107,8 +123,15 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	if err != nil {
 		return nil, err
 	}
+	caKey, caCert, err := s.LoadOrCreateSharedCA()
+	if err != nil {
+		return nil, err
+	}
 
 	w := New(holderKey, issuerKey, false)
+	if err := w.SetCertificateAuthority(caKey, caCert); err != nil {
+		return nil, fmt.Errorf("configuring shared wallet CA: %w", err)
+	}
 
 	data, err := os.ReadFile(s.walletPath())
 	if err != nil {
@@ -181,6 +204,59 @@ func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, 
 	return holderKey, issuerKey, nil
 }
 
+// LoadOrCreateSharedCA loads the shared wallet CA from disk or creates it.
+func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
+	if err := os.MkdirAll(s.sharedStateDir(), 0700); err != nil {
+		return nil, nil, fmt.Errorf("creating shared wallet state directory: %w", err)
+	}
+
+	keyData, keyErr := os.ReadFile(s.sharedCAKeyPath())
+	certData, certErr := os.ReadFile(s.sharedCACertPath())
+	if keyErr == nil && certErr == nil {
+		key, err := parsePEMKey(keyData, "wallet CA")
+		if err == nil {
+			cert, err := parsePEMCertificate(certData, "wallet CA")
+			if err == nil && cert.IsCA && cert.CheckSignatureFrom(cert) == nil {
+				return key, cert, nil
+			}
+		}
+	}
+	if keyErr != nil && !os.IsNotExist(keyErr) {
+		return nil, nil, fmt.Errorf("reading wallet CA key: %w", keyErr)
+	}
+	if certErr != nil && !os.IsNotExist(certErr) {
+		return nil, nil, fmt.Errorf("reading wallet CA certificate: %w", certErr)
+	}
+
+	caKey, err := mock.GenerateKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating wallet CA key: %w", err)
+	}
+	caCert, err := mock.GenerateCACert(caKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating wallet CA certificate: %w", err)
+	}
+	if err := saveKeyPEM(s.sharedCAKeyPath(), caKey); err != nil {
+		return nil, nil, fmt.Errorf("saving wallet CA key: %w", err)
+	}
+	if err := saveCertPEM(s.sharedCACertPath(), caCert); err != nil {
+		return nil, nil, fmt.Errorf("saving wallet CA certificate: %w", err)
+	}
+	return caKey, caCert, nil
+}
+
+// LoadOrCreateSharedCACertificatePEM returns the shared wallet CA certificate PEM.
+func (s *WalletStore) LoadOrCreateSharedCACertificatePEM() ([]byte, error) {
+	if _, _, err := s.LoadOrCreateSharedCA(); err != nil {
+		return nil, err
+	}
+	certPEM, err := os.ReadFile(s.sharedCACertPath())
+	if err != nil {
+		return nil, fmt.Errorf("reading wallet CA certificate: %w", err)
+	}
+	return certPEM, nil
+}
+
 // LoadOrCreateIssuerTLSCertificate loads the issuer HTTPS certificate from disk,
 // or generates and persists a new one if none exists or it no longer matches
 // the requested host.
@@ -231,26 +307,25 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 	if serverName == "" {
 		serverName = "localhost"
 	}
+	caKey, caCert, err := s.LoadOrCreateSharedCA()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	certPEM, certErr := os.ReadFile(s.issuerTLSCertPath())
 	keyPEM, keyErr := os.ReadFile(s.issuerTLSKeyPath())
 	if os.IsNotExist(certErr) && os.IsNotExist(keyErr) {
 		certPEM, certErr = os.ReadFile(s.legacyIssuerTLSCertPath())
 		keyPEM, keyErr = os.ReadFile(s.legacyIssuerTLSKeyPath())
-		if certErr == nil && keyErr == nil {
-			if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName) {
-				if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
-					return nil, nil, fmt.Errorf("migrating wallet TLS certificate: %w", err)
-				}
-				if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
-					return nil, nil, fmt.Errorf("migrating wallet TLS key: %w", err)
-				}
-				return certPEM, keyPEM, nil
-			}
-		}
 	}
 	if certErr == nil && keyErr == nil {
-		if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName) {
+		if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName, caCert) {
+			if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
+				return nil, nil, fmt.Errorf("saving wallet TLS certificate: %w", err)
+			}
+			if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
+				return nil, nil, fmt.Errorf("saving wallet TLS key: %w", err)
+			}
 			return certPEM, keyPEM, nil
 		}
 	}
@@ -262,7 +337,7 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 		return nil, nil, fmt.Errorf("reading wallet TLS key: %w", keyErr)
 	}
 
-	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM(serverName)
+	certPEM, keyPEM, err = generateIssuerTLSCertificatePEMWithCA(serverName, caKey, caCert)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -276,7 +351,7 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 	return certPEM, keyPEM, nil
 }
 
-func issuerTLSCertificateMatches(cert tls.Certificate, serverName string) bool {
+func issuerTLSCertificateMatches(cert tls.Certificate, serverName string, caCert *x509.Certificate) bool {
 	if len(cert.Certificate) == 0 {
 		return false
 	}
@@ -288,7 +363,22 @@ func issuerTLSCertificateMatches(cert tls.Certificate, serverName string) bool {
 	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
 		return false
 	}
-	return leaf.VerifyHostname(serverName) == nil
+	if leaf.VerifyHostname(serverName) != nil {
+		return false
+	}
+	if caCert == nil {
+		return true
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+	opts := x509.VerifyOptions{
+		Roots:   roots,
+		DNSName: serverName,
+	}
+	if _, err := leaf.Verify(opts); err != nil {
+		return false
+	}
+	return true
 }
 
 // loadOrGenerateKey loads a PEM key from path, or generates and saves a new one.
@@ -340,6 +430,18 @@ func parsePEMKey(data []byte, label string) (*ecdsa.PrivateKey, error) {
 	return ecKey, nil
 }
 
+func parsePEMCertificate(data []byte, label string) (*x509.Certificate, error) {
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("%s certificate: no PEM block found", label)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("%s certificate: unable to parse PEM: %w", label, err)
+	}
+	return cert, nil
+}
+
 // saveKeyPEM saves an EC private key as a PEM file.
 func saveKeyPEM(path string, key *ecdsa.PrivateKey) error {
 	der, err := x509.MarshalECPrivateKey(key)
@@ -353,4 +455,8 @@ func saveKeyPEM(path string, key *ecdsa.PrivateKey) error {
 	}
 
 	return os.WriteFile(path, pem.EncodeToMemory(block), 0600)
+}
+
+func saveCertPEM(path string, cert *x509.Certificate) error {
+	return os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0644)
 }

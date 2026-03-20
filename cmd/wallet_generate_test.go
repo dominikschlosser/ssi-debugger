@@ -113,3 +113,39 @@ func TestWalletTLSCert_ExportsPersistentCertificate(t *testing.T) {
 		t.Fatal("expected exported certificate to match persisted issuer TLS certificate")
 	}
 }
+
+func TestWalletCACert_ExportsSharedCertificate(t *testing.T) {
+	tmpDir := t.TempDir()
+	wDir := filepath.Join(tmpDir, "wallet")
+	outPath := filepath.Join(tmpDir, "wallet-ca-cert.pem")
+	if err := os.MkdirAll(wDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	walletDir = wDir
+
+	rootCmd.SetArgs([]string{"wallet", "ca-cert", "--out", outPath})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("wallet ca-cert: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading exported certificate: %v", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("expected PEM CERTIFICATE, got %q", block.Type)
+	}
+
+	store := wallet.NewWalletStore(wDir)
+	want, err := store.LoadOrCreateSharedCACertificatePEM()
+	if err != nil {
+		t.Fatalf("LoadOrCreateSharedCACertificatePEM: %v", err)
+	}
+	if !bytes.Equal(data, want) {
+		t.Fatal("expected exported certificate to match persisted shared wallet CA certificate")
+	}
+}

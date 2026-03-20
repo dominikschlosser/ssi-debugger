@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-03-20
+
+### Added
+
+- `wallet ca-cert` to print or export the shared wallet CA certificate
+
+### Changed
+
+- wallets under the same wallet base directory now share one persisted CA
+- the shared CA now anchors wallet trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet certificates
+- HTTPS wallet certificates are now signed by the shared CA instead of being self-signed
+- no wallet API endpoint paths or response formats changed; only the trust model and certificate material changed
+
 ## [1.5.1] - 2026-03-20
 
 ### Changed

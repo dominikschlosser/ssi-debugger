@@ -106,8 +106,8 @@ func buildIssuerSigningJWK(w *Wallet, exp time.Time) map[string]any {
 	return jwk
 }
 
-func generateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
-	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM(serverName)
+func generateIssuerTLSCertificate(serverName string, caKey *ecdsa.PrivateKey, caCert *x509.Certificate) (tls.Certificate, error) {
+	certPEM, keyPEM, err := generateIssuerTLSCertificatePEMWithCA(serverName, caKey, caCert)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
@@ -119,6 +119,10 @@ func generateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
 }
 
 func generateIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) {
+	return generateIssuerTLSCertificatePEMWithCA(serverName, nil, nil)
+}
+
+func generateIssuerTLSCertificatePEMWithCA(serverName string, caKey *ecdsa.PrivateKey, caCert *x509.Certificate) ([]byte, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating TLS key: %w", err)
@@ -151,12 +155,22 @@ func generateIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) 
 		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 	}
 
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	parent := tmpl
+	signer := any(key)
+	if caKey != nil && caCert != nil {
+		parent = caCert
+		signer = caKey
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, signer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating TLS certificate: %w", err)
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if caCert != nil {
+		certPEM = append(certPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})...)
+	}
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encoding TLS private key: %w", err)

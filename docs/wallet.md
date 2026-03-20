@@ -21,6 +21,7 @@ For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.
 | `accept`       | Accept an OID4VP presentation request or OID4VCI credential offer (auto-detects) |
 | `scan`         | Scan a QR code and auto-dispatch to accept/import               |
 | `trust-list`   | Print the trust list JWT (or just the URL with `--url`)         |
+| `ca-cert`      | Print or export the shared wallet CA certificate                |
 | `tls-cert`     | Print or export the HTTPS wallet certificate used by HTTPS wallet endpoints |
 | `register`     | Register OS URL scheme handlers (macOS only)                    |
 | `unregister`   | Remove OS URL scheme handlers                                   |
@@ -44,6 +45,9 @@ oid4vc-dev wallet serve
 
 # Start the wallet and register URL scheme handlers
 oid4vc-dev wallet serve --register
+
+# Export the shared wallet CA for verifier trust stores
+oid4vc-dev wallet ca-cert --out wallet-ca-cert.pem
 
 # Export the HTTPS wallet certificate for verifier trust stores
 oid4vc-dev wallet tls-cert --out wallet-tls-cert.pem
@@ -69,22 +73,25 @@ oid4vc-dev wallet register
 All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 
 ```
-~/.oid4vc-dev/wallet/
-├── wallet.json       # Credentials + metadata
-├── holder.pem        # Holder EC private key (auto-generated on first use)
-├── issuer.pem        # Issuer EC private key (for self-issued credentials)
-├── wallet-tls-cert.pem # HTTPS certificate for wallet endpoints on port+1
-└── wallet-tls-key.pem  # HTTPS private key for wallet endpoints on port+1
+~/.oid4vc-dev/
+├── wallet-ca-cert.pem  # Shared CA certificate used across wallet instances
+├── wallet-ca-key.pem   # Shared CA private key
+└── wallet/
+    ├── wallet.json       # Credentials + metadata
+    ├── holder.pem        # Holder EC private key (auto-generated on first use)
+    ├── issuer.pem        # Issuer EC private key (for self-issued credentials)
+    ├── wallet-tls-cert.pem # HTTPS certificate for wallet endpoints on port+1
+    └── wallet-tls-key.pem  # HTTPS private key for wallet endpoints on port+1
 ```
 
-Keys are P-256 EC keys, auto-generated on first use and reused across invocations. On startup, the wallet generates a **CA key** and builds a certificate chain:
+Keys are P-256 EC keys, auto-generated on first use and reused across invocations. Wallets under the same wallet base directory share a persisted **CA key** and build certificate chains from it:
 
 1. **CA certificate** — self-signed, used as trust anchor in the trust list (`/api/trustlist`)
 2. **Leaf certificate** — signed by the CA, wraps the issuer key's public key
 
-Generated credentials are signed with the **issuer key**. SD-JWT credentials include a deterministic `kid` header, expose the signing key through JWT VC issuer metadata, and include the leaf signing certificate in `x5c`. The trust anchor CA stays in the wallet trust list so verifiers can validate the signing key through the exposed trust chain instead of trusting a bare public key.
+Generated credentials are signed with the **issuer key**. SD-JWT credentials include a deterministic `kid` header, expose the signing key through JWT VC issuer metadata, and include the leaf signing certificate in `x5c`. The shared trust-anchor CA stays in the wallet trust list so verifiers can validate the signing key through the exposed trust chain instead of trusting a bare public key.
 
-The CA key and credential signing certificate chain are regenerated on each load. The issuer key is persisted and reused across invocations. The separate HTTPS certificate used by the wallet's HTTPS endpoints on `port+1` is also persisted and reused across invocations so automated verifier tests can trust a stable local certificate.
+The shared CA key is persisted and reused across wallet instances in the same base directory. Each wallet keeps its own issuer key, and its credential-signing leaf certificate and HTTPS wallet certificate are minted from that shared CA.
 
 Generated credentials expire in **30 days** by default. Use `--exp` to override (e.g. `--exp 720h` for 30 days, `--exp 24h` for 1 day). Use `--nbf` to set a not-before time (RFC3339 or duration, e.g. `--nbf 2025-01-15T00:00:00Z` or `--nbf -1h`).
 
@@ -114,7 +121,7 @@ The server exposes:
 - ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating credentials issued by the wallet
 - HTTPS wallet endpoints on `https://<host>:<port+1>`, including `/.well-known/jwt-vc-issuer`, `/api/trustlist`, and `/api/statuslist`
 
-The HTTPS wallet certificate is persisted in the wallet directory and can be exported with `wallet tls-cert` for verifier trust stores or CI fixtures.
+The shared wallet CA can be exported with `wallet ca-cert` for verifier trust stores or CI fixtures. The per-wallet HTTPS leaf certificate can still be exported with `wallet tls-cert` when you need the exact server certificate instead. The wallet continues to serve the same endpoints and response formats on top of that shared trust root.
 
 Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
@@ -208,6 +215,19 @@ oid4vc-dev wallet trust-list --url --docker           # http://host.docker.inter
 | `--url`    | `false` | Print only the trust list URL (for a running server) |
 | `--port`   | `8085`  | Wallet server port (used with --url)                |
 | `--docker` | `false` | Use `host.docker.internal` instead of `localhost` (used with --url) |
+
+## `wallet ca-cert`
+
+Loads or creates the shared wallet CA certificate and prints it as PEM. All wallets under the same wallet base directory use this CA for trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet endpoints.
+
+```bash
+oid4vc-dev wallet ca-cert
+oid4vc-dev wallet ca-cert --out wallet-ca-cert.pem
+```
+
+| Flag    | Default | Description |
+|---------|---------|-------------|
+| `--out` | —       | Write the shared wallet CA certificate PEM to a file instead of stdout |
 
 ## `wallet tls-cert`
 
@@ -366,6 +386,7 @@ curl -X POST http://localhost:8085/api/credentials \
 When you generate PID credentials with `wallet generate-pid` or `wallet serve --pid`, generated credentials include a `status.status_list` claim pointing to the wallet's HTTPS status list endpoint. You can also force the same behavior explicitly with `--status-list`. The URI baked into credentials is `https://<host>:<port+1>/api/statuslist`, derived from the same host-selection logic as the wallet's issuer metadata endpoint.
 
 The HTTPS issuer URL for wallet-generated SD-JWT credentials is derived from the same host-selection mechanism. By default it is `https://localhost:<port+1>` and serves `/.well-known/jwt-vc-issuer`.
+Both endpoints use certificate chains rooted in the shared wallet CA.
 
 **Important:** If the verifier runs in Docker (or any environment that can't reach `localhost`), use `--docker` (or `--base-url` for a custom URL) so both the status list URL and the issuer metadata host are reachable:
 

@@ -173,6 +173,12 @@ For automated verifier tests that need to trust that HTTPS endpoint explicitly, 
 oid4vc-dev wallet tls-cert --docker --out wallet-tls-cert.pem
 ```
 
+If the verifier should trust all spawned wallets from one root instead of pinning one leaf certificate, export the shared wallet CA instead:
+
+```bash
+oid4vc-dev wallet ca-cert --out wallet-ca-cert.pem
+```
+
 **Important:** The status list URI and SD-JWT issuer host are baked into generated credentials at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--docker` (or `--base-url` for a custom URL) so both the status list URL and the issuer metadata host are reachable from both sides:
 
 ```bash

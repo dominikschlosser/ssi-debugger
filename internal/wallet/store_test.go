@@ -16,6 +16,7 @@ package wallet
 
 import (
 	"bytes"
+	"crypto/x509"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,9 @@ func TestWalletStore_LoadOrCreate_NewWallet(t *testing.T) {
 	}
 	if w.IssuerKey == nil {
 		t.Fatal("expected non-nil issuer key")
+	}
+	if w.CAKey == nil || len(w.CertChain) < 2 {
+		t.Fatal("expected shared CA-backed certificate chain")
 	}
 	if len(w.Credentials) != 0 {
 		t.Errorf("expected 0 credentials, got %d", len(w.Credentials))
@@ -148,6 +152,12 @@ func TestWalletStore_PathHelpers(t *testing.T) {
 	if store.issuerTLSKeyPath() != "/tmp/test-wallet/wallet-tls-key.pem" {
 		t.Errorf("wrong issuer TLS key path: %s", store.issuerTLSKeyPath())
 	}
+	if store.sharedCACertPath() != "/tmp/wallet-ca-cert.pem" {
+		t.Errorf("wrong wallet CA cert path: %s", store.sharedCACertPath())
+	}
+	if store.sharedCAKeyPath() != "/tmp/wallet-ca-key.pem" {
+		t.Errorf("wrong wallet CA key path: %s", store.sharedCAKeyPath())
+	}
 }
 
 func TestDefaultWalletDir(t *testing.T) {
@@ -178,6 +188,19 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_Persists(t *testing.T) {
 	}
 	if !bytes.Equal(cert1.Certificate[0], cert2.Certificate[0]) {
 		t.Fatal("expected issuer TLS certificate to persist across loads")
+	}
+	_, caCert, err := store.LoadOrCreateSharedCA()
+	if err != nil {
+		t.Fatalf("LoadOrCreateSharedCA: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+	leaf, err := x509.ParseCertificate(cert1.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost"}); err != nil {
+		t.Fatalf("expected wallet TLS cert to chain to shared CA: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-cert.pem")); err != nil {
 		t.Fatalf("expected wallet-tls-cert.pem to exist: %v", err)
@@ -232,5 +255,45 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_RegeneratesForNewHost(t *t
 
 	if bytes.Equal(cert1.Certificate[0], cert2.Certificate[0]) {
 		t.Fatal("expected issuer TLS certificate to regenerate for a different host")
+	}
+}
+
+func TestWalletStore_LoadOrCreateSharedCA_SameParentDir(t *testing.T) {
+	root := t.TempDir()
+	store1 := NewWalletStore(filepath.Join(root, "wallet-a"))
+	store2 := NewWalletStore(filepath.Join(root, "wallet-b"))
+
+	_, cert1, err := store1.LoadOrCreateSharedCA()
+	if err != nil {
+		t.Fatalf("store1 LoadOrCreateSharedCA: %v", err)
+	}
+	_, cert2, err := store2.LoadOrCreateSharedCA()
+	if err != nil {
+		t.Fatalf("store2 LoadOrCreateSharedCA: %v", err)
+	}
+
+	if !bytes.Equal(cert1.Raw, cert2.Raw) {
+		t.Fatal("expected stores under the same parent directory to share the same CA certificate")
+	}
+}
+
+func TestWalletStore_LoadOrCreate_UsesSharedCA(t *testing.T) {
+	root := t.TempDir()
+	store1 := NewWalletStore(filepath.Join(root, "wallet-a"))
+	store2 := NewWalletStore(filepath.Join(root, "wallet-b"))
+
+	w1, err := store1.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("store1 LoadOrCreate: %v", err)
+	}
+	w2, err := store2.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("store2 LoadOrCreate: %v", err)
+	}
+	if len(w1.CertChain) < 2 || len(w2.CertChain) < 2 {
+		t.Fatal("expected CA-backed cert chains on both wallets")
+	}
+	if !bytes.Equal(w1.CertChain[len(w1.CertChain)-1].Raw, w2.CertChain[len(w2.CertChain)-1].Raw) {
+		t.Fatal("expected both wallets to use the same shared CA certificate")
 	}
 }

@@ -16,6 +16,7 @@ package wallet
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,7 +170,7 @@ func (s *Server) SetLogger(fn func(format string, args ...any)) {
 	s.logFunc = fn
 }
 
-// SetIssuerTLSCertificate sets the certificate used by the HTTPS issuer metadata server.
+// SetIssuerTLSCertificate sets the certificate used by the wallet's HTTPS endpoints.
 func (s *Server) SetIssuerTLSCertificate(cert tls.Certificate) {
 	s.issuerTLSCert = &cert
 }
@@ -190,7 +191,11 @@ func (s *Server) startIssuerTLSServer() error {
 		cert = *s.issuerTLSCert
 	} else {
 		var err error
-		cert, err = generateIssuerTLSCertificate(parseIssuerHost(s.wallet.IssuerURL))
+		var caCert *x509.Certificate
+		if len(s.wallet.CertChain) > 1 {
+			caCert = s.wallet.CertChain[len(s.wallet.CertChain)-1]
+		}
+		cert, err = generateIssuerTLSCertificate(parseIssuerHost(s.wallet.IssuerURL), s.wallet.CAKey, caCert)
 		if err != nil {
 			return fmt.Errorf("generating issuer TLS certificate: %w", err)
 		}
@@ -553,7 +558,7 @@ func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "wallet has no CA certificate chain", http.StatusInternalServerError)
 		return
 	}
-	jwt, err := GenerateTrustListJWT(s.wallet.IssuerKey, s.wallet.CertChain[len(s.wallet.CertChain)-1])
+	jwt, err := GenerateTrustListJWT(s.wallet.CAKey, s.wallet.CertChain[len(s.wallet.CertChain)-1])
 	if err != nil {
 		http.Error(w, fmt.Sprintf("generating trust list: %v", err), http.StatusInternalServerError)
 		return

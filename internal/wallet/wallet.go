@@ -217,6 +217,21 @@ func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
 	return w
 }
 
+// SetCertificateAuthority replaces the wallet's certificate chain with one rooted
+// in the provided CA, while keeping the existing issuer signing key.
+func (w *Wallet) SetCertificateAuthority(caKey *ecdsa.PrivateKey, caCert *x509.Certificate) error {
+	if w == nil || w.IssuerKey == nil || caKey == nil || caCert == nil {
+		return fmt.Errorf("wallet CA configuration requires issuer key, CA key, and CA certificate")
+	}
+	leafCert, err := mock.GenerateLeafCert(caKey, caCert, &w.IssuerKey.PublicKey)
+	if err != nil {
+		return fmt.Errorf("generating issuer leaf certificate: %w", err)
+	}
+	w.CAKey = caKey
+	w.CertChain = []*x509.Certificate{leafCert, caCert}
+	return nil
+}
+
 // GenerateDefaultCredentials generates SD-JWT and mDoc PID credentials.
 // If PID credentials already exist, they are replaced. Optional claimOverrides
 // are merged on top of the default PID claims. vct specifies the SD-JWT VCT;

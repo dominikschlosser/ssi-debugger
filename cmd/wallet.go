@@ -58,6 +58,7 @@ func init() {
 	walletCmd.AddCommand(walletRegisterCmd())
 	walletCmd.AddCommand(walletUnregisterCmd())
 	walletCmd.AddCommand(walletTrustListCmd())
+	walletCmd.AddCommand(walletCACertCmd())
 	walletCmd.AddCommand(walletTLSCertCmd())
 
 	// Deprecated aliases (hidden from help)
@@ -347,10 +348,10 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 				return err
 			}
 
-			if len(w.CertChain) < 2 {
+			if w.CAKey == nil || len(w.CertChain) < 2 {
 				return fmt.Errorf("wallet has no CA certificate chain")
 			}
-			jwt, err := wallet.GenerateTrustListJWT(w.IssuerKey, w.CertChain[len(w.CertChain)-1])
+			jwt, err := wallet.GenerateTrustListJWT(w.CAKey, w.CertChain[len(w.CertChain)-1])
 			if err != nil {
 				return fmt.Errorf("generating trust list: %w", err)
 			}
@@ -363,6 +364,37 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 	cmd.Flags().BoolVar(&urlOnly, "url", false, "Print only the trust list URL (for a running wallet server)")
 	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (used with --url)")
 	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost (used with --url)")
+	return cmd
+}
+
+func walletCACertCmd() *cobra.Command {
+	var outPath string
+
+	cmd := &cobra.Command{
+		Use:   "ca-cert",
+		Short: "Print or export the shared wallet CA certificate",
+		Long: `Loads or creates the shared wallet CA certificate and prints it as PEM.
+All wallets under the same wallet base directory use this CA for trust lists,
+status list x5c chains, issuer-metadata x5c chains, and HTTPS wallet endpoints.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store := loadStore()
+			certPEM, err := store.LoadOrCreateSharedCACertificatePEM()
+			if err != nil {
+				return fmt.Errorf("loading wallet CA certificate: %w", err)
+			}
+			if outPath != "" {
+				if err := os.WriteFile(outPath, certPEM, 0644); err != nil {
+					return fmt.Errorf("writing wallet CA certificate: %w", err)
+				}
+				fmt.Println(outPath)
+				return nil
+			}
+			fmt.Print(string(certPEM))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the shared wallet CA certificate PEM to a file instead of stdout")
 	return cmd
 }
 

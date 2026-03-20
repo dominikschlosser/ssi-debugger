@@ -64,7 +64,6 @@ var SDJWTPIDClaims = map[string]any{
 	"issuing_country":                "DE",
 	"document_number":                "TEST-PID-123456",
 	"issuing_jurisdiction":           "DE-BE",
-	"trust_anchor":                   "https://preprod.pid-provider.bundesdruckerei.de",
 }
 
 // MDOCPIDClaims returns claims aligned with the PID Rulebook's ISO 18013-5

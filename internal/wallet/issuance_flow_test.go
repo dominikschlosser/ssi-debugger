@@ -454,6 +454,63 @@ func TestProcessCredentialOffer_Draft14RawStringArray(t *testing.T) {
 	}
 }
 
+func TestProcessCredentialOffer_VerifiesViaIssuerMetadata(t *testing.T) {
+	w := generateTestWallet(t)
+
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	var issuer string
+	metaSrv := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwt-vc-issuer" {
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(map[string]any{
+			"issuer": issuer,
+			"jwks": map[string]any{
+				"keys": []any{mock.SigningJWKMap(&key.PublicKey)},
+			},
+		})
+	}))
+	defer metaSrv.Close()
+	issuer = metaSrv.URL
+
+	credRaw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    issuer,
+		VCT:       "TestIssuedCred",
+		ExpiresIn: 24 * time.Hour,
+		Claims:    map[string]any{"given_name": "Test", "family_name": "User"},
+		Key:       key,
+		HolderKey: &w.HolderKey.PublicKey,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	srv, offerURI := setupMockIssuer(t, w, mockIssuerOpts{
+		tokenCNonce:        "test-c-nonce",
+		credentialResponse: map[string]any{"credential": credRaw},
+	})
+	defer srv.Close()
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	result, err := w.ProcessCredentialOffer(offerURI)
+	if err != nil {
+		t.Fatalf("ProcessCredentialOffer: %v", err)
+	}
+
+	if result.VerificationStatus != "pass" {
+		t.Fatalf("expected verification pass, got %q (%s)", result.VerificationStatus, result.VerificationDetail)
+	}
+}
+
 func TestProcessCredentialOffer_UsesCredentialIdentifierFromAuthorizationDetails(t *testing.T) {
 	w := generateTestWallet(t)
 

@@ -287,6 +287,13 @@ func processCredentialOffer(uri string, txCode string) error {
 	}
 
 	fmt.Printf("Received %s credential from %s (ID: %s)\n", result.Format, result.Issuer, result.CredentialID)
+	if result.VerificationDetail != "" {
+		fmt.Printf("Verification: %s", result.VerificationDetail)
+		if result.VerificationStatus != "" {
+			fmt.Printf(" [%s]", result.VerificationStatus)
+		}
+		fmt.Println()
+	}
 
 	if jsonOutput {
 		data, _ := json.MarshalIndent(result, "", "  ")

@@ -192,6 +192,9 @@ func TestGenerateSDJWT_PIDClaims(t *testing.T) {
 	if len(nats) != 1 || nats[0] != "DE" {
 		t.Errorf("expected nationalities=[DE], got %v", nats)
 	}
+	if _, ok := token.ResolvedClaims["trust_anchor"]; ok {
+		t.Fatal("did not expect trust_anchor in resolved SD-JWT claims")
+	}
 
 	// Verify signature
 	verifyResult := sdjwt.Verify(token, &key.PublicKey)

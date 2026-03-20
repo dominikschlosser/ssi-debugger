@@ -27,6 +27,8 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
 
 // HTTPClient is the interface used for HTTP requests during issuance flows.
@@ -40,10 +42,12 @@ var httpClient HTTPClient = http.DefaultClient
 
 // IssuanceResult captures the result of an OID4VCI flow.
 type IssuanceResult struct {
-	CredentialID string `json:"credential_id"`
-	Format       string `json:"format"`
-	Issuer       string `json:"issuer"`
-	Error        string `json:"error,omitempty"`
+	CredentialID       string `json:"credential_id"`
+	Format             string `json:"format"`
+	Issuer             string `json:"issuer"`
+	VerificationStatus string `json:"verification_status,omitempty"`
+	VerificationDetail string `json:"verification_detail,omitempty"`
+	Error              string `json:"error,omitempty"`
 }
 
 // ProcessCredentialOffer processes an OID4VCI credential offer URI.
@@ -160,10 +164,13 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 			if credFormat == "" {
 				credFormat = imported.Format
 			}
+			verificationStatus, verificationDetail := verifyImportedJWTMetadataSignature(credential)
 			return &IssuanceResult{
-				CredentialID: imported.ID,
-				Format:       credFormat,
-				Issuer:       offer.CredentialIssuer,
+				CredentialID:       imported.ID,
+				Format:             credFormat,
+				Issuer:             offer.CredentialIssuer,
+				VerificationStatus: verificationStatus,
+				VerificationDetail: verificationDetail,
 			}, nil
 		}
 	}
@@ -192,11 +199,38 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 		credFormat = imported.Format
 	}
 
+	verificationStatus, verificationDetail := verifyImportedJWTMetadataSignature(credential)
 	return &IssuanceResult{
-		CredentialID: imported.ID,
-		Format:       credFormat,
-		Issuer:       offer.CredentialIssuer,
+		CredentialID:       imported.ID,
+		Format:             credFormat,
+		Issuer:             offer.CredentialIssuer,
+		VerificationStatus: verificationStatus,
+		VerificationDetail: verificationDetail,
 	}, nil
+}
+
+func verifyImportedJWTMetadataSignature(raw string) (string, string) {
+	token, err := sdjwt.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	result, source, err := validate.VerifyJWTSignature(token, nil, nil)
+	if err != nil {
+		return "fail", err.Error()
+	}
+	if result == nil {
+		return "skipped", "Issuer metadata verification unavailable"
+	}
+	if result.SignatureValid {
+		if source != "" {
+			return "pass", fmt.Sprintf("Signature valid (%s, via %s)", result.Algorithm, source)
+		}
+		return "pass", fmt.Sprintf("Signature valid (%s)", result.Algorithm)
+	}
+	if source != "" {
+		return "fail", fmt.Sprintf("Signature invalid via %s", source)
+	}
+	return "fail", "Signature invalid"
 }
 
 // fetchIssuerMetadata fetches the OpenID Credential Issuer metadata.

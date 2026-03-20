@@ -222,49 +222,47 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 		}
 	}
 
-	if len(pubKeys) == 0 && len(tlCerts) == 0 {
+	result, source, err := validate.VerifyJWTSignature(token, pubKeys, tlCerts)
+	if err != nil {
+		return CheckResult{
+			Name:   "signature",
+			Status: "fail",
+			Detail: err.Error(),
+		}
+	}
+	if result == nil {
+		detail := "No key provided"
+		if validate.CanResolveJWTIssuerMetadata(token) {
+			detail = "Issuer metadata verification unavailable"
+		}
 		return CheckResult{
 			Name:   "signature",
 			Status: "skipped",
-			Detail: "No key provided",
+			Detail: detail,
 		}
 	}
-
-	// Try x5c chain validation first
-	if len(tlCerts) > 0 {
-		if x5cKey, err := validate.ExtractAndValidateX5C(token.Header, tlCerts); err == nil && x5cKey != nil {
-			result := sdjwt.Verify(token, x5cKey)
-			if result.SignatureValid {
-				return CheckResult{
-					Name:   "signature",
-					Status: "pass",
-					Detail: fmt.Sprintf("Valid (%s, chain verified)", result.Algorithm),
-				}
-			}
-			return CheckResult{
-				Name:   "signature",
-				Status: "fail",
-				Detail: "Signature invalid (chain-derived key)",
-			}
-		}
-	}
-
-	// Try each key directly
-	for _, key := range pubKeys {
-		result := sdjwt.Verify(token, key)
-		if result.SignatureValid {
+	if result.SignatureValid {
+		if source != "" {
 			return CheckResult{
 				Name:   "signature",
 				Status: "pass",
-				Detail: fmt.Sprintf("Valid (%s)", result.Algorithm),
+				Detail: fmt.Sprintf("Valid (%s, via %s)", result.Algorithm, source),
 			}
 		}
+		return CheckResult{
+			Name:   "signature",
+			Status: "pass",
+			Detail: fmt.Sprintf("Valid (%s)", result.Algorithm),
+		}
 	}
-
+	detail := "Signature verification failed"
+	if source != "" {
+		detail = fmt.Sprintf("Signature verification failed via %s", source)
+	}
 	return CheckResult{
 		Name:   "signature",
 		Status: "fail",
-		Detail: "Signature verification failed",
+		Detail: detail,
 	}
 }
 

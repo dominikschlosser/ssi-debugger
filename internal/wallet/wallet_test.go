@@ -21,6 +21,7 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 func generateTestWallet(t *testing.T) *Wallet {
@@ -100,6 +101,31 @@ func TestGenerateDefaultCredentials(t *testing.T) {
 	}
 	if birthPlace["locality"] != "BERLIN" {
 		t.Errorf("expected mDoc birth_place.locality BERLIN, got %v", birthPlace["locality"])
+	}
+}
+
+func TestGenerateDefaultCredentials_SDJWTIssuerUsesWalletIssuerURL(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://issuer.wallet.example:8443"
+
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating PID credentials: %v", err)
+	}
+
+	creds := w.GetCredentials()
+	if len(creds) == 0 {
+		t.Fatal("expected generated credentials")
+	}
+
+	token, err := sdjwt.Parse(creds[0].Raw)
+	if err != nil {
+		t.Fatalf("parsing generated SD-JWT: %v", err)
+	}
+	if token.Payload["iss"] != w.IssuerURL {
+		t.Fatalf("expected SD-JWT iss %s, got %v", w.IssuerURL, token.Payload["iss"])
+	}
+	if _, ok := token.ResolvedClaims["trust_anchor"]; ok {
+		t.Fatal("did not expect trust_anchor in generated SD-JWT claims")
 	}
 }
 

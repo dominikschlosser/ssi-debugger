@@ -27,6 +27,8 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
+	"github.com/dominikschlosser/oid4vc-dev/internal/web"
 )
 
 var (
@@ -41,8 +43,8 @@ var decodeCmd = &cobra.Command{
 	Long: `Decode and inspect verifiable credentials (JWT, SD-JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 This is a read-only inspection tool — it parses and displays the content but does
-not verify signatures, check expiry, or validate revocation status. Use 'validate'
-for active verification.
+automatically verifies JWT/SD-JWT signatures when issuer metadata can be resolved
+from iss+kid. Use 'validate' for explicit keys, trust lists, and revocation checks.
 
 Accepts:
   - Credential strings: SD-JWT, JWT, mDOC (hex or base64url)
@@ -138,20 +140,46 @@ func runDecode(cmd *cobra.Command, args []string) error {
 
 	switch detected {
 	case format.FormatSDJWT:
+		if opts.JSON {
+			result, err := web.Validate(raw, web.ValidateOpts{})
+			if err != nil {
+				return err
+			}
+			output.PrintJSON(result)
+			return nil
+		}
 		token, err := sdjwt.Parse(raw)
 		if err != nil {
 			return fmt.Errorf("parsing SD-JWT: %w", err)
 		}
 		output.PrintSDJWT(token, opts)
+		printAutoVerifyResult(token, opts)
 
 	case format.FormatJWT:
+		if opts.JSON {
+			result, err := web.Validate(raw, web.ValidateOpts{})
+			if err != nil {
+				return err
+			}
+			output.PrintJSON(result)
+			return nil
+		}
 		token, err := sdjwt.Parse(raw)
 		if err != nil {
 			return fmt.Errorf("parsing JWT: %w", err)
 		}
 		output.PrintJWT(token, opts)
+		printAutoVerifyResult(token, opts)
 
 	case format.FormatMDOC:
+		if opts.JSON {
+			result, err := web.Validate(raw, web.ValidateOpts{})
+			if err != nil {
+				return err
+			}
+			output.PrintJSON(result)
+			return nil
+		}
 		doc, err := mdoc.Parse(raw)
 		if err != nil {
 			return fmt.Errorf("parsing mDOC: %w", err)
@@ -207,4 +235,24 @@ func decodeTrustList(raw string, opts output.Options) error {
 func isHTTPURL(s string) bool {
 	lower := strings.ToLower(s)
 	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
+}
+
+func printAutoVerifyResult(token *sdjwt.Token, opts output.Options) {
+	result, _, err := validate.VerifyJWTSignature(token, nil, nil)
+	if result != nil {
+		output.PrintVerifyResultSDJWT(result, opts)
+		return
+	}
+	if err == nil {
+		return
+	}
+
+	failed := &sdjwt.VerifyResult{
+		SignatureValid: false,
+		Algorithm:      fmt.Sprint(token.Header["alg"]),
+		KeyID:          fmt.Sprint(token.Header["kid"]),
+		Issuer:         fmt.Sprint(token.Payload["iss"]),
+		Errors:         []string{err.Error()},
+	}
+	output.PrintVerifyResultSDJWT(failed, opts)
 }

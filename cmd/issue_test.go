@@ -471,7 +471,6 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		"personal_administrative_number",
 		"issuing_authority",
 		"issuing_country", "document_number", "issuing_jurisdiction",
-		"trust_anchor",
 	}
 	for _, name := range required {
 		if _, ok := mock.SDJWTPIDClaims[name]; !ok {
@@ -479,8 +478,8 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 		}
 	}
 
-	if len(mock.SDJWTPIDClaims) != 23 {
-		t.Errorf("expected 23 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
+	if len(mock.SDJWTPIDClaims) != 22 {
+		t.Errorf("expected 22 SD-JWT PID claims, got %d", len(mock.SDJWTPIDClaims))
 	}
 
 	// address should be a nested object
@@ -524,6 +523,9 @@ func TestSDJWTPIDClaims_HasExpectedFields(t *testing.T) {
 
 	if _, ok := mock.SDJWTPIDClaims["administrative_number"]; ok {
 		t.Error("administrative_number should not be present in SD-JWT PID claims")
+	}
+	if _, ok := mock.SDJWTPIDClaims["trust_anchor"]; ok {
+		t.Error("trust_anchor should not be present in SD-JWT PID claims")
 	}
 }
 

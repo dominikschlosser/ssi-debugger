@@ -121,11 +121,14 @@ func TestHandleDecode_JWTResponseStructure(t *testing.T) {
 
 	result := decodeResponse(t, w)
 
-	// Must have exactly format, header, payload
+	// Must include the decoded JWT structure.
 	for _, key := range []string{"format", "header", "payload"} {
 		if _, ok := result[key]; !ok {
 			t.Errorf("missing key %q in response", key)
 		}
+	}
+	if _, ok := result["validation"]; !ok {
+		t.Error("expected validation in decode response")
 	}
 
 	header := result["header"].(map[string]any)

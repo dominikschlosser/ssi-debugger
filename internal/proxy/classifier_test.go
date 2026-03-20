@@ -21,11 +21,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
+	"github.com/dominikschlosser/oid4vc-dev/internal/web"
 )
 
 // --- classifyEntry tests ---
@@ -441,6 +445,73 @@ func TestDecodeEntryVCICredentialRequest(t *testing.T) {
 	}
 	if resp["credential"] != "abc.def.ghi" {
 		t.Errorf("credential: got %v", resp["credential"])
+	}
+}
+
+func TestDecodeEntryVCICredentialRequest_IncludesValidation(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	var issuer string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwt-vc-issuer" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": issuer,
+			"jwks": map[string]any{
+				"keys": []any{mock.SigningJWKMap(&key.PublicKey)},
+			},
+		})
+	}))
+	defer srv.Close()
+	issuer = srv.URL
+
+	cred, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    issuer,
+		VCT:       "urn:test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"given_name": "Erika"},
+		Key:       key,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	e := &TrafficEntry{
+		Method:       "POST",
+		URL:          "http://issuer.example/credential",
+		RequestBody:  `{"format":"vc+sd-jwt","vct":"pid"}`,
+		StatusCode:   200,
+		ResponseBody: `{"credential":"` + cred + `"}`,
+	}
+	Classify(e)
+
+	decoded, ok := e.Decoded["credential_decoded"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected credential_decoded map, got %T", e.Decoded["credential_decoded"])
+	}
+	validation, ok := decoded["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected validation map, got %T", decoded["validation"])
+	}
+	checks, ok := validation["checks"].([]web.CheckResult)
+	if !ok {
+		t.Fatalf("expected validation checks, got %T", validation["checks"])
+	}
+	found := false
+	for _, check := range checks {
+		if check.Name == "signature" && check.Status == "pass" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected passing signature check, got %v", checks)
 	}
 }
 

@@ -19,9 +19,6 @@ import (
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
-	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
-	"github.com/dominikschlosser/oid4vc-dev/internal/output"
-	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
 // Decode detects the credential format and returns a JSON-serializable map.
@@ -30,25 +27,13 @@ func Decode(input string) (map[string]any, error) {
 
 	switch detected {
 	case format.FormatSDJWT:
-		token, err := sdjwt.Parse(input)
-		if err != nil {
-			return nil, fmt.Errorf("parsing SD-JWT: %w", err)
-		}
-		return output.BuildSDJWTJSON(token), nil
+		return Validate(input, ValidateOpts{})
 
 	case format.FormatJWT:
-		token, err := sdjwt.Parse(input)
-		if err != nil {
-			return nil, fmt.Errorf("parsing JWT: %w", err)
-		}
-		return output.BuildJWTJSON(token), nil
+		return Validate(input, ValidateOpts{})
 
 	case format.FormatMDOC:
-		doc, err := mdoc.Parse(input)
-		if err != nil {
-			return nil, fmt.Errorf("parsing mDOC: %w", err)
-		}
-		return output.BuildMDOCJSON(doc), nil
+		return Validate(input, ValidateOpts{})
 
 	default:
 		return nil, fmt.Errorf("unable to auto-detect credential format (not JWT, SD-JWT, or mDOC)")

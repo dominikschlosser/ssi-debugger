@@ -349,6 +349,9 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log("  Received:      %s credential from %s", result.Format, result.Issuer)
+	if result.VerificationDetail != "" {
+		s.log("  Verification:  %s [%s]", result.VerificationDetail, result.VerificationStatus)
+	}
 	s.wallet.AddLog("issuance", fmt.Sprintf("Received %s credential from %s", result.Format, result.Issuer), true)
 	s.triggerSave()
 	writeJSON(w, http.StatusOK, result)

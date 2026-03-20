@@ -18,7 +18,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func buildTestJWT(t *testing.T, header, payload map[string]any) string {
@@ -206,5 +211,68 @@ func TestDecode_JWTResultHasNoDisclosures(t *testing.T) {
 	}
 	if _, ok := result["resolvedClaims"]; ok {
 		t.Error("JWT result should not have resolvedClaims")
+	}
+}
+
+func TestDecode_SDJWTIncludesIssuerMetadataValidation(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	var issuer string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwt-vc-issuer" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": issuer,
+			"jwks": map[string]any{
+				"keys": []any{mock.SigningJWKMap(&key.PublicKey)},
+			},
+		})
+	}))
+	defer srv.Close()
+	issuer = srv.URL
+
+	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    issuer,
+		VCT:       "urn:test",
+		ExpiresIn: time.Hour,
+		Claims:    map[string]any{"given_name": "Erika"},
+		Key:       key,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	result, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("Decode() error: %v", err)
+	}
+
+	validation, ok := result["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected validation object, got %T", result["validation"])
+	}
+	checks, ok := validation["checks"].([]CheckResult)
+	if !ok {
+		t.Fatalf("expected validation checks array, got %T", validation["checks"])
+	}
+	var signature *CheckResult
+	for i := range checks {
+		check := checks[i]
+		if check.Name == "signature" {
+			signature = &check
+			break
+		}
+	}
+	if signature == nil {
+		t.Fatal("expected signature check")
+	}
+	if signature.Status != "pass" {
+		t.Fatalf("expected signature pass, got %v", signature)
 	}
 }

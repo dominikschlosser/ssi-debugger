@@ -33,7 +33,7 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 | `https://<wallet>:8086/.well-known/jwt-vc-issuer` | GET | JWT VC issuer metadata for wallet-issued SD-JWTs; exposes the signing key by `kid` and leaf `x5c` chain |
 | `/api/credentials` | GET/POST | List all credentials / import a credential |
 | `/api/credentials/<id>/status` | POST | Set revocation status for a credential |
-| `/api/statuslist` | GET | Status list JWT (requires `--status-list`) |
+| `/api/statuslist` | GET | Status list JWT (available when PID generation or `--status-list` is enabled) |
 | `/api/next-error` | POST/DELETE | Set or clear a one-shot error override |
 | `/api/config/preferred-format` | PUT | Set credential format preference (`dc+sd-jwt` / `mso_mdoc` / `jwt_vc_json` / empty) |
 
@@ -163,15 +163,21 @@ curl -X POST http://localhost:8085/api/credentials -d 'eyJhbGci...'
 
 ### Status list (revocation)
 
-Enable with `--status-list`. Generated credentials will include a status list reference pointing to the wallet's `/api/statuslist` endpoint.
+When you use `wallet serve --pid`, generated credentials include a status list reference pointing to the wallet's `/api/statuslist` endpoint. You can also force the same behavior explicitly with `--status-list`.
 
 The wallet also derives its HTTPS issuer URL from the same host-selection mechanism. By default that issuer runs on `https://<host>:<port+1>` and serves `/.well-known/jwt-vc-issuer`.
+
+For automated verifier tests that need to trust that HTTPS endpoint explicitly, export the persisted certificate with:
+
+```bash
+oid4vc-dev wallet issuer-tls-cert --docker --out issuer-tls-cert.pem
+```
 
 **Important:** The status list URI and SD-JWT issuer host are baked into generated credentials at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--docker` (or `--base-url` for a custom URL) so both the status list URL and the issuer metadata host are reachable from both sides:
 
 ```bash
 # Wallet on host, verifier in Docker
-oid4vc-dev wallet serve --pid --auto-accept --status-list --docker
+oid4vc-dev wallet serve --pid --auto-accept --docker
 ```
 
 ```yaml
@@ -180,7 +186,7 @@ services:
   wallet:
     image: ghcr.io/dominikschlosser/oid4vc-dev:latest
     command: ["wallet", "serve", "--auto-accept", "--pid", "--port", "8085",
-              "--status-list", "--base-url", "http://wallet:8085"]
+              "--base-url", "http://wallet:8085"]
     ports:
       - "8085:8085"
       - "8086:8086"

@@ -16,44 +16,18 @@ package validate
 
 import (
 	"crypto"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
-
-var issuerMetadataHTTPClientForURL = defaultIssuerMetadataHTTPClientForURL
-
-func defaultIssuerMetadataHTTPClientForURL(u *url.URL) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if strings.EqualFold(u.Scheme, "https") && isLocalIssuerMetadataHost(u.Hostname()) {
-		//nolint:gosec // Local dev wallet metadata uses a self-signed HTTPS certificate on localhost/host.docker.internal.
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	return &http.Client{
-		Timeout:   15 * time.Second,
-		Transport: transport,
-	}
-}
-
-func isLocalIssuerMetadataHost(host string) bool {
-	switch strings.ToLower(strings.TrimSpace(host)) {
-	case "localhost", "127.0.0.1", "::1", "host.docker.internal":
-		return true
-	default:
-		return false
-	}
-}
 
 // CanResolveJWTIssuerMetadata reports whether the token has enough information
 // for kid-based issuer metadata key resolution.
@@ -157,12 +131,7 @@ func VerifyJWTSignature(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCerts 
 }
 
 func fetchIssuerMetadataDocument(metadataURL string) (map[string]any, error) {
-	u, err := url.Parse(metadataURL)
-	if err != nil {
-		return nil, fmt.Errorf("parsing issuer metadata URL: %w", err)
-	}
-	client := issuerMetadataHTTPClientForURL(u)
-	resp, err := client.Get(metadataURL)
+	resp, err := format.HTTPClientForURL(metadataURL).Get(metadataURL)
 	if err != nil {
 		return nil, err
 	}

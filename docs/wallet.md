@@ -21,6 +21,7 @@ For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.
 | `accept`       | Accept an OID4VP presentation request or OID4VCI credential offer (auto-detects) |
 | `scan`         | Scan a QR code and auto-dispatch to accept/import               |
 | `trust-list`   | Print the trust list JWT (or just the URL with `--url`)         |
+| `issuer-tls-cert` | Print or export the HTTPS issuer certificate used by wallet metadata |
 | `register`     | Register OS URL scheme handlers (macOS only)                    |
 | `unregister`   | Remove OS URL scheme handlers                                   |
 
@@ -43,6 +44,9 @@ oid4vc-dev wallet serve
 
 # Start the wallet and register URL scheme handlers
 oid4vc-dev wallet serve --register
+
+# Export the HTTPS issuer certificate for verifier trust stores
+oid4vc-dev wallet issuer-tls-cert --out issuer-tls-cert.pem
 
 # Process an OID4VP request from the CLI
 oid4vc-dev wallet accept 'openid4vp://authorize?client_id=...'
@@ -68,7 +72,9 @@ All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 ~/.oid4vc-dev/wallet/
 ├── wallet.json       # Credentials + metadata
 ├── holder.pem        # Holder EC private key (auto-generated on first use)
-└── issuer.pem        # Issuer EC private key (for self-issued credentials)
+├── issuer.pem        # Issuer EC private key (for self-issued credentials)
+├── issuer-tls-cert.pem # HTTPS certificate for /.well-known/jwt-vc-issuer
+└── issuer-tls-key.pem  # HTTPS private key for /.well-known/jwt-vc-issuer
 ```
 
 Keys are P-256 EC keys, auto-generated on first use and reused across invocations. On startup, the wallet generates a **CA key** and builds a certificate chain:
@@ -78,7 +84,7 @@ Keys are P-256 EC keys, auto-generated on first use and reused across invocation
 
 Generated credentials are signed with the **issuer key**. SD-JWT credentials include a deterministic `kid` header, expose the signing key through JWT VC issuer metadata, and include the leaf signing certificate in `x5c`. The trust anchor CA stays in the wallet trust list so verifiers can validate the signing key through the exposed trust chain instead of trusting a bare public key.
 
-The CA key and certificates are ephemeral (regenerated each time the wallet starts). The issuer key is persisted and reused across invocations.
+The CA key and credential signing certificate chain are regenerated on each load. The issuer key is persisted and reused across invocations. The separate HTTPS certificate used by the issuer metadata endpoint is also persisted and reused across invocations so automated verifier tests can trust a stable local certificate.
 
 Generated credentials expire in **30 days** by default. Use `--exp` to override (e.g. `--exp 720h` for 30 days, `--exp 24h` for 1 day). Use `--nbf` to set a not-before time (RFC3339 or duration, e.g. `--nbf 2025-01-15T00:00:00Z` or `--nbf -1h`).
 
@@ -108,6 +114,8 @@ The server exposes:
 - ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating credentials issued by the wallet
 - HTTPS JWT VC issuer metadata endpoint on `https://<host>:<port+1>/.well-known/jwt-vc-issuer`
 
+The HTTPS issuer certificate is persisted in the wallet directory and can be exported with `wallet issuer-tls-cert` for verifier trust stores or CI fixtures.
+
 Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
 ```bash
@@ -131,7 +139,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
 | `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt`, `mso_mdoc`, or `jwt_vc_json` |
-| `--status-list`         | `false`  | Embed status list references in generated credentials |
+| `--status-list`         | `false`  | Embed status list references in generated credentials (auto-enabled with `--pid`) |
 | `--base-url`            | —        | Base URL for the status list endpoint; its host is also reused for the HTTPS issuer URL (default status list: `http://localhost:<port>`, issuer: `https://localhost:<port+1>`) |
 | `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` for both `--base-url` defaults and the HTTPS issuer URL |
 | `--haip`                      | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
@@ -200,6 +208,26 @@ oid4vc-dev wallet trust-list --url --docker           # http://host.docker.inter
 | `--url`    | `false` | Print only the trust list URL (for a running server) |
 | `--port`   | `8085`  | Wallet server port (used with --url)                |
 | `--docker` | `false` | Use `host.docker.internal` instead of `localhost` (used with --url) |
+
+## `wallet issuer-tls-cert`
+
+Loads or creates the HTTPS certificate used by the wallet's issuer metadata endpoint and prints it as PEM. Use `--out` to write the certificate to a file for verifier trust stores in automated tests.
+
+```bash
+oid4vc-dev wallet issuer-tls-cert
+oid4vc-dev wallet issuer-tls-cert --out issuer-tls-cert.pem
+oid4vc-dev wallet issuer-tls-cert --docker --out issuer-tls-cert.pem
+oid4vc-dev wallet issuer-tls-cert --base-url http://wallet:8085 --out issuer-tls-cert.pem
+```
+
+Use the same `--port`, `--docker`, and `--base-url` flags as `wallet serve` so the exported certificate matches the HTTPS issuer host that the running wallet presents.
+
+| Flag         | Default | Description |
+|--------------|---------|-------------|
+| `--out`      | —       | Write the certificate PEM to a file instead of stdout |
+| `--port`     | `8085`  | Wallet server port (certificate will match issuer metadata on `port+1`) |
+| `--docker`   | `false` | Use `host.docker.internal` instead of `localhost` when deriving the issuer host |
+| `--base-url` | —       | Base URL used to derive the issuer HTTPS host |
 
 ## `wallet register` / `wallet unregister`
 
@@ -335,7 +363,7 @@ curl -X POST http://localhost:8085/api/credentials \
 
 ### Status list
 
-When `--status-list` is enabled, generated credentials include a `status.status_list` claim pointing to the wallet's status list endpoint. The URI baked into credentials is `<base-url>/api/statuslist`, where `<base-url>` defaults to `http://localhost:<port>`.
+When you generate PID credentials with `wallet generate-pid` or `wallet serve --pid`, generated credentials include a `status.status_list` claim pointing to the wallet's status list endpoint. You can also force the same behavior explicitly with `--status-list`. The URI baked into credentials is `<base-url>/api/statuslist`, where `<base-url>` defaults to `http://localhost:<port>`.
 
 The HTTPS issuer URL for wallet-generated SD-JWT credentials is derived from the same host-selection mechanism. By default it is `https://localhost:<port+1>` and serves `/.well-known/jwt-vc-issuer`.
 
@@ -343,13 +371,13 @@ The HTTPS issuer URL for wallet-generated SD-JWT credentials is derived from the
 
 ```bash
 # Verifier on the same host
-oid4vc-dev wallet serve --pid --status-list
+oid4vc-dev wallet serve --pid
 
 # Verifier in Docker (shortcut for --base-url http://host.docker.internal:<port>)
-oid4vc-dev wallet serve --pid --status-list --docker
+oid4vc-dev wallet serve --pid --docker
 
 # Custom base URL
-oid4vc-dev wallet serve --pid --status-list --base-url http://my-host:8085
+oid4vc-dev wallet serve --pid --base-url http://my-host:8085
 ```
 
 The status of individual credentials can be changed at runtime:

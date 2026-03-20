@@ -109,7 +109,13 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	dim := color.New(color.Faint)
 
 	// Start server so the trust list is available during verification
+	if w.IssuerURL == "" {
+		w.IssuerURL = wallet.LocalIssuerURL(port+1, false)
+	}
 	srv := wallet.NewServer(w, port, nil)
+	if err := configureIssuerTLSCertificate(srv, store, w.IssuerURL); err != nil {
+		return err
+	}
 	addr, err := srv.ListenAndServeBackground()
 	if err != nil {
 		return fmt.Errorf("starting server: %w", err)

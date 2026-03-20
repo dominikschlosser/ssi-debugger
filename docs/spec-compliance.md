@@ -93,7 +93,7 @@ The repository does not yet implement the full HAIP 1.0 profile for issuance, Wa
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Status list JWT generation | Implemented | `--status-list` flag |
+| Status list JWT generation | Implemented | Available for generated wallet credentials (`--pid` or `--status-list`) |
 | Status list JWT parsing | Implemented | |
-| Revocation status check | Implemented | In `validate --status-list` |
+| Revocation status check | Implemented | In `validate` and the validate UI when a status reference is present |
 | Runtime status changes via API | Implemented | `POST /api/credentials/<id>/status` |

@@ -122,13 +122,9 @@ so the wallet automatically receives incoming protocol requests.`,
 				w.BaseURL = baseURL
 			}
 
-			w.IssuerURL = wallet.LocalIssuerURL(port+1, docker)
-			if baseURL != "" {
-				issuerURL, err := wallet.IssuerURLFromBaseURL(baseURL, port+1)
-				if err != nil {
-					return err
-				}
-				w.IssuerURL = issuerURL
+			w.IssuerURL, err = deriveWalletIssuerURL(port, baseURL, docker)
+			if err != nil {
+				return err
 			}
 
 			if pid {
@@ -210,6 +206,9 @@ so the wallet automatically receives incoming protocol requests.`,
 					fmt.Fprintf(os.Stderr, "warning: saving wallet: %v\n", err)
 				}
 			})
+			if err := configureIssuerTLSCertificate(srv, store, w.IssuerURL); err != nil {
+				return err
+			}
 
 			// Always enable request logging
 			srv.SetLogger(func(format string, args ...any) {

@@ -17,6 +17,7 @@ package statuslist
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -213,6 +214,31 @@ func TestCheck_WithMockServer(t *testing.T) {
 	}
 }
 
+func TestCheck_WithLocalTLSServer(t *testing.T) {
+	bitstring := make([]byte, 16)
+
+	jwt, err := GenerateStatusListJWT(bitstring, mustGenerateKey(t), StatusListConfig{
+		URI: "https://127.0.0.1/status",
+	})
+	if err != nil {
+		t.Fatalf("GenerateStatusListJWT: %v", err)
+	}
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/statuslist+jwt")
+		_, _ = w.Write([]byte(jwt))
+	}))
+	defer server.Close()
+
+	result, err := Check(&StatusRef{URI: server.URL, Idx: 0})
+	if err != nil {
+		t.Fatalf("Check() against local TLS server: %v", err)
+	}
+	if !result.IsValid {
+		t.Fatalf("expected valid status, got %d", result.Status)
+	}
+}
+
 func TestCheck_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
@@ -223,6 +249,15 @@ func TestCheck_HTTPError(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for HTTP 500")
 	}
+}
+
+func mustGenerateKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	return key
 }
 
 func TestCheckWithOptions_SignatureVerification(t *testing.T) {

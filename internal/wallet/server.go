@@ -41,6 +41,7 @@ type Server struct {
 	logFunc          func(format string, args ...any)
 	httpSrv          *http.Server
 	issuerSrv        *http.Server
+	issuerTLSCert    *tls.Certificate
 	issuerPort       int
 	issuerKeyExpiry  time.Time
 	parseOpts        oid4vc.ParseOptions
@@ -168,6 +169,11 @@ func (s *Server) SetLogger(fn func(format string, args ...any)) {
 	s.logFunc = fn
 }
 
+// SetIssuerTLSCertificate sets the certificate used by the HTTPS issuer metadata server.
+func (s *Server) SetIssuerTLSCertificate(cert tls.Certificate) {
+	s.issuerTLSCert = &cert
+}
+
 func (s *Server) log(format string, args ...any) {
 	if s.logFunc != nil {
 		s.logFunc(format, args...)
@@ -179,9 +185,15 @@ func (s *Server) startIssuerTLSServer() error {
 		return nil
 	}
 
-	cert, err := generateIssuerTLSCertificate(parseIssuerHost(s.wallet.IssuerURL))
-	if err != nil {
-		return fmt.Errorf("generating issuer TLS certificate: %w", err)
+	cert := tls.Certificate{}
+	if s.issuerTLSCert != nil {
+		cert = *s.issuerTLSCert
+	} else {
+		var err error
+		cert, err = generateIssuerTLSCertificate(parseIssuerHost(s.wallet.IssuerURL))
+		if err != nil {
+			return fmt.Errorf("generating issuer TLS certificate: %w", err)
+		}
 	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", s.issuerPort))

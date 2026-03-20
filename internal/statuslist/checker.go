@@ -27,14 +27,9 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
-
-var httpClient = &http.Client{
-	Timeout: 15 * time.Second,
-}
 
 // ExtractStatusRef extracts the status list reference from SD-JWT claims or mDOC MSO status.
 func ExtractStatusRef(claims map[string]any) *StatusRef {
@@ -87,7 +82,7 @@ func CheckWithOptions(ref *StatusRef, opts CheckOptions) (*StatusResult, error) 
 	}
 	req.Header.Set("Accept", "application/statuslist+jwt")
 
-	resp, err := httpClient.Do(req)
+	resp, err := format.HTTPClientForURL(ref.URI).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching status list: %w", err)
 	}

@@ -16,12 +16,14 @@ package wallet
 
 import (
 	"crypto/ecdsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
@@ -74,6 +76,16 @@ func (s *WalletStore) holderKeyPath() string {
 // issuerKeyPath returns the path to the issuer private key.
 func (s *WalletStore) issuerKeyPath() string {
 	return filepath.Join(s.Dir, "issuer.pem")
+}
+
+// issuerTLSCertPath returns the path to the issuer HTTPS certificate.
+func (s *WalletStore) issuerTLSCertPath() string {
+	return filepath.Join(s.Dir, "issuer-tls-cert.pem")
+}
+
+// issuerTLSKeyPath returns the path to the issuer HTTPS private key.
+func (s *WalletStore) issuerTLSKeyPath() string {
+	return filepath.Join(s.Dir, "issuer-tls-key.pem")
 }
 
 // LoadOrCreate loads the wallet from disk, or creates a new empty wallet if none exists.
@@ -159,6 +171,101 @@ func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, 
 	}
 
 	return holderKey, issuerKey, nil
+}
+
+// LoadOrCreateIssuerTLSCertificate loads the issuer HTTPS certificate from disk,
+// or generates and persists a new one if none exists or it no longer matches
+// the requested host.
+func (s *WalletStore) LoadOrCreateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
+	if err := s.ensureDir(); err != nil {
+		return tls.Certificate{}, fmt.Errorf("creating wallet directory: %w", err)
+	}
+
+	certPEM, keyPEM, err := s.loadIssuerTLSCertificatePEM(serverName)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("loading issuer TLS certificate: %w", err)
+	}
+	return cert, nil
+}
+
+// LoadOrCreateIssuerTLSCertificateForURL resolves the host from the issuer URL and
+// loads or creates a matching issuer HTTPS certificate.
+func (s *WalletStore) LoadOrCreateIssuerTLSCertificateForURL(issuerURL string) (tls.Certificate, error) {
+	return s.LoadOrCreateIssuerTLSCertificate(parseIssuerHost(issuerURL))
+}
+
+// LoadOrCreateIssuerTLSCertificatePEM returns the persisted issuer HTTPS certificate PEM,
+// generating it first if needed.
+func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEM(serverName string) ([]byte, error) {
+	if err := s.ensureDir(); err != nil {
+		return nil, fmt.Errorf("creating wallet directory: %w", err)
+	}
+
+	certPEM, _, err := s.loadIssuerTLSCertificatePEM(serverName)
+	if err != nil {
+		return nil, err
+	}
+	return certPEM, nil
+}
+
+// LoadOrCreateIssuerTLSCertificatePEMForURL resolves the host from the issuer URL and
+// returns the matching persisted issuer HTTPS certificate PEM.
+func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL string) ([]byte, error) {
+	return s.LoadOrCreateIssuerTLSCertificatePEM(parseIssuerHost(issuerURL))
+}
+
+func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) {
+	if serverName == "" {
+		serverName = "localhost"
+	}
+
+	certPEM, certErr := os.ReadFile(s.issuerTLSCertPath())
+	keyPEM, keyErr := os.ReadFile(s.issuerTLSKeyPath())
+	if certErr == nil && keyErr == nil {
+		if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName) {
+			return certPEM, keyPEM, nil
+		}
+	}
+
+	if certErr != nil && !os.IsNotExist(certErr) {
+		return nil, nil, fmt.Errorf("reading issuer TLS certificate: %w", certErr)
+	}
+	if keyErr != nil && !os.IsNotExist(keyErr) {
+		return nil, nil, fmt.Errorf("reading issuer TLS key: %w", keyErr)
+	}
+
+	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM(serverName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
+		return nil, nil, fmt.Errorf("saving issuer TLS certificate: %w", err)
+	}
+	if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
+		return nil, nil, fmt.Errorf("saving issuer TLS key: %w", err)
+	}
+
+	return certPEM, keyPEM, nil
+}
+
+func issuerTLSCertificateMatches(cert tls.Certificate, serverName string) bool {
+	if len(cert.Certificate) == 0 {
+		return false
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return false
+	}
+	return leaf.VerifyHostname(serverName) == nil
 }
 
 // loadOrGenerateKey loads a PEM key from path, or generates and saves a new one.

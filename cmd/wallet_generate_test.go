@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,5 +75,41 @@ func TestWalletGeneratePID_SetsIssuerURLForSDJWT(t *testing.T) {
 	}
 	if len(w.StatusEntries) != 2 {
 		t.Fatalf("expected generated PID credentials to register 2 status entries, got %d", len(w.StatusEntries))
+	}
+}
+
+func TestWalletIssuerTLSCert_ExportsPersistentCertificate(t *testing.T) {
+	tmpDir := t.TempDir()
+	wDir := filepath.Join(tmpDir, "wallet")
+	outPath := filepath.Join(tmpDir, "issuer-tls-cert.pem")
+	if err := os.MkdirAll(wDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	walletDir = wDir
+
+	rootCmd.SetArgs([]string{"wallet", "issuer-tls-cert", "--out", outPath})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("wallet issuer-tls-cert: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading exported certificate: %v", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("expected PEM CERTIFICATE, got %q", block.Type)
+	}
+
+	store := wallet.NewWalletStore(wDir)
+	want, err := store.LoadOrCreateIssuerTLSCertificatePEM("localhost")
+	if err != nil {
+		t.Fatalf("LoadOrCreateIssuerTLSCertificatePEM: %v", err)
+	}
+	if !bytes.Equal(data, want) {
+		t.Fatal("expected exported certificate to match persisted issuer TLS certificate")
 	}
 }

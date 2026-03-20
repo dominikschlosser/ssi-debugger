@@ -58,6 +58,7 @@ func init() {
 	walletCmd.AddCommand(walletRegisterCmd())
 	walletCmd.AddCommand(walletUnregisterCmd())
 	walletCmd.AddCommand(walletTrustListCmd())
+	walletCmd.AddCommand(walletIssuerTLSCertCmd())
 
 	// Deprecated aliases (hidden from help)
 	presentAlias := &cobra.Command{
@@ -115,6 +116,22 @@ func applyValidationMode(w *wallet.Wallet, raw string) error {
 		return err
 	}
 	w.ValidationMode = mode
+	return nil
+}
+
+func deriveWalletIssuerURL(port int, baseURL string, docker bool) (string, error) {
+	if baseURL != "" {
+		return wallet.IssuerURLFromBaseURL(baseURL, port+1)
+	}
+	return wallet.LocalIssuerURL(port+1, docker), nil
+}
+
+func configureIssuerTLSCertificate(srv *wallet.Server, store *wallet.WalletStore, issuerURL string) error {
+	cert, err := store.LoadOrCreateIssuerTLSCertificateForURL(issuerURL)
+	if err != nil {
+		return fmt.Errorf("loading issuer TLS certificate: %w", err)
+	}
+	srv.SetIssuerTLSCertificate(cert)
 	return nil
 }
 
@@ -346,6 +363,50 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 	cmd.Flags().BoolVar(&urlOnly, "url", false, "Print only the trust list URL (for a running wallet server)")
 	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (used with --url)")
 	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost (used with --url)")
+	return cmd
+}
+
+func walletIssuerTLSCertCmd() *cobra.Command {
+	var (
+		port    int
+		baseURL string
+		docker  bool
+		outPath string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "issuer-tls-cert",
+		Short: "Print or export the issuer TLS certificate used by wallet metadata",
+		Long: `Loads or creates the HTTPS certificate used by the wallet's issuer metadata server.
+Use this to add the local issuer certificate to verifier trust stores in automated tests.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store := loadStore()
+			issuerURL, err := deriveWalletIssuerURL(port, baseURL, docker)
+			if err != nil {
+				return err
+			}
+			certPEM, err := store.LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL)
+			if err != nil {
+				return fmt.Errorf("loading issuer TLS certificate: %w", err)
+			}
+
+			if outPath != "" {
+				if err := os.WriteFile(outPath, certPEM, 0644); err != nil {
+					return fmt.Errorf("writing issuer certificate: %w", err)
+				}
+				fmt.Println(outPath)
+				return nil
+			}
+
+			fmt.Print(string(certPEM))
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (certificate will match issuer metadata on port+1)")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL used to derive the issuer HTTPS host")
+	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost when deriving the issuer host")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the issuer certificate PEM to a file instead of stdout")
 	return cmd
 }
 

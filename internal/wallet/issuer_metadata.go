@@ -107,9 +107,21 @@ func buildIssuerSigningJWK(w *Wallet, exp time.Time) map[string]any {
 }
 
 func generateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
+	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM(serverName)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("loading TLS certificate: %w", err)
+	}
+	return cert, nil
+}
+
+func generateIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generating TLS key: %w", err)
+		return nil, nil, fmt.Errorf("generating TLS key: %w", err)
 	}
 	if serverName == "" {
 		serverName = "localhost"
@@ -122,7 +134,7 @@ func generateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("generating TLS serial: %w", err)
+		return nil, nil, fmt.Errorf("generating TLS serial: %w", err)
 	}
 
 	tmpl := &x509.Certificate{
@@ -141,18 +153,14 @@ func generateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
 
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("creating TLS certificate: %w", err)
+		return nil, nil, fmt.Errorf("creating TLS certificate: %w", err)
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("encoding TLS private key: %w", err)
+		return nil, nil, fmt.Errorf("encoding TLS private key: %w", err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("loading TLS certificate: %w", err)
-	}
-	return cert, nil
+	return certPEM, keyPEM, nil
 }

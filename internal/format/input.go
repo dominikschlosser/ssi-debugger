@@ -15,9 +15,11 @@
 package format
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -25,6 +27,38 @@ import (
 
 var httpClient = &http.Client{
 	Timeout: 15 * time.Second,
+}
+
+// HTTPClientForURL returns a fetch client configured for the target URL.
+// Local developer endpoints bypass proxies and accept self-signed HTTPS certs.
+func HTTPClientForURL(rawURL string) *http.Client {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return httpClient
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if isLocalFetchHost(u.Hostname()) {
+		transport.Proxy = nil
+		if strings.EqualFold(u.Scheme, "https") {
+			//nolint:gosec // Local dev endpoints use self-signed certificates on localhost/host.docker.internal.
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		}
+	}
+
+	return &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: transport,
+	}
+}
+
+func isLocalFetchHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost", "127.0.0.1", "::1", "host.docker.internal":
+		return true
+	default:
+		return false
+	}
 }
 
 // readStdin reads all input from stdin, returning an error if stdin is a terminal.
@@ -101,7 +135,7 @@ func ReadInputRaw(input string) (string, error) {
 
 // FetchURL fetches content from a URL and returns it as a trimmed string.
 func FetchURL(url string) (string, error) {
-	resp, err := httpClient.Get(url)
+	resp, err := HTTPClientForURL(url).Get(url)
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", url, err)
 	}

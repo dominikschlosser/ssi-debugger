@@ -8,11 +8,9 @@ If neither `--key` nor `--trust-list` is provided, signature verification is ski
 # Full validation with signature verification
 oid4vc-dev validate --key issuer-key.pem credential.txt
 oid4vc-dev validate --trust-list trust-list.jwt credential.txt
-oid4vc-dev validate --key key.pem --status-list credential.txt
 oid4vc-dev validate --key key.pem --allow-expired credential.txt
 
 # Expiry + revocation check without signature verification
-oid4vc-dev validate --status-list credential.txt
 oid4vc-dev validate credential.txt
 ```
 
@@ -22,7 +20,7 @@ oid4vc-dev validate credential.txt
 |-------------------|---------------------------------------------------|
 | `--key`           | Public key file (PEM or JWK) — optional            |
 | `--trust-list`    | ETSI trust list JWT (file path or URL) — optional   |
-| `--status-list`   | Check revocation via status list (network call)    |
+| `--status-list`   | Check revocation via status list when the credential contains a status reference (enabled by default) |
 | `--allow-expired` | Don't fail on expired credentials                  |
 
 ## Certificate chain validation
@@ -37,6 +35,8 @@ When a trust list is provided and the credential contains an x5c (SD-JWT/JWT) or
 This matches the Bundesdruckerei PID provider setup where the trust list contains CA certificates like "PIDP Preprod CA" and credentials carry a leaf certificate signed by that CA.
 
 Wallet-generated SD-JWT credentials follow the same model: the SD-JWT header carries a deterministic `kid` plus the leaf signing certificate in `x5c`, while the wallet trust list exposes the CA trust anchor separately. The wallet also publishes HTTPS JWT VC issuer metadata at `/.well-known/jwt-vc-issuer` for ecosystems that resolve issuer keys via metadata/JWKS.
+
+If your verifier test environment needs to trust the wallet's local HTTPS issuer endpoint explicitly, export the persisted certificate with `oid4vc-dev wallet issuer-tls-cert --out issuer-tls-cert.pem` and add it to the verifier trust store.
 
 ```bash
 # Validate a wallet-issued credential against the wallet's trust list

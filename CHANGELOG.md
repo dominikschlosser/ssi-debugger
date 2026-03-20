@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-03-20
+
+### Added
+
+- persistent wallet issuer HTTPS certificate files in the wallet directory
+- `wallet issuer-tls-cert` to print or export the HTTPS issuer certificate used by `/.well-known/jwt-vc-issuer`
+
+### Changed
+
+- validate UI banner now prefers the status-list validation result when a status check ran
+
+### Fixed
+
+- local validation fetches now bypass proxies and correctly trust the wallet's self-signed local HTTPS endpoints for issuer metadata and status-list resolution
+
+## [1.4.5] - 2026-03-20
+
+### Fixed
+
+- statuslist entries for generate-pid/validate checks statuslist
+
+## [1.4.4] - 2026-03-20
+
+### Fixed
+
+- kid-based verification in validate ui
+
+## [1.4.3] - 2026-03-20
+
+### Fixed
+
+- validate ui does kid-based resolution
+
 ## [1.4.2] - 2026-03-20
 
 ### Fixed

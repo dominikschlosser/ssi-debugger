@@ -527,8 +527,11 @@
     // what actually passed/failed instead of always defaulting to expiry.
     let detail = "";
     const firstFailed = checks.find((c) => c.status === "fail");
+    const statusCheck = checks.find((c) => c.name === "status" && c.status !== "skipped");
     if (firstFailed) {
       detail = firstFailed.name + ": " + firstFailed.detail;
+    } else if (statusCheck) {
+      detail = "status: " + statusCheck.detail;
     } else if (sigCheck && sigCheck.status !== "skipped") {
       detail = "signature: " + sigCheck.detail;
     } else {

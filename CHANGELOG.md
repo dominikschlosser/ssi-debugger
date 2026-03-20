@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-03-20
+
+### Fixed
+
+- `wallet tls-cert` now prints exactly one leaf PEM certificate; `wallet ca-cert` prints exactly one CA PEM certificate
+
 ## [1.5.2] - 2026-03-20
 
 ### Added
@@ -17,7 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the shared CA now anchors wallet trust lists, status-list `x5c` chains, issuer-metadata `x5c` chains, and HTTPS wallet certificates
 - HTTPS wallet certificates are now signed by the shared CA instead of being self-signed
 - no wallet API endpoint paths or response formats changed; only the trust model and certificate material changed
-- `wallet tls-cert` now prints exactly one leaf PEM certificate; `wallet ca-cert` prints exactly one CA PEM certificate
 
 ## [1.5.1] - 2026-03-20
 
@@ -95,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- further mock PID structural fixes
 - multi-credential decoding in proxy
 
 ## [1.3.6] - 2026-03-19
@@ -522,6 +528,19 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 
 - add Apache 2.0 license
 
+[1.5.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.3
+[1.5.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.2
+[1.5.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.1
+[1.5.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.0
+[1.4.5]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.5
+[1.4.4]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.4
+[1.4.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.3
+[1.4.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.2
+[1.4.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.1
+[1.4.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.4.0
+[1.3.8]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.8
+[1.3.7]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.7
+[1.3.6]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.6
 [1.3.5]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.5
 [1.3.4]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.4
 [1.3.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.3.3

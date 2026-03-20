@@ -355,7 +355,15 @@ func checkSDJWTStatus(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 	}
 
 	ref := statuslist.ExtractStatusRef(token.ResolvedClaims)
-	return checkStatusRef(ref)
+	_, tlCerts, err := resolveKeys(opts)
+	if err != nil {
+		return CheckResult{
+			Name:   "status",
+			Status: "fail",
+			Detail: err.Error(),
+		}
+	}
+	return checkStatusRef(ref, tlCerts)
 }
 
 func checkMDOCStatus(doc *mdoc.Document, opts ValidateOpts) CheckResult {
@@ -378,10 +386,18 @@ func checkMDOCStatus(doc *mdoc.Document, opts ValidateOpts) CheckResult {
 	// ExtractStatusRef expects {"status": {"status_list": ...}} but MSO.Status
 	// is already the inner status object. Wrap it so the lookup works.
 	ref := statuslist.ExtractStatusRef(map[string]any{"status": doc.IssuerAuth.MSO.Status})
-	return checkStatusRef(ref)
+	_, tlCerts, err := resolveKeys(opts)
+	if err != nil {
+		return CheckResult{
+			Name:   "status",
+			Status: "fail",
+			Detail: err.Error(),
+		}
+	}
+	return checkStatusRef(ref, tlCerts)
 }
 
-func checkStatusRef(ref *statuslist.StatusRef) CheckResult {
+func checkStatusRef(ref *statuslist.StatusRef, tlCerts []trustlist.CertInfo) CheckResult {
 	if ref == nil {
 		return CheckResult{
 			Name:   "status",
@@ -390,7 +406,14 @@ func checkStatusRef(ref *statuslist.StatusRef) CheckResult {
 		}
 	}
 
-	result, err := statuslist.Check(ref)
+	checkOpts := statuslist.CheckOptions{}
+	for _, ci := range tlCerts {
+		if len(ci.Raw) > 0 {
+			checkOpts.TrustListCerts = append(checkOpts.TrustListCerts, statuslist.TrustCert{Raw: ci.Raw})
+		}
+	}
+
+	result, err := statuslist.CheckWithOptions(ref, checkOpts)
 	if err != nil {
 		return CheckResult{
 			Name:   "status",
@@ -399,18 +422,34 @@ func checkStatusRef(ref *statuslist.StatusRef) CheckResult {
 		}
 	}
 
+	signatureDetail := ""
+	if result.SignatureValid != nil {
+		if *result.SignatureValid {
+			signatureDetail = fmt.Sprintf(", signature: %s", result.SignatureInfo)
+		} else {
+			signatureDetail = fmt.Sprintf(", signature invalid: %s", result.SignatureInfo)
+		}
+	}
+	if result.SignatureValid != nil && !*result.SignatureValid {
+		return CheckResult{
+			Name:   "status",
+			Status: "fail",
+			Detail: fmt.Sprintf("Status list signature invalid (index %d, status=%d%s)", result.Index, result.Status, signatureDetail),
+		}
+	}
+
 	if result.IsValid {
 		return CheckResult{
 			Name:   "status",
 			Status: "pass",
-			Detail: fmt.Sprintf("Valid (index %d, status=%d)", result.Index, result.Status),
+			Detail: fmt.Sprintf("Valid (index %d, status=%d%s)", result.Index, result.Status, signatureDetail),
 		}
 	}
 
 	return CheckResult{
 		Name:   "status",
 		Status: "fail",
-		Detail: fmt.Sprintf("Revoked (index %d, status=%d)", result.Index, result.Status),
+		Detail: fmt.Sprintf("Revoked (index %d, status=%d%s)", result.Index, result.Status, signatureDetail),
 	}
 }
 

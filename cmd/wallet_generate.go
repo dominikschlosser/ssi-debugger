@@ -95,7 +95,7 @@ func walletGeneratePIDCmd() *cobra.Command {
 	cmd.Flags().StringVar(&claimsFlag, "claims", "", "Claim overrides as JSON (e.g. '{\"given_name\":\"Max\"}')")
 	cmd.Flags().StringVar(&keyPath, "key", "", "Path to PEM-encoded EC private key for signing (default: auto-generated)")
 	cmd.Flags().StringVar(&vctFlag, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type for SD-JWT PID")
-	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
+	cmd.Flags().BoolVar(&statusList, "status-list", true, "Embed status list references in generated credentials")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:8085)")
 	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for --base-url")
 	return cmd

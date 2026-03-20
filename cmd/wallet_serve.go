@@ -111,7 +111,7 @@ so the wallet automatically receives incoming protocol requests.`,
 				w.RequireHAIP = true
 			}
 
-			if statusList {
+			if statusList || pid {
 				if baseURL == "" {
 					if docker {
 						baseURL = fmt.Sprintf("http://host.docker.internal:%d", port)

@@ -960,7 +960,9 @@ func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("generating credentials: %v", err)
 	}
+	expMin := time.Now().Add(24 * time.Hour).Unix()
 	srv := NewServer(w, 0, nil)
+	expMax := time.Now().Add(24 * time.Hour).Unix()
 
 	metaResp := serverRequest(t, srv, "GET", "/.well-known/jwt-vc-issuer", "")
 	if metaResp.Code != http.StatusOK {
@@ -986,6 +988,13 @@ func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
 	wantKid := mock.KeyIDForPublicKey(&w.IssuerKey.PublicKey)
 	if jwk["kid"] != wantKid {
 		t.Fatalf("expected metadata kid %s, got %v", wantKid, jwk["kid"])
+	}
+	exp, ok := jwk["exp"].(float64)
+	if !ok {
+		t.Fatalf("expected numeric exp in JWK, got %T", jwk["exp"])
+	}
+	if got := int64(exp); got < expMin || got > expMax {
+		t.Fatalf("expected JWK exp between %d and %d, got %d", expMin, expMax, got)
 	}
 
 	x5c, ok := jwk["x5c"].([]any)
@@ -1045,6 +1054,27 @@ func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
 	}
 	if token.Header["kid"] != wantKid {
 		t.Fatalf("expected SD-JWT kid %s, got %v", wantKid, token.Header["kid"])
+	}
+
+	metaResp2 := serverRequest(t, srv, "GET", "/.well-known/jwt-vc-issuer", "")
+	if metaResp2.Code != http.StatusOK {
+		t.Fatalf("expected second metadata request 200, got %d: %s", metaResp2.Code, metaResp2.Body.String())
+	}
+	meta2 := decodeJSON(t, metaResp2)
+	jwks2, ok := meta2["jwks"].(map[string]any)
+	if !ok {
+		t.Fatal("expected jwks object in second metadata response")
+	}
+	keys2, ok := jwks2["keys"].([]any)
+	if !ok || len(keys2) != 1 {
+		t.Fatalf("expected a single JWK in second metadata response, got %v", jwks2["keys"])
+	}
+	jwk2, ok := keys2[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected second JWK object, got %T", keys2[0])
+	}
+	if jwk2["exp"] != jwk["exp"] {
+		t.Fatalf("expected JWK exp to stay stable across requests, got %v then %v", jwk["exp"], jwk2["exp"])
 	}
 }
 

@@ -22,10 +22,16 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/output"
+	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
@@ -384,6 +390,43 @@ func TestExtractAndValidateX5C_ValidBase64ButInvalidDER(t *testing.T) {
 	_, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err == nil {
 		t.Error("expected error for invalid DER data")
+	}
+}
+
+func TestCheckStatus_ReturnsErrorForRevokedCredential(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	bitstring := make([]byte, 16)
+	bitstring[0] = 1
+
+	statusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwt, err := statuslist.GenerateStatusListJWT(bitstring, key, statuslist.StatusListConfig{
+			URI: r.URL.String(),
+		})
+		if err != nil {
+			t.Fatalf("GenerateStatusListJWT: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/statuslist+jwt")
+		_, _ = w.Write([]byte(jwt))
+	}))
+	defer statusSrv.Close()
+
+	err = checkStatus(map[string]any{
+		"status": map[string]any{
+			"status_list": map[string]any{
+				"uri": statusSrv.URL,
+				"idx": 0,
+			},
+		},
+	}, nil, output.Options{NoColor: true})
+	if err == nil {
+		t.Fatal("expected revoked status list to fail validation")
+	}
+	if !strings.Contains(err.Error(), "credential revoked") {
+		t.Fatalf("expected revoked error, got %v", err)
 	}
 }
 

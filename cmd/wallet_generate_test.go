@@ -61,4 +61,18 @@ func TestWalletGeneratePID_SetsIssuerURLForSDJWT(t *testing.T) {
 	if token.Payload["iss"] != want {
 		t.Fatalf("expected iss %s, got %v", want, token.Payload["iss"])
 	}
+	status, ok := token.Payload["status"].(map[string]any)
+	if !ok {
+		t.Fatal("expected generated SD-JWT to contain status claim")
+	}
+	statusList, ok := status["status_list"].(map[string]any)
+	if !ok {
+		t.Fatal("expected generated SD-JWT to contain status_list reference")
+	}
+	if got := statusList["uri"]; got != "http://localhost:8085/api/statuslist" {
+		t.Fatalf("expected status list uri http://localhost:8085/api/statuslist, got %v", got)
+	}
+	if len(w.StatusEntries) != 2 {
+		t.Fatalf("expected generated PID credentials to register 2 status entries, got %d", len(w.StatusEntries))
+	}
 }

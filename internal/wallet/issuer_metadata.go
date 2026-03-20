@@ -87,11 +87,14 @@ func parseIssuerHost(raw string) string {
 	return u.Hostname()
 }
 
-func buildIssuerSigningJWK(w *Wallet) map[string]any {
+func buildIssuerSigningJWK(w *Wallet, exp time.Time) map[string]any {
 	if w == nil || w.IssuerKey == nil {
 		return nil
 	}
 	jwk := mock.SigningJWKMap(&w.IssuerKey.PublicKey)
+	if !exp.IsZero() {
+		jwk["exp"] = exp.Unix()
+	}
 	chain := mock.WithoutSelfSignedTrustAnchor(w.CertChain)
 	if len(chain) > 0 {
 		x5c := make([]string, 0, len(chain))

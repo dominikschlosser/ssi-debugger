@@ -42,13 +42,19 @@ type Server struct {
 	httpSrv          *http.Server
 	issuerSrv        *http.Server
 	issuerPort       int
+	issuerKeyExpiry  time.Time
 	parseOpts        oid4vc.ParseOptions
 }
 
 // NewServer creates a new wallet HTTP server.
 // onSave is called after credential-changing operations (import, delete, issuance).
 func NewServer(w *Wallet, port int, onSave func()) *Server {
-	s := &Server{wallet: w, port: port, onSave: onSave}
+	s := &Server{
+		wallet:          w,
+		port:            port,
+		onSave:          onSave,
+		issuerKeyExpiry: time.Now().Add(24 * time.Hour),
+	}
 	if p := parseIssuerPort(w.IssuerURL); p > 0 {
 		s.issuerPort = p
 	} else if port > 0 {
@@ -550,7 +556,7 @@ func (s *Server) handleJWTVCIssuerMetadata(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "wallet issuer URL is not configured", http.StatusNotFound)
 		return
 	}
-	jwk := buildIssuerSigningJWK(s.wallet)
+	jwk := buildIssuerSigningJWK(s.wallet, s.issuerKeyExpiry)
 	if jwk == nil {
 		http.Error(w, "wallet has no issuer signing key", http.StatusInternalServerError)
 		return

@@ -18,6 +18,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +28,7 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
@@ -530,6 +533,74 @@ func TestHandleValidate_JWTStatusSkippedEvenWhenRequested(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestHandleValidate_SDJWTStatusCheckedWhenPresent(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	bitstring := make([]byte, 16)
+	statusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwt, err := statuslist.GenerateStatusListJWT(bitstring, key, statuslist.StatusListConfig{
+			URI: r.URL.String(),
+		})
+		if err != nil {
+			t.Fatalf("GenerateStatusListJWT: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/statuslist+jwt")
+		_, _ = w.Write([]byte(jwt))
+	}))
+	defer statusSrv.Close()
+
+	jwt := makeSDJWT(
+		map[string]any{
+			"iss":     "https://issuer.example",
+			"_sd_alg": "sha-256",
+			"_sd":     nil,
+			"exp":     float64(4102444800),
+			"status": map[string]any{
+				"status_list": map[string]any{
+					"uri": statusSrv.URL,
+					"idx": 0,
+				},
+			},
+		},
+		[][]any{
+			{"salt1", "given_name", "Erika"},
+		},
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"input":       jwt,
+		"checkStatus": true,
+	})
+	w := apiPostTo(t, "/api/validate", string(body))
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decodeResponse(t, w)
+	val := result["validation"].(map[string]any)
+	checks := val["checks"].([]any)
+
+	for _, c := range checks {
+		cm := c.(map[string]any)
+		if cm["name"] == "status" {
+			if cm["status"] != "pass" {
+				t.Fatalf("status check: got %s, want pass", cm["status"])
+			}
+			detail, _ := cm["detail"].(string)
+			if detail == "" || detail == "No status list reference in credential" {
+				t.Fatalf("expected status validation detail, got %q", detail)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected status check in validation response")
 }
 
 func TestValidate_MDOCStatusWrapping(t *testing.T) {

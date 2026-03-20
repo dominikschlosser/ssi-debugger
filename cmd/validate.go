@@ -46,7 +46,7 @@ var validateCmd = &cobra.Command{
 
   - Signature verification (requires --key or --trust-list)
   - Expiry check (use --allow-expired to skip)
-  - Revocation status (with --status-list, makes a network call)
+  - Revocation status via status list when the credential contains a status reference
 
 If neither --key nor --trust-list is provided, signature verification is skipped
 and only expiry/status checks are performed. This is useful for quick revocation
@@ -58,7 +58,7 @@ checks without needing the issuer's key.`,
 func init() {
 	validateCmd.Flags().StringVar(&keyFile, "key", "", "Public key file (PEM or JWK)")
 	validateCmd.Flags().StringVar(&trustListFile, "trust-list", "", "ETSI trust list JWT (file path or URL)")
-	validateCmd.Flags().BoolVar(&statusListFlag, "status-list", false, "Check revocation via status list (network call)")
+	validateCmd.Flags().BoolVar(&statusListFlag, "status-list", true, "Check revocation via status list when the credential contains a status reference")
 	validateCmd.Flags().BoolVar(&allowExpired, "allow-expired", false, "Don't fail on expired credentials")
 	rootCmd.AddCommand(validateCmd)
 }
@@ -149,7 +149,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 		// Status list check
 		if statusListFlag {
-			checkStatus(token.ResolvedClaims, tlCerts, opts)
+			if err := checkStatus(token.ResolvedClaims, tlCerts, opts); err != nil {
+				return err
+			}
 		}
 
 	case format.FormatJWT:
@@ -189,7 +191,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 
 		if statusListFlag {
-			checkStatus(token.ResolvedClaims, tlCerts, opts)
+			if err := checkStatus(token.ResolvedClaims, tlCerts, opts); err != nil {
+				return err
+			}
 		}
 
 	case format.FormatMDOC:
@@ -233,7 +237,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		// Status list check for mDOC — wrap in "status" key since ExtractStatusRef
 		// expects {"status": {"status_list": ...}} but MSO.Status is the inner map.
 		if statusListFlag && doc.IssuerAuth != nil && doc.IssuerAuth.MSO != nil && doc.IssuerAuth.MSO.Status != nil {
-			checkStatus(map[string]any{"status": doc.IssuerAuth.MSO.Status}, tlCerts, opts)
+			if err := checkStatus(map[string]any{"status": doc.IssuerAuth.MSO.Status}, tlCerts, opts); err != nil {
+				return err
+			}
 		}
 
 	default:
@@ -261,13 +267,10 @@ func verifyWithBestKey[T any](pubKeys []crypto.PublicKey, x5cKey crypto.PublicKe
 	return best
 }
 
-func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts output.Options) {
+func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts output.Options) error {
 	ref := statuslist.ExtractStatusRef(claims)
 	if ref == nil {
-		if !opts.JSON {
-			fmt.Println("\n  No status list reference found in credential")
-		}
-		return
+		return nil
 	}
 
 	// Build check options with trust list certs for signature validation
@@ -280,8 +283,7 @@ func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts outpu
 
 	result, err := statuslist.CheckWithOptions(ref, checkOpts)
 	if err != nil {
-		output.PrintError(fmt.Sprintf("status check: %v", err))
-		return
+		return fmt.Errorf("status check: %w", err)
 	}
 	if opts.JSON {
 		output.PrintJSON(result)
@@ -299,4 +301,11 @@ func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts outpu
 			}
 		}
 	}
+	if !result.IsValid {
+		return fmt.Errorf("credential revoked")
+	}
+	if result.SignatureValid != nil && !*result.SignatureValid {
+		return fmt.Errorf("status list signature invalid")
+	}
+	return nil
 }

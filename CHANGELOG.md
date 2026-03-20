@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-03-20
+
+### Fixed
+
+- `wallet generate-pid` now uses the correct local issuer `iss` instead of `https://issuer.example`
+
+## [1.4.1] - 2026-03-20
+
+### Fixed
+
+- kid-based issuer metadata resolution issues
+
+## [1.4.0] - 2026-03-20
+
+### Added
+
+- HTTPS issuer metadata endpoint for wallet-issued SD-JWT credentials
+- kid-based issuer metadata resolution for SD-JWT verification
+
+## [1.3.8] - 2026-03-19
+
+### Fixed
+
+- disclosure of nested values in SD-JWT credentials
+
+## [1.3.7] - 2026-03-19
+
+### Fixed
+
+- multi-credential decoding in proxy
+
 ## [1.3.6] - 2026-03-19
 
 ### Fixed

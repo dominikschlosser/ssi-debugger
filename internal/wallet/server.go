@@ -17,6 +17,7 @@ package wallet
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -142,7 +143,9 @@ func (s *Server) ListenAndServeBackground() (string, error) {
 		IdleTimeout:  120 * time.Second,
 	}
 	if err := s.startIssuerTLSServer(); err != nil {
-		ln.Close()
+		if closeErr := ln.Close(); closeErr != nil {
+			return "", errors.Join(err, fmt.Errorf("closing listener: %w", closeErr))
+		}
 		return "", err
 	}
 	go func() { _ = s.httpSrv.Serve(ln) }()

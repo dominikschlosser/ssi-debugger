@@ -86,17 +86,18 @@ oid4vc-dev wallet scan --screen         # QR scan → auto-dispatch
 
 > **Security:** The wallet server exposes unauthenticated HTTP endpoints for credential management and presentation flows. It is designed exclusively for **local development and testing** — never expose it to untrusted networks.
 
-`wallet serve` also starts HTTPS wallet endpoints on `port+1`, including `/.well-known/jwt-vc-issuer`, `/.well-known/openid-credential-issuer`, `/api/trustlist`, `/api/trustlists`, `/api/statuslist`, and `/api/registrar/wrp`. Wallet-generated credentials use those HTTPS URLs for issuer metadata and status-list resolution, while HTTP URLs remain available where the wallet serves them.
-The trust list stays ETSI-shaped and certificate-centric. Provider entitlements and exact credential-type authorization are published separately through signed OpenID Credential Issuer metadata (`issuer_info`) and registrar-style responses. `/api/trustlist` remains the legacy default endpoint and returns the PID trust list when one is registered. `/api/trustlists` exposes all coherent trust-list profiles registered in the wallet, for example `/api/trustlists/pid` or `/api/trustlists/local`.
-`issue ... --wallet` uses the wallet issuer key and a trust-profile-specific leaf certificate chain under the shared wallet CA, and by default also uses the wallet-managed status list so issued credentials validate against the same wallet trust and revocation endpoints.
-Wallets under the same wallet base directory share a persisted CA. That CA anchors the wallet trust list, the status-list `x5c` chain, the issuer-metadata `x5c` chain, and the HTTPS wallet certificate. `wallet ca-cert` prints that CA as a single PEM certificate. `wallet tls-cert` prints the exact HTTPS leaf certificate as a single PEM certificate.
+`wallet serve` starts the local wallet UI plus HTTP and HTTPS wallet endpoints for presentation, issuer metadata, trust lists, status lists, and test registrar responses. `wallet generate-pid` gives you a ready-to-use PID wallet, `issue ... --wallet` adds new credentials into the same wallet context, and `wallet ca-cert` / `wallet tls-cert` export the trust root or exact HTTPS leaf certificate when a verifier needs them.
 
-Use `--preferred-format dc+sd-jwt`, `--preferred-format mso_mdoc`, or `--preferred-format jwt_vc_json` to control which credential format is selected when multiple match a DCQL query.
-Use `wallet --mode debug` (default) to keep processing requests with non-fatal spec findings for debugging. During DCQL evaluation, debug mode warns and keeps a credential match when some required claim paths are missing but the credential still matches the rest of the query. Use `wallet --mode strict` to enforce final-spec wallet behavior instead.
+For day-to-day use, the main commands are:
+- `wallet serve` to run the wallet
+- `wallet generate-pid` to preload PID credentials
+- `wallet trust-list` to get the verifier trust-list URL or JWT
+- `wallet ca-cert` and `wallet tls-cert` to export certificate material
+- `wallet --mode debug|strict` and `--preferred-format ...` to control runtime behavior
 
 ![Wallet UI](docs/wallet-ui.png)
 
-→ [Full documentation](docs/wallet.md) — subcommands, flags, storage, URL scheme registration
+→ [Full documentation](docs/wallet.md) — subcommands, flags, endpoints, trust lists, storage, URL scheme registration
 
 ---
 

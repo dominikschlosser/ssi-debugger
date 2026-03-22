@@ -145,6 +145,14 @@ The wallet groups registered attestation entries by trust-list profile. Each gro
 - `local` for the built-in local ETSI-shaped profile
 - `tl-<hash>` for any additional custom profile
 
+`/api/trustlists` is a local discovery endpoint for those profiles. It is not the ETSI trust-list payload itself. Each entry includes:
+- `id`, for example `pid` or `local`
+- `path`, for example `/api/trustlists/pid`
+- `advertised_url` when the wallet has an issuer URL configured, for example `https://localhost:8086/api/trustlists/pid`
+- `url` as a backward-compatible alias for `advertised_url`
+
+Clients that call the wallet through Docker port mappings, reverse proxies, or Testcontainers should resolve `path` against the URL they actually used to reach `/api/trustlists`. `advertised_url` is the wallet's configured publication URL and may intentionally differ from the caller's local route.
+
 `/api/trustlist` remains the backward-compatible legacy endpoint. Its selection rules are:
 - if a PID trust-list profile exists, `/api/trustlist` returns that PID trust list
 - if no PID profile exists, `/api/trustlist` returns the first available profile
@@ -155,6 +163,31 @@ Examples:
 - `/api/trustlists/local`
 - `/api/trustlist?vct=eu.europa.ec.eudi.pid.1`
 - `/api/trustlist?doctype=org.iso.23220.photoid.1`
+
+Example discovery response:
+
+```json
+{
+  "trust_lists": [
+    {
+      "id": "pid",
+      "default": true,
+      "path": "/api/trustlists/pid",
+      "advertised_url": "https://localhost:8086/api/trustlists/pid",
+      "url": "https://localhost:8086/api/trustlists/pid",
+      "loTEType": "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList"
+    },
+    {
+      "id": "local",
+      "default": false,
+      "path": "/api/trustlists/local",
+      "advertised_url": "https://localhost:8086/api/trustlists/local",
+      "url": "https://localhost:8086/api/trustlists/local",
+      "loTEType": "http://uri.etsi.org/19602/LoTEType/local"
+    }
+  ]
+}
+```
 
 When the wallet needs a local default profile, it uses:
 - `LoTEType = http://uri.etsi.org/19602/LoTEType/local`

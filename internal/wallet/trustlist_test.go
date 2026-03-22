@@ -217,6 +217,41 @@ func TestTrustListGroupsForWallet_MixedProfiles(t *testing.T) {
 	}
 }
 
+func TestBuildTrustListIndexEntries_UsesRelativePathAndOptionalAdvertisedURL(t *testing.T) {
+	w := generateTestWallet(t)
+	if err := w.RegisterIssuedAttestation(applyPIDTrustProfileDefaults(IssuedAttestationSpec{
+		Format: "dc+sd-jwt",
+		VCT:    mock.DefaultPIDVCT,
+	})); err != nil {
+		t.Fatalf("registering PID attestation: %v", err)
+	}
+
+	entries := BuildTrustListIndexEntries(w, "")
+	if len(entries) != 1 {
+		t.Fatalf("expected one trust-list entry, got %d", len(entries))
+	}
+	if entries[0].Path != "/api/trustlists/pid" {
+		t.Fatalf("expected pid path, got %s", entries[0].Path)
+	}
+	if entries[0].AdvertisedURL != "" {
+		t.Fatalf("expected empty advertised_url without issuer, got %s", entries[0].AdvertisedURL)
+	}
+	if entries[0].URL != "" {
+		t.Fatalf("expected empty legacy url without issuer, got %s", entries[0].URL)
+	}
+
+	entries = BuildTrustListIndexEntries(w, "https://wallet.example:8443")
+	if len(entries) != 1 {
+		t.Fatalf("expected one trust-list entry, got %d", len(entries))
+	}
+	if entries[0].AdvertisedURL != "https://wallet.example:8443/api/trustlists/pid" {
+		t.Fatalf("expected advertised_url, got %s", entries[0].AdvertisedURL)
+	}
+	if entries[0].URL != entries[0].AdvertisedURL {
+		t.Fatalf("expected legacy url alias to match advertised_url, got %s vs %s", entries[0].URL, entries[0].AdvertisedURL)
+	}
+}
+
 func TestSigningCertChainForProfile_UsesSharedCAWithDistinctLeafs(t *testing.T) {
 	w := generateTestWallet(t)
 	pidSpec := applyPIDTrustProfileDefaults(IssuedAttestationSpec{

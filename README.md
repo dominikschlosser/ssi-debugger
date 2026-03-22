@@ -95,6 +95,8 @@ For day-to-day use, the main commands are:
 - `wallet ca-cert` and `wallet tls-cert` to export certificate material
 - `wallet --mode debug|strict` and `--preferred-format ...` to control runtime behavior
 
+When a wallet exposes multiple trust-list profiles, `/api/trustlists` gives you the available IDs and routes. Use the entry's relative `path` when you access the wallet through Docker port mappings or similar local indirection.
+
 ![Wallet UI](docs/wallet-ui.png)
 
 → [Full documentation](docs/wallet.md) — subcommands, flags, endpoints, trust lists, storage, URL scheme registration

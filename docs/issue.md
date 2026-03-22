@@ -97,7 +97,7 @@ That means trust lists are created from the wallet's issued-attestation registry
 - each issued or imported credential type contributes one registry entry
 - entries with the same trust-list profile fields are grouped into one trust list
 - the legacy `/api/trustlist` endpoint stays PID-first
-- the full set of groups is exposed through `/api/trustlists`, with concrete IDs such as `pid` or `local`
+- the full set of groups is exposed through `/api/trustlists`, with concrete IDs such as `pid` or `local`, a relative `path` for local resolution, and an optional `advertised_url` for the configured issuer URL
 
 If you do not pass any trust-metadata flags, the wallet derives defaults from the credential type:
 - PID attestation types default to the PID trust-list and entitlement profile

@@ -30,7 +30,7 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 |----------|--------|---------|
 | `/authorize` | GET/POST | OID4VP authorization endpoint — accepts standard OID4VP query parameters (`client_id`, `response_type`, `dcql_query`, `nonce`, `state`, `response_uri`, `response_mode`, `request_uri`) |
 | `/api/trustlist` | GET | Legacy trust-list endpoint; returns the PID trust list when one is registered, otherwise the first available trust-list profile |
-| `/api/trustlists` | GET | JSON index of all coherent trust-list profiles registered in the wallet |
+| `/api/trustlists` | GET | JSON index of all coherent trust-list profiles registered in the wallet; each entry includes a relative `path` plus optional `advertised_url` / legacy `url` |
 | `/api/trustlists/<id>` | GET | ETSI trust list JWT for one specific trust-list profile |
 | `https://<wallet>:8086/.well-known/openid-credential-issuer` | GET | Signed OpenID Credential Issuer metadata (`application/openidvci-issuer-metadata+jwt`) with `issuer_info` / `registrar_dataset` authorization data |
 | `https://<wallet>:8086/.well-known/jwt-vc-issuer` | GET | JWT VC issuer metadata for wallet-issued SD-JWTs; exposes the signing key by `kid` and leaf `x5c` chain |
@@ -50,7 +50,9 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 5. Your verifier receives the VP token and can validate its signing chain using the wallet's trust list from `/api/trustlist`
 6. If your verifier enforces current EUDI issuer authorization semantics, resolve provider entitlements and exact attestation types from the signed `/.well-known/openid-credential-issuer` metadata and `/api/registrar/wrp` responses instead of expecting custom trust-list fields
 
-`/api/trustlist` stays certificate-centric and remains backward compatible as the legacy default endpoint. `/api/trustlists` and `/api/trustlists/<id>` expose the full set of coherent trust-list profiles when the wallet contains multiple credential-type trust domains.
+`/api/trustlist` stays certificate-centric and remains backward compatible as the legacy default endpoint. `/api/trustlists` is a local discovery helper for the available profile IDs and routes, while `/api/trustlists/<id>` serves the actual ETSI trust-list JWT for one profile.
+
+When you access the wallet through Docker port mappings or Testcontainers, prefer the relative `path` from `/api/trustlists` and resolve it against the URL you actually used to reach the wallet. `advertised_url` reflects the wallet's configured issuer URL and can differ from the externally reachable test URL.
 
 ## Docker Compose example
 

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-03-22
+
+### Changed
+
+- `/api/trustlists` now exposes a container-friendly relative `path` for each trust-list profile entry
+- `/api/trustlists` now publishes `advertised_url` for the configured issuer URL and keeps `url` as a backward-compatible alias
+
+### Documentation
+
+- clarified that `/api/trustlists` is a local discovery endpoint while `/api/trustlists/{id}` serves the ETSI trust-list JWT
+- documented how Docker and Testcontainers callers should resolve trust-list `path` values against the URL they actually used
+
 ## [1.6.0] - 2026-03-22
 
 ### Added
@@ -552,6 +564,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 
 - add Apache 2.0 license
 
+[1.7.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.7.0
 [1.6.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.6.0
 [1.5.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.3
 [1.5.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.2

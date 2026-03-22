@@ -1460,13 +1460,29 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 		if !ok {
 			t.Fatalf("expected trust-list entry object, got %T", raw)
 		}
+		path, ok := entry["path"].(string)
+		if !ok || !strings.HasPrefix(path, "/api/trustlists/") {
+			t.Fatalf("expected relative trust-list path, got %v", entry["path"])
+		}
 		switch entry["id"] {
 		case "pid":
 			if entry["default"] != true {
 				t.Fatalf("expected pid trust list to be default, got %v", entry["default"])
 			}
+			if entry["advertised_url"] != "https://localhost:8443/api/trustlists/pid" {
+				t.Fatalf("expected pid advertised_url, got %v", entry["advertised_url"])
+			}
+			if entry["url"] != entry["advertised_url"] {
+				t.Fatalf("expected legacy url alias to match advertised_url, got %v vs %v", entry["url"], entry["advertised_url"])
+			}
 			sawPIDDefault = true
 		case "local":
+			if entry["path"] != "/api/trustlists/local" {
+				t.Fatalf("expected local path, got %v", entry["path"])
+			}
+			if entry["advertised_url"] != "https://localhost:8443/api/trustlists/local" {
+				t.Fatalf("expected local advertised_url, got %v", entry["advertised_url"])
+			}
 			sawLocal = true
 		}
 	}

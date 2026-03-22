@@ -49,11 +49,13 @@ type TrustListGroup struct {
 type TrustListIndexEntry struct {
 	ID                    string                  `json:"id"`
 	Default               bool                    `json:"default"`
+	Path                  string                  `json:"path"`
 	LoTEType              string                  `json:"loTEType"`
 	EntityName            string                  `json:"entityName"`
 	IssuanceServiceType   string                  `json:"issuanceServiceType"`
 	RevocationServiceType string                  `json:"revocationServiceType"`
 	Attestations          []IssuedAttestationSpec `json:"attestations"`
+	AdvertisedURL         string                  `json:"advertised_url,omitempty"`
 	URL                   string                  `json:"url,omitempty"`
 }
 
@@ -196,9 +198,11 @@ func BuildTrustListIndexEntries(w *Wallet, issuer string) []TrustListIndexEntry 
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	entries := make([]TrustListIndexEntry, 0, len(groups))
 	for _, group := range groups {
+		path := "/api/trustlists/" + group.ID
 		entry := TrustListIndexEntry{
 			ID:                    group.ID,
 			Default:               hasDefault && group.ID == defaultGroup.ID,
+			Path:                  path,
 			LoTEType:              group.Profile.LoTEType,
 			EntityName:            group.Profile.EntityName,
 			IssuanceServiceType:   group.Profile.IssuanceServiceType,
@@ -206,7 +210,8 @@ func BuildTrustListIndexEntries(w *Wallet, issuer string) []TrustListIndexEntry 
 			Attestations:          append([]IssuedAttestationSpec(nil), group.Specs...),
 		}
 		if issuer != "" {
-			entry.URL = issuer + "/api/trustlists/" + group.ID
+			entry.AdvertisedURL = issuer + path
+			entry.URL = entry.AdvertisedURL
 		}
 		entries = append(entries, entry)
 	}

@@ -64,7 +64,7 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | `issue`    | Generate test SD-JWT, JWT, or mDOC credentials for development |
 | `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
 | `serve`    | Web UI for decoding and validating credentials in the browser |
-| `decode`   | Auto-detect & decode credentials, OpenID4VCI/VP, and trust lists (read-only, no verification) |
+| `decode`   | Auto-detect & inspect credentials, OpenID4VCI/VP, and trust lists; may auto-verify issuer metadata when resolvable |
 | `validate` | Verify signatures, check expiry, and check revocation status |
 | `dcql`     | Generate a DCQL query from a credential's claims            |
 | `version`  | Print version                                               |

@@ -1,6 +1,6 @@
 # Decode
 
-Auto-detect and decode credentials (SD-JWT, JWT VC, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
+Auto-detect and inspect credentials (SD-JWT, JWT VC, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 ```bash
 # Credentials
@@ -93,5 +93,7 @@ SD-JWT Credential
   [2] family_name: Mustermann
   [3] birth_date: 1984-08-12
 ```
+
+`decode` is primarily an inspection tool, but it can automatically verify JWT or SD-JWT signatures when issuer metadata can be resolved from `iss` and `kid`. Use `validate` when you need explicit trust inputs such as `--key`, `--trust-list`, or status-list checking.
 
 Use `-v` for x5c chains, digest IDs, and device key info. Use `--json` for machine-readable output.

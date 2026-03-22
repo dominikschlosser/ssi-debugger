@@ -83,13 +83,15 @@ The repository does not yet implement the full HAIP 1.0 profile for issuance, Wa
 | Session transcript (ISO 18013-7 mode) | Implemented | `--session-transcript iso` |
 | DeviceSigned generation | Implemented | Wallet generates DeviceAuth in DeviceResponse |
 
-## ETSI TS 119 612 Trust Lists
+## ETSI TS 119 602 Trusted Entity Lists
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Trust list JWT generation | Implemented | Wallet generates its own |
-| Trust list JWT parsing | Implemented | Signature not verified (intentional for debugging); accepts current BMI sandbox fields such as `ListIssueDateTime` |
-| Certificate chain validation against trust list | Implemented | In `validate` command |
+| Trusted entity list JWT generation | Implemented | Wallet generates ETSI TS 119 602-style JWT lists |
+| Trusted entity list JWT parsing | Implemented | Signature not verified (intentional for debugging); accepts current EUDI-style fields such as `ListIssueDateTime` |
+| Certificate chain validation against trusted entity list | Implemented | In `validate` command |
+
+The implementation target for the EUDI wallet trust infrastructure is ETSI TS 119 602, which defines the EUDI trusted-entity list data model and LoTE structures. It does not implement the classic ETSI TS 119 612 XML trusted-list format used for eIDAS trust-service status lists.
 
 ## Token Status List (RFC 9596)
 

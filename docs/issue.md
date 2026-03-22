@@ -2,6 +2,8 @@
 
 Generate test SD-JWT, JWT, or mDOC credentials for development and testing. Produces valid, signed credentials using an ephemeral P-256 key by default (prints the public JWK to stderr).
 
+Use `--wallet-dir` on `issue` when `--wallet` should target a non-default wallet store.
+
 ```bash
 oid4vc-dev issue sdjwt
 oid4vc-dev issue sdjwt --pid
@@ -30,6 +32,12 @@ oid4vc-dev issue mdoc  | oid4vc-dev decode
 ```
 
 ## Flags
+
+`issue` also supports:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--wallet-dir` | `~/.oid4vc-dev/wallet/` | Wallet storage directory used by `--wallet` |
 
 ### `issue sdjwt`
 

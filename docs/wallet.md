@@ -120,7 +120,9 @@ The server exposes:
 - OID4VP authorization endpoint (`/authorize`)
 - Legacy ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating PID credentials issued by the wallet
 - Trust-list index endpoint (`/api/trustlists`) with one JWT endpoint per coherent trust-list profile
-- HTTPS wallet endpoints on `https://<host>:<port+1>`, including `/.well-known/jwt-vc-issuer`, `/.well-known/openid-credential-issuer`, `/api/trustlist`, `/api/trustlists`, `/api/statuslist`, and `/api/registrar/wrp`
+- HTTPS wallet endpoints on the wallet's effective issuer URL, including `/.well-known/jwt-vc-issuer`, `/.well-known/openid-credential-issuer`, `/api/trustlist`, `/api/trustlists`, `/api/statuslist`, and `/api/registrar/wrp`
+
+By default, a fresh wallet uses a local issuer URL on `https://localhost:<port+1>`. If the wallet already has a persisted issuer URL, `wallet serve` reuses it unless you explicitly replace it with `--base-url` or `--docker`.
 
 The shared wallet CA can be exported with `wallet ca-cert` for verifier trust stores or CI fixtures. The per-wallet HTTPS leaf certificate can still be exported with `wallet tls-cert` when you need the exact server certificate instead. The wallet continues to serve the same endpoints and response formats on top of that shared trust root.
 The trust list remains certificate- and service-centric. EUDI-style issuer authorization data such as provider entitlements and `providesAttestations` is published through signed OpenID Credential Issuer metadata and registrar-style responses instead of being added as custom trust-list fields.
@@ -218,8 +220,8 @@ oid4vc-dev wallet serve --register --port 9000
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
 | `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt`, `mso_mdoc`, or `jwt_vc_json` |
 | `--status-list`         | `false`  | Embed status list references in generated credentials (auto-enabled with `--pid`) |
-| `--base-url`            | —        | Base URL for the HTTP status list endpoint; its host is also reused for HTTPS wallet endpoints (default status list HTTP: `http://localhost:<port>`, HTTPS: `https://localhost:<port+1>`) |
-| `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` for both HTTP and HTTPS wallet endpoint URLs |
+| `--base-url`            | —        | Base URL for the wallet's HTTP endpoints; its host is also used to derive the HTTPS issuer URL. Existing persisted issuer URLs are reused unless this flag is set |
+| `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` when deriving new HTTP and HTTPS wallet endpoint URLs |
 | `--haip`                      | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 | `--require-encrypted-request` | `false` | Require verifiers to encrypt request objects (sends encryption key in `wallet_metadata`) |
 

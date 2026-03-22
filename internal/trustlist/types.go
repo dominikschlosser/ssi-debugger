@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package trustlist parses and extracts certificates from ETSI TS 119 612 trust lists.
+// Package trustlist parses and extracts certificates from ETSI TS 119 602 trusted entity lists.
 package trustlist
 
 import "crypto"

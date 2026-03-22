@@ -100,6 +100,9 @@ func parseSchemeInfo(lsi map[string]any) *SchemeInfo {
 	} else if lid, ok := lsi["ListIssueDatetime"].(string); ok {
 		info.ListIssueDatetime = lid
 	}
+	if next, ok := lsi["NextUpdate"].(string); ok {
+		info.NextUpdate = next
+	}
 
 	return info
 }

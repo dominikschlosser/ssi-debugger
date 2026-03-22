@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-03-22
+
+### Fixed
+
+- trust-list parsing and decoded output now preserve and expose `ListAndSchemeInformation.NextUpdate`
+
 ## [1.7.0] - 2026-03-22
 
 ### Changed
@@ -564,6 +570,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 
 - add Apache 2.0 license
 
+[1.7.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.7.1
 [1.7.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.7.0
 [1.6.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.6.0
 [1.5.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.3

@@ -722,6 +722,7 @@ func BuildTrustListJSON(tl *trustlist.TrustList) map[string]any {
 			"loTEType":           tl.SchemeInfo.LoTEType,
 			"schemeOperatorName": tl.SchemeInfo.SchemeOperatorName,
 			"listIssueDatetime":  tl.SchemeInfo.ListIssueDatetime,
+			"nextUpdate":         tl.SchemeInfo.NextUpdate,
 		}
 	}
 	entities := make([]map[string]any, 0)
@@ -763,6 +764,9 @@ func PrintTrustList(tl *trustlist.TrustList, opts Options) {
 		fmt.Printf("\n  Operator:  %s\n", tl.SchemeInfo.SchemeOperatorName)
 		fmt.Printf("  Type:      %s\n", tl.SchemeInfo.LoTEType)
 		fmt.Printf("  Issued:    %s\n", tl.SchemeInfo.ListIssueDatetime)
+		if tl.SchemeInfo.NextUpdate != "" {
+			fmt.Printf("  Next:      %s\n", tl.SchemeInfo.NextUpdate)
+		}
 	}
 
 	if alg, ok := tl.Header["alg"].(string); ok {

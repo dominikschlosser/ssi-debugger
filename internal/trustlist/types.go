@@ -30,6 +30,7 @@ type SchemeInfo struct {
 	LoTEType           string
 	SchemeOperatorName string
 	ListIssueDatetime  string
+	NextUpdate         string
 }
 
 // TrustedEntity represents a single trusted entity with its services.

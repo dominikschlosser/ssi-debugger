@@ -15,7 +15,12 @@
 package wallet
 
 import (
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 )
 
 func TestResolveCredentialIdentifier_FromAuthDetails(t *testing.T) {
@@ -213,5 +218,81 @@ func TestGetCredentialEndpoint_TrailingSlash(t *testing.T) {
 	got := getCredentialEndpoint(metadata, "https://issuer.example/")
 	if got != "https://issuer.example/credential" {
 		t.Errorf("expected trimmed trailing slash, got %s", got)
+	}
+}
+
+func TestParseIssuerMetadataResponse_SignedJWT(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://issuer.example:8443"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+
+	raw, err := signCredentialIssuerMetadataJWT(w, w.IssuerURL, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("signing issuer metadata: %v", err)
+	}
+
+	metadata, err := parseIssuerMetadataResponse([]byte(raw), "application/openidvci-issuer-metadata+jwt")
+	if err != nil {
+		t.Fatalf("parsing signed issuer metadata: %v", err)
+	}
+	if metadata["credential_issuer"] != w.IssuerURL {
+		t.Fatalf("expected credential_issuer %s, got %v", w.IssuerURL, metadata["credential_issuer"])
+	}
+
+	issuerInfo, ok := metadata["issuer_info"].([]any)
+	if !ok || len(issuerInfo) != 1 {
+		t.Fatalf("expected single issuer_info entry, got %v", metadata["issuer_info"])
+	}
+	entry, ok := issuerInfo[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected issuer_info object, got %T", issuerInfo[0])
+	}
+	if entry["format"] != "registrar_dataset" {
+		t.Fatalf("expected registrar_dataset issuer_info, got %v", entry["format"])
+	}
+	record, ok := entry["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected issuer_info data object, got %T", entry["data"])
+	}
+	if record["registryURI"] != w.IssuerURL+"/api/registrar/wrp" {
+		t.Fatalf("expected registryURI %s, got %v", w.IssuerURL+"/api/registrar/wrp", record["registryURI"])
+	}
+	provides, ok := record["providesAttestations"].([]any)
+	if !ok || len(provides) != 2 {
+		t.Fatalf("expected 2 providesAttestations entries, got %v", record["providesAttestations"])
+	}
+}
+
+func TestParseIssuerMetadataResponse_RejectsTamperedSignedJWT(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://issuer.example:8443"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+
+	raw, err := signCredentialIssuerMetadataJWT(w, w.IssuerURL, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("signing issuer metadata: %v", err)
+	}
+
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected compact JWT, got %q", raw)
+	}
+	payloadBytes, err := format.DecodeBase64URL(parts[1])
+	if err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	tamperedPayload := strings.Replace(string(payloadBytes), mock.DefaultPIDVCT, "urn:example:tampered", 1)
+	if tamperedPayload == string(payloadBytes) {
+		t.Fatal("expected signed issuer metadata payload to contain default PID VCT")
+	}
+	parts[1] = format.EncodeBase64URL([]byte(tamperedPayload))
+	tampered := strings.Join(parts, ".")
+
+	if _, err := parseIssuerMetadataResponse([]byte(tampered), "application/openidvci-issuer-metadata+jwt"); err == nil {
+		t.Fatal("expected tampered signed issuer metadata to fail verification")
 	}
 }

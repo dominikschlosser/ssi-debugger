@@ -63,7 +63,8 @@ type Wallet struct {
 	HolderKey               *ecdsa.PrivateKey
 	IssuerKey               *ecdsa.PrivateKey
 	CAKey                   *ecdsa.PrivateKey
-	CertChain               []*x509.Certificate // [leaf, CA] certificate chain
+	CertChain               []*x509.Certificate     // [leaf, CA] certificate chain
+	IssuedAttestations      []IssuedAttestationSpec `json:"issued_attestations,omitempty"`
 	AutoAccept              bool
 	SessionTranscript       SessionTranscriptMode // "oid4vp" (default) or "iso"
 	PreferredFormat         string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
@@ -272,6 +273,11 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	if w.HolderKey != nil {
 		holderPubKey = &w.HolderKey.PublicKey
 	}
+	pidSpec := applyPIDTrustProfileDefaults(IssuedAttestationSpec{Format: "dc+sd-jwt", VCT: vct})
+	pidChain, err := w.SigningCertChainForIssuedAttestation(pidSpec)
+	if err != nil {
+		return fmt.Errorf("building PID signing certificate chain: %w", err)
+	}
 
 	sdConfig := mock.SDJWTConfig{
 		Issuer:    issuer,
@@ -280,7 +286,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		Claims:    sdClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
-		CertChain: w.CertChain,
+		CertChain: pidChain,
 	}
 
 	// Assign status list indices if enabled
@@ -313,7 +319,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
 		ExpiresIn: 30 * 24 * time.Hour,
-		CertChain: w.CertChain,
+		CertChain: pidChain,
 	}
 
 	if w.BaseURL != "" {
@@ -331,6 +337,11 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	mdocCred, err := w.ImportCredential(mdocResult)
 	if err != nil {
 		return fmt.Errorf("importing mDoc PID: %w", err)
+	}
+
+	w.IssuedAttestations = []IssuedAttestationSpec{
+		pidSpec,
+		applyPIDTrustProfileDefaults(IssuedAttestationSpec{Format: "mso_mdoc", DocType: "eu.europa.ec.eudi.pid.1"}),
 	}
 
 	// Register status entry for mDoc credential
@@ -366,6 +377,29 @@ func (w *Wallet) RemoveCredential(id string) bool {
 		}
 	}
 	return false
+}
+
+// RegisterIssuedAttestation records a credential type and its trust/registration
+// metadata as something this wallet is configured to issue.
+func (w *Wallet) RegisterIssuedAttestation(spec IssuedAttestationSpec) error {
+	normalized, err := NormalizeIssuedAttestationSpec(spec, "")
+	if err != nil {
+		return err
+	}
+	key := normalized.Format + "|" + normalized.VCT + "|" + normalized.DocType
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i, existing := range w.IssuedAttestations {
+		existingKey := existing.Format + "|" + existing.VCT + "|" + existing.DocType
+		if existingKey == key {
+			w.IssuedAttestations[i] = normalized
+			return nil
+		}
+	}
+	w.IssuedAttestations = append(w.IssuedAttestations, normalized)
+	w.IssuedAttestations = dedupeIssuedAttestations(w.IssuedAttestations)
+	return nil
 }
 
 // GetCredentials returns a snapshot of all credentials.

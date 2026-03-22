@@ -10,6 +10,8 @@ oid4vc-dev issue sdjwt --claims '{"name":"Test","age":30}'
 oid4vc-dev issue sdjwt --iss https://my-issuer.example --vct my-type --exp 48h --nbf 2025-06-01T00:00:00Z
 oid4vc-dev issue sdjwt --key signing-key.pem
 oid4vc-dev issue sdjwt --wallet                # Issue and import into wallet
+oid4vc-dev issue sdjwt --wallet --trust-profile pid
+oid4vc-dev issue sdjwt --wallet --entitlement https://uri.etsi.org/19475/Entitlement/Non_Q_EAA_Provider --trust-list-type http://example.com/LoTEType/Custom --issuance-service-type http://example.com/SvcType/Custom/Issuance --revocation-service-type http://example.com/SvcType/Custom/Revocation
 oid4vc-dev issue jwt                           # Plain JWT VC (no selective disclosure)
 oid4vc-dev issue jwt --pid
 oid4vc-dev issue jwt --claims '{"name":"Test","age":30}'
@@ -80,3 +82,39 @@ Unlike SD-JWT, the JWT subcommand produces a standard JWT with all claims direct
 | `--status-list-idx` | `0`                     | Status list index to embed in credential       |
 
 When no `--claims` are provided, a minimal set of PID-like claims is used (given_name, family_name, birth_date). With `--pid`, the full EUDI PID Rulebook claim set is generated (27 claims including address, nationality, age attributes, document metadata, etc.).
+
+## Wallet Registration Metadata
+
+When `--wallet` is used, the credential is issued with the wallet's issuer key and a trust-profile-specific leaf certificate chain under the shared wallet CA, then stored in the wallet together with an issued-attestation entry for that credential type. That stored entry is what later drives:
+- `/.well-known/openid-credential-issuer`
+- `/api/registrar/wrp`
+- `/api/trustlist`
+- `/api/trustlists`
+
+Unless you explicitly override the status-list flags, `--wallet` also uses the wallet's own status-list endpoint and registers a wallet-managed status entry for the new credential.
+
+That means trust lists are created from the wallet's issued-attestation registry:
+- each issued or imported credential type contributes one registry entry
+- entries with the same trust-list profile fields are grouped into one trust list
+- the legacy `/api/trustlist` endpoint stays PID-first
+- the full set of groups is exposed through `/api/trustlists`, with concrete IDs such as `pid` or `local`
+
+If you do not pass any trust-metadata flags, the wallet derives defaults from the credential type:
+- PID attestation types default to the PID trust-list and entitlement profile
+- other attestation types default to `Non_Q_EAA_Provider` plus the local ETSI-shaped trust-list profile
+
+Use the following flags when you need explicit control over the stored trust or issuer metadata for that credential type:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--trust-profile` | `auto` | Built-in trust-list profile for `--wallet` metadata: `auto`, `pid`, or `local` |
+| `--entitlement` | — | Registrar entitlement URI to store for the credential type; repeatable |
+| `--trust-list-type` | — | LoTE type URI to store for the credential type |
+| `--status-determination-approach` | — | Trust-list status determination approach URI to store |
+| `--scheme-community-rule` | — | Trust-list scheme community rule URI to store |
+| `--scheme-territory` | — | Trust-list scheme territory to store |
+| `--trust-entity-name` | — | Trust-list entity name to store |
+| `--issuance-service-type` | — | Issuance service type identifier to store |
+| `--revocation-service-type` | — | Revocation service type identifier to store |
+| `--issuance-service-name` | — | Issuance service name to store |
+| `--revocation-service-name` | — | Revocation service name to store |

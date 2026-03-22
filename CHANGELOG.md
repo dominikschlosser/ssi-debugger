@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-22
+
+### Added
+
+- multiple wallet trust-list profiles with `/api/trustlists`, `/api/trustlists/{id}`, and CLI selection via `wallet trust-list --id|--vct|--doctype`
+- signed OpenID Credential Issuer metadata and registrar-style authorization responses for wallet-issued credential types
+- trust-profile-specific credential-signing leaf certificates under the shared wallet CA
+
+### Changed
+
+- `issue --wallet` now issues with the wallet issuer context instead of generating externally and importing afterward
+- wallet issuer and status-list URLs are now persisted and reused across commands so generated credentials, `wallet serve`, trust lists, and status lists stay aligned
+- wallet trust lists remain ETSI-shaped and certificate-centric while issuer authorization data is published through issuer metadata and registrar responses
+
+### Fixed
+
+- `issue --wallet` credentials now validate against the wallet trust list and use wallet-managed status-list entries by default
+- `wallet generate-pid`, `wallet serve`, `wallet trust-list`, `wallet ca-cert`, `wallet tls-cert`, and `validate --trust-list` now work coherently against the same persisted wallet issuer state
+- trust-list parsing accepts current ETSI-style `ListIssueDateTime` payloads
+
+### Documentation
+
+- documented trust-list creation, profile IDs such as `pid` and `local`, wallet-native `issue --wallet` behavior, and the shared-CA/per-profile-leaf certificate model
+
 ## [1.5.3] - 2026-03-20
 
 ### Fixed
@@ -528,6 +552,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 
 - add Apache 2.0 license
 
+[1.6.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.6.0
 [1.5.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.3
 [1.5.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.2
 [1.5.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.5.1

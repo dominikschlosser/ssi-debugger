@@ -35,10 +35,13 @@ type WalletStore struct {
 
 // walletJSON is the on-disk format of wallet.json.
 type walletJSON struct {
-	Credentials       []StoredCredential     `json:"credentials"`
-	StatusEntries     map[string]StatusEntry `json:"status_entries,omitempty"`
-	StatusListCounter int                    `json:"status_list_counter,omitempty"`
-	Port              int                    `json:"port,omitempty"`
+	Credentials        []StoredCredential      `json:"credentials"`
+	IssuedAttestations []IssuedAttestationSpec `json:"issued_attestations,omitempty"`
+	StatusEntries      map[string]StatusEntry  `json:"status_entries,omitempty"`
+	StatusListCounter  int                     `json:"status_list_counter,omitempty"`
+	BaseURL            string                  `json:"base_url,omitempty"`
+	IssuerURL          string                  `json:"issuer_url,omitempty"`
+	Port               int                     `json:"port,omitempty"`
 }
 
 // DefaultWalletDir returns the default wallet storage directory.
@@ -147,8 +150,11 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	}
 
 	w.Credentials = wj.Credentials
+	w.IssuedAttestations = dedupeIssuedAttestations(wj.IssuedAttestations)
 	w.StatusEntries = wj.StatusEntries
 	w.StatusListCounter = wj.StatusListCounter
+	w.BaseURL = wj.BaseURL
+	w.IssuerURL = wj.IssuerURL
 
 	// Re-hydrate non-serializable fields from Raw
 	for i := range w.Credentials {
@@ -168,13 +174,19 @@ func (s *WalletStore) Save(w *Wallet) error {
 
 	creds := w.GetCredentials()
 	w.mu.RLock()
+	issuedAttestations := dedupeIssuedAttestations(w.IssuedAttestations)
 	statusEntries := w.StatusEntries
 	statusListCounter := w.StatusListCounter
+	baseURL := w.BaseURL
+	issuerURL := w.IssuerURL
 	w.mu.RUnlock()
 	wj := walletJSON{
-		Credentials:       creds,
-		StatusEntries:     statusEntries,
-		StatusListCounter: statusListCounter,
+		Credentials:        creds,
+		IssuedAttestations: issuedAttestations,
+		StatusEntries:      statusEntries,
+		StatusListCounter:  statusListCounter,
+		BaseURL:            baseURL,
+		IssuerURL:          issuerURL,
 	}
 
 	data, err := json.MarshalIndent(wj, "", "  ")

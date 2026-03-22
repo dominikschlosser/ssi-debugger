@@ -17,6 +17,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -54,7 +55,8 @@ func walletServeCmd() *cobra.Command {
 Capabilities:
   - Web UI for credential management and consent
   - OID4VP authorization endpoint (/authorize)
-  - Trust list endpoint (/api/trustlist)
+  - Legacy PID-first trust list endpoint (/api/trustlist)
+  - Trust-list index endpoint (/api/trustlists)
   - Request logging with timestamps
   - Browser-based consent UI for incoming requests
 
@@ -111,7 +113,9 @@ so the wallet automatically receives incoming protocol requests.`,
 				w.RequireHAIP = true
 			}
 
-			if statusList || pid {
+			if cmd.Flags().Changed("base-url") {
+				w.BaseURL = baseURL
+			} else if (statusList || pid) && strings.TrimSpace(w.BaseURL) == "" {
 				if baseURL == "" {
 					if docker {
 						baseURL = fmt.Sprintf("http://host.docker.internal:%d", port)
@@ -122,9 +126,15 @@ so the wallet automatically receives incoming protocol requests.`,
 				w.BaseURL = baseURL
 			}
 
-			w.IssuerURL, err = deriveWalletIssuerURL(port, baseURL, docker)
-			if err != nil {
-				return err
+			if cmd.Flags().Changed("base-url") || cmd.Flags().Changed("docker") || strings.TrimSpace(w.IssuerURL) == "" {
+				issuerBaseURL := baseURL
+				if issuerBaseURL == "" && cmd.Flags().Changed("base-url") {
+					issuerBaseURL = w.BaseURL
+				}
+				w.IssuerURL, err = deriveWalletIssuerURL(port, issuerBaseURL, docker)
+				if err != nil {
+					return err
+				}
 			}
 
 			if pid {
@@ -170,6 +180,8 @@ so the wallet automatically receives incoming protocol requests.`,
 			dim.Printf("               %s/authorize\n", httpsURL)
 			fmt.Printf("  Trust List:  %s/api/trustlist\n", publicHTTPURL)
 			dim.Printf("               %s/api/trustlist\n", httpsURL)
+			fmt.Printf("  Trust Lists: %s/api/trustlists\n", publicHTTPURL)
+			dim.Printf("               %s/api/trustlists\n", httpsURL)
 			fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", httpsURL)
 			fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
 			fmt.Printf("  Storage:     %s\n", store.Dir)

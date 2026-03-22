@@ -16,6 +16,7 @@ package wallet
 
 import (
 	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
@@ -252,12 +254,85 @@ func fetchIssuerMetadata(issuer string) (map[string]any, error) {
 		return nil, fmt.Errorf("metadata request failed (%d): %s", resp.StatusCode, string(body))
 	}
 
-	var metadata map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		return nil, fmt.Errorf("parsing metadata: %w", err)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading metadata: %w", err)
+	}
+	return parseIssuerMetadataResponse(body, resp.Header.Get("Content-Type"))
+}
+
+func parseIssuerMetadataResponse(body []byte, contentType string) (map[string]any, error) {
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		return nil, fmt.Errorf("issuer metadata response was empty")
 	}
 
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if strings.Contains(mediaType, "openidvci-issuer-metadata+jwt") || strings.Count(raw, ".") == 2 {
+		token, err := sdjwt.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parsing signed issuer metadata: %w", err)
+		}
+		if err := verifySignedIssuerMetadata(token); err != nil {
+			return nil, err
+		}
+		return token.Payload, nil
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		return nil, fmt.Errorf("parsing metadata JSON: %w", err)
+	}
 	return metadata, nil
+}
+
+func verifySignedIssuerMetadata(token *sdjwt.Token) error {
+	if token == nil {
+		return fmt.Errorf("signed issuer metadata token is nil")
+	}
+	x5cRaw, ok := token.Header["x5c"]
+	if !ok {
+		return nil
+	}
+	entries, err := normalizeMetadataX5CEntries(x5cRaw)
+	if err != nil {
+		return fmt.Errorf("parsing issuer metadata x5c: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	der, err := format.DecodeBase64Std(entries[0])
+	if err != nil {
+		return fmt.Errorf("decoding issuer metadata x5c leaf: %w", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return fmt.Errorf("parsing issuer metadata x5c leaf: %w", err)
+	}
+	result := sdjwt.Verify(token, cert.PublicKey)
+	if result == nil || !result.SignatureValid {
+		return fmt.Errorf("issuer metadata signature is invalid")
+	}
+	return nil
+}
+
+func normalizeMetadataX5CEntries(raw any) ([]string, error) {
+	switch v := raw.(type) {
+	case []string:
+		return v, nil
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, entry := range v {
+			s, ok := entry.(string)
+			if !ok {
+				return nil, fmt.Errorf("x5c entry is not a string")
+			}
+			out = append(out, s)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("x5c is not an array")
+	}
 }
 
 func getTokenEndpoint(metadata map[string]any, issuer string) string {

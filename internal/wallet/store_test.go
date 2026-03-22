@@ -81,6 +81,12 @@ func TestWalletStore_SaveAndLoad(t *testing.T) {
 	if _, err := w.ImportCredential(sdjwt); err != nil {
 		t.Fatalf("importing: %v", err)
 	}
+	if len(w.IssuedAttestations) != 1 {
+		t.Fatalf("expected 1 issued-attestation entry after import, got %d", len(w.IssuedAttestations))
+	}
+	if w.IssuedAttestations[0].VCT != "TestCred" {
+		t.Fatalf("expected issued-attestation VCT TestCred, got %s", w.IssuedAttestations[0].VCT)
+	}
 
 	// Save
 	if err := store.Save(w); err != nil {
@@ -102,6 +108,39 @@ func TestWalletStore_SaveAndLoad(t *testing.T) {
 	}
 	if len(creds[0].Disclosures) == 0 {
 		t.Error("expected disclosures to be rehydrated")
+	}
+	if len(w2.IssuedAttestations) != 1 {
+		t.Fatalf("expected 1 issued-attestation entry after reload, got %d", len(w2.IssuedAttestations))
+	}
+	if w2.IssuedAttestations[0].TrustListType != localTrustListType {
+		t.Fatalf("expected persisted local trust-list type, got %s", w2.IssuedAttestations[0].TrustListType)
+	}
+}
+
+func TestWalletStore_SaveAndLoad_PersistsIssuerURLs(t *testing.T) {
+	dir := t.TempDir()
+	store := NewWalletStore(dir)
+
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	w.BaseURL = "http://localhost:8085"
+	w.IssuerURL = "https://localhost:8086"
+
+	if err := store.Save(w); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	w2, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate after save: %v", err)
+	}
+	if w2.BaseURL != w.BaseURL {
+		t.Fatalf("expected BaseURL %s, got %s", w.BaseURL, w2.BaseURL)
+	}
+	if w2.IssuerURL != w.IssuerURL {
+		t.Fatalf("expected IssuerURL %s, got %s", w.IssuerURL, w2.IssuerURL)
 	}
 }
 

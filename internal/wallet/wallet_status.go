@@ -67,6 +67,11 @@ func (w *Wallet) nextStatusIndex() int {
 	return idx
 }
 
+// NextStatusIndex reserves and returns the next wallet-managed status list index.
+func (w *Wallet) NextStatusIndex() int {
+	return w.nextStatusIndex()
+}
+
 // registerStatusEntry records a status entry for a credential.
 func (w *Wallet) registerStatusEntry(credID string, idx int) {
 	w.mu.Lock()
@@ -75,4 +80,9 @@ func (w *Wallet) registerStatusEntry(credID string, idx int) {
 		w.StatusEntries = make(map[string]StatusEntry)
 	}
 	w.StatusEntries[credID] = StatusEntry{Index: idx, Status: 0}
+}
+
+// RegisterStatusEntry records a wallet-managed status list entry for a credential.
+func (w *Wallet) RegisterStatusEntry(credID string, idx int) {
+	w.registerStatusEntry(credID, idx)
 }

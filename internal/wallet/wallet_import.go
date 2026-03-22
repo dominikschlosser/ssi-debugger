@@ -92,7 +92,9 @@ func (w *Wallet) importSDJWT(raw string) (*StoredCredential, error) {
 		cred.VCT = vct
 	}
 
-	return w.appendCredential(cred), nil
+	stored := w.appendCredential(cred)
+	_ = w.RegisterIssuedAttestation(IssuedAttestationSpec{Format: cred.Format, VCT: cred.VCT, DocType: cred.DocType})
+	return stored, nil
 }
 
 func (w *Wallet) importPlainJWT(raw string) (*StoredCredential, error) {
@@ -112,7 +114,9 @@ func (w *Wallet) importPlainJWT(raw string) (*StoredCredential, error) {
 		cred.VCT = vct
 	}
 
-	return w.appendCredential(cred), nil
+	stored := w.appendCredential(cred)
+	_ = w.RegisterIssuedAttestation(IssuedAttestationSpec{Format: cred.Format, VCT: cred.VCT, DocType: cred.DocType})
+	return stored, nil
 }
 
 func (w *Wallet) importMDoc(raw string) (*StoredCredential, error) {
@@ -137,7 +141,9 @@ func (w *Wallet) importMDoc(raw string) (*StoredCredential, error) {
 		NameSpaces: doc.NameSpaces,
 	}
 
-	return w.appendCredential(cred), nil
+	stored := w.appendCredential(cred)
+	_ = w.RegisterIssuedAttestation(IssuedAttestationSpec{Format: cred.Format, VCT: cred.VCT, DocType: cred.DocType})
+	return stored, nil
 }
 
 // ImportCredentialFromFile reads a file and imports the credential.

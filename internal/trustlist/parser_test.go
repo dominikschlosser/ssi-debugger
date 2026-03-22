@@ -36,7 +36,7 @@ func TestParse_BasicTrustList(t *testing.T) {
 			"SchemeOperatorName": []any{
 				map[string]any{"lang": "en", "value": "Test Operator"},
 			},
-			"ListIssueDatetime": "2025-01-01T00:00:00Z",
+			"ListIssueDateTime": "2025-01-01T00:00:00Z",
 		},
 		"TrustedEntitiesList": []any{
 			map[string]any{
@@ -74,6 +74,9 @@ func TestParse_BasicTrustList(t *testing.T) {
 	if tl.SchemeInfo.SchemeOperatorName != "Test Operator" {
 		t.Errorf("SchemeOperatorName = %q", tl.SchemeInfo.SchemeOperatorName)
 	}
+	if tl.SchemeInfo.ListIssueDatetime != "2025-01-01T00:00:00Z" {
+		t.Errorf("ListIssueDatetime = %q", tl.SchemeInfo.ListIssueDatetime)
+	}
 
 	if len(tl.Entities) != 1 {
 		t.Fatalf("expected 1 entity, got %d", len(tl.Entities))
@@ -86,6 +89,23 @@ func TestParse_BasicTrustList(t *testing.T) {
 	}
 	if tl.Entities[0].Services[0].ServiceType != "http://uri.etsi.org/19602/SvcType/Issuance" {
 		t.Errorf("service type = %q", tl.Entities[0].Services[0].ServiceType)
+	}
+}
+
+func TestParse_LegacyListIssueDatetimeStillSupported(t *testing.T) {
+	payload := map[string]any{
+		"ListAndSchemeInformation": map[string]any{
+			"ListIssueDatetime": "2025-01-01T00:00:00Z",
+		},
+	}
+
+	raw := buildTrustListJWT(t, payload)
+	tl, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	if tl.SchemeInfo == nil || tl.SchemeInfo.ListIssueDatetime != "2025-01-01T00:00:00Z" {
+		t.Fatalf("expected legacy ListIssueDatetime to be parsed, got %+v", tl.SchemeInfo)
 	}
 }
 

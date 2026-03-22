@@ -21,7 +21,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
+	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
 // --- omitClaims unit tests ---
@@ -223,6 +228,68 @@ func TestResolveIssueClaims_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestBuildIssueAttestationSpec_AutoNonPIDDefaults(t *testing.T) {
+	issueTrustProfile = "auto"
+	issueEntitlements = nil
+	issueTrustListType = ""
+	issueStatusDetermination = ""
+	issueSchemeCommunityRule = ""
+	issueSchemeTerritory = ""
+	issueTrustEntityName = ""
+	issueIssuanceServiceType = ""
+	issueRevocationServiceType = ""
+	issueIssuanceServiceName = ""
+	issueRevocationServiceName = ""
+
+	spec, err := buildIssueAttestationSpec(&wallet.StoredCredential{
+		Format: "dc+sd-jwt",
+		VCT:    "urn:test:employee:1",
+	})
+	if err != nil {
+		t.Fatalf("buildIssueAttestationSpec: %v", err)
+	}
+	if spec.TrustListType != "http://uri.etsi.org/19602/LoTEType/local" {
+		t.Fatalf("expected local trust-list type, got %s", spec.TrustListType)
+	}
+	if len(spec.Entitlements) != 1 || spec.Entitlements[0] != "https://uri.etsi.org/19475/Entitlement/Non_Q_EAA_Provider" {
+		t.Fatalf("expected Non_Q_EAA entitlement, got %v", spec.Entitlements)
+	}
+}
+
+func TestBuildIssueAttestationSpec_RespectsExplicitOverrides(t *testing.T) {
+	issueTrustProfile = "local"
+	issueEntitlements = []string{"https://uri.etsi.org/19475/Entitlement/Service_Provider"}
+	issueTrustListType = "http://example.com/LoTEType/Custom"
+	issueStatusDetermination = "http://example.com/status"
+	issueSchemeCommunityRule = "http://example.com/rules"
+	issueSchemeTerritory = "DE"
+	issueTrustEntityName = "Custom Entity"
+	issueIssuanceServiceType = "http://example.com/SvcType/Custom/Issuance"
+	issueRevocationServiceType = "http://example.com/SvcType/Custom/Revocation"
+	issueIssuanceServiceName = "Custom Issuance"
+	issueRevocationServiceName = "Custom Revocation"
+
+	spec, err := buildIssueAttestationSpec(&wallet.StoredCredential{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.23220.photoid.1",
+	})
+	if err != nil {
+		t.Fatalf("buildIssueAttestationSpec: %v", err)
+	}
+	if spec.TrustListType != "http://example.com/LoTEType/Custom" {
+		t.Fatalf("expected custom trust-list type, got %s", spec.TrustListType)
+	}
+	if spec.IssuanceServiceType != "http://example.com/SvcType/Custom/Issuance" {
+		t.Fatalf("expected custom issuance service type, got %s", spec.IssuanceServiceType)
+	}
+	if spec.RevocationServiceType != "http://example.com/SvcType/Custom/Revocation" {
+		t.Fatalf("expected custom revocation service type, got %s", spec.RevocationServiceType)
+	}
+	if spec.EntityName != "Custom Entity" {
+		t.Fatalf("expected custom entity name, got %s", spec.EntityName)
+	}
+}
+
 func TestResolveIssueClaims_MissingFile(t *testing.T) {
 	issuePID = false
 	issueClaims = "@/nonexistent/path/claims.json"
@@ -293,6 +360,97 @@ func TestIssueSDJWT_WithCustomClaims(t *testing.T) {
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--claims", `{"custom":"claim"}`})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("issue sdjwt --claims: %v", err)
+	}
+}
+
+func TestIssueSDJWTToWallet_UsesWalletIssuerContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	wDir := filepath.Join(tmpDir, "wallet")
+	if err := os.MkdirAll(wDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+
+	issueClaims = ""
+	issueKeyPath = ""
+	issueIssuer = "https://issuer.example"
+	issueVCT = "urn:test:employee:1"
+	issueExpires = "24h"
+	issueNBF = ""
+	issuePID = false
+	issueOmit = nil
+	issueToWallet = false
+	issueStatusListURI = ""
+	issueStatusListIdx = 0
+	issueTrustProfile = "auto"
+	issueEntitlements = nil
+	issueTrustListType = ""
+	issueStatusDetermination = ""
+	issueSchemeCommunityRule = ""
+	issueSchemeTerritory = ""
+	issueTrustEntityName = ""
+	issueIssuanceServiceType = ""
+	issueRevocationServiceType = ""
+	issueIssuanceServiceName = ""
+	issueRevocationServiceName = ""
+	walletDir = ""
+
+	rootCmd.SetArgs([]string{"issue", "--wallet-dir", wDir, "sdjwt", "--wallet", "--vct", "urn:test:employee:1"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("issue sdjwt --wallet: %v", err)
+	}
+
+	store := wallet.NewWalletStore(wDir)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("loading wallet: %v", err)
+	}
+	creds := w.GetCredentials()
+	if len(creds) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(creds))
+	}
+	if len(w.StatusEntries) != 1 {
+		t.Fatalf("expected 1 wallet-managed status entry, got %d", len(w.StatusEntries))
+	}
+	token, err := sdjwt.Parse(creds[0].Raw)
+	if err != nil {
+		t.Fatalf("parsing wallet-issued SD-JWT: %v", err)
+	}
+	wantIssuer := wallet.LocalIssuerURL(config.DefaultWalletPort+1, false)
+	if token.Payload["iss"] != wantIssuer {
+		t.Fatalf("expected iss %s, got %v", wantIssuer, token.Payload["iss"])
+	}
+	status, ok := token.Payload["status"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status claim on wallet-issued SD-JWT")
+	}
+	statusList, ok := status["status_list"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status_list claim on wallet-issued SD-JWT")
+	}
+	if got := statusList["uri"]; got != wantIssuer+"/api/statuslist" {
+		t.Fatalf("expected status list uri %s/api/statuslist, got %v", wantIssuer, got)
+	}
+
+	tlJWT, err := wallet.GenerateTrustListJWTForWallet(w, w.IssuerURL)
+	if err != nil {
+		t.Fatalf("GenerateTrustListJWTForWallet: %v", err)
+	}
+	tl, err := trustlist.Parse(tlJWT)
+	if err != nil {
+		t.Fatalf("trustlist.Parse: %v", err)
+	}
+	if len(tl.Entities) == 0 || len(tl.Entities[0].Services) == 0 {
+		t.Fatal("expected trust list services")
+	}
+	key, err := validate.ExtractAndValidateX5C(token.Header, tl.Entities[0].Services[0].Certificates)
+	if err != nil {
+		t.Fatalf("validating wallet-issued SD-JWT x5c against trust list: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected trust-list-validated x5c key")
 	}
 }
 

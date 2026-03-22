@@ -36,6 +36,9 @@ This matches the Bundesdruckerei PID provider setup where the trust list contain
 
 Wallet-generated SD-JWT credentials follow the same model: the SD-JWT header carries a deterministic `kid` plus the leaf signing certificate in `x5c`, while the wallet trust list exposes the CA trust anchor separately. The wallet also publishes HTTPS JWT VC issuer metadata at `/.well-known/jwt-vc-issuer` for ecosystems that resolve issuer keys via metadata/JWKS.
 
+This trust-list validation step is intentionally limited to certificate trust and service listing. Current EUDI authorization checks such as provider class and exact attestation-type entitlement come from signed Credential Issuer metadata (`/.well-known/openid-credential-issuer`, `issuer_info`) and registrar or registration data, not from custom trust-list fields.
+The trust-list parser and decoder accept current ETSI-style field names, including `ListIssueDateTime`. When a wallet exposes multiple trust-list profiles, use the legacy `/api/trustlist` endpoint for PID compatibility or select a specific profile from `/api/trustlists`.
+
 If your verifier test environment needs to trust the wallet's local HTTPS endpoints explicitly, export the shared wallet CA with `oid4vc-dev wallet ca-cert --out wallet-ca-cert.pem` and add it to the verifier trust store. Use `wallet tls-cert` only when you need the exact per-wallet HTTPS leaf certificate as a single PEM.
 
 ```bash

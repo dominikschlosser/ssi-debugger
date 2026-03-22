@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -324,6 +325,9 @@ func walletTrustListCmd() *cobra.Command {
 		port    int
 		docker  bool
 		urlOnly bool
+		id      string
+		vct     string
+		docType string
 	)
 
 	cmd := &cobra.Command{
@@ -332,13 +336,36 @@ func walletTrustListCmd() *cobra.Command {
 		Long: `Generates and prints the ETSI trust list JWT containing the wallet's issuer certificate.
 The output can be piped to a file or used directly with --trust-list in the validate command.
 
+Without selection flags, this prints the same legacy PID-first trust list as /api/trustlist.
+Use --id, --vct, or --doctype to select a specific trust-list profile.
 Use --url to print only the trust list URL for a running wallet server instead.`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if id != "" && (vct != "" || docType != "") {
+				return fmt.Errorf("--id cannot be combined with --vct or --doctype")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if urlOnly {
-				if docker {
-					fmt.Printf("http://host.docker.internal:%d/api/trustlist\n", port)
+				path := "/api/trustlist"
+				query := url.Values{}
+				if id != "" {
+					path = "/api/trustlists/" + url.PathEscape(id)
 				} else {
-					fmt.Printf("http://localhost:%d/api/trustlist\n", port)
+					if vct != "" {
+						query.Set("vct", vct)
+					}
+					if docType != "" {
+						query.Set("doctype", docType)
+					}
+				}
+				if encoded := query.Encode(); encoded != "" {
+					path += "?" + encoded
+				}
+				if docker {
+					fmt.Printf("http://host.docker.internal:%d%s\n", port, path)
+				} else {
+					fmt.Printf("http://localhost:%d%s\n", port, path)
 				}
 				return nil
 			}
@@ -351,7 +378,15 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 			if w.CAKey == nil || len(w.CertChain) < 2 {
 				return fmt.Errorf("wallet has no CA certificate chain")
 			}
-			jwt, err := wallet.GenerateTrustListJWT(w.CAKey, w.CertChain[len(w.CertChain)-1])
+			group, ok := wallet.FindTrustListGroupForWallet(w, id, vct, docType)
+			if !ok {
+				return fmt.Errorf("wallet has no matching trust-list profile")
+			}
+			path := "/api/trustlist"
+			if id != "" {
+				path = "/api/trustlists/" + group.ID
+			}
+			jwt, err := wallet.GenerateTrustListJWTForWalletGroup(w, w.IssuerURL, group, path)
 			if err != nil {
 				return fmt.Errorf("generating trust list: %w", err)
 			}
@@ -364,6 +399,9 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 	cmd.Flags().BoolVar(&urlOnly, "url", false, "Print only the trust list URL (for a running wallet server)")
 	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port (used with --url)")
 	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost (used with --url)")
+	cmd.Flags().StringVar(&id, "id", "", "Trust-list profile ID to print, for example 'pid' or 'local'")
+	cmd.Flags().StringVar(&vct, "vct", "", "Select the trust list covering this SD-JWT VCT")
+	cmd.Flags().StringVar(&docType, "doctype", "", "Select the trust list covering this mdoc docType")
 	return cmd
 }
 

@@ -95,7 +95,11 @@ func buildIssuerSigningJWK(w *Wallet, exp time.Time) map[string]any {
 	if !exp.IsZero() {
 		jwk["exp"] = exp.Unix()
 	}
-	chain := mock.WithoutSelfSignedTrustAnchor(w.CertChain)
+	chain := w.CertChain
+	if derived, err := w.DefaultSigningCertChain(); err == nil && len(derived) > 0 {
+		chain = derived
+	}
+	chain = mock.WithoutSelfSignedTrustAnchor(chain)
 	if len(chain) > 0 {
 		x5c := make([]string, 0, len(chain))
 		for _, cert := range chain {

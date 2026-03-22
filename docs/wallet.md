@@ -118,10 +118,48 @@ Starts a persistent wallet HTTP server with a web UI for managing credentials an
 The server exposes:
 - Web UI for credential management and consent
 - OID4VP authorization endpoint (`/authorize`)
-- ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating credentials issued by the wallet
-- HTTPS wallet endpoints on `https://<host>:<port+1>`, including `/.well-known/jwt-vc-issuer`, `/api/trustlist`, and `/api/statuslist`
+- Legacy ETSI trust list endpoint (`/api/trustlist`) — use this URL as `--trust-list` when validating PID credentials issued by the wallet
+- Trust-list index endpoint (`/api/trustlists`) with one JWT endpoint per coherent trust-list profile
+- HTTPS wallet endpoints on `https://<host>:<port+1>`, including `/.well-known/jwt-vc-issuer`, `/.well-known/openid-credential-issuer`, `/api/trustlist`, `/api/trustlists`, `/api/statuslist`, and `/api/registrar/wrp`
 
 The shared wallet CA can be exported with `wallet ca-cert` for verifier trust stores or CI fixtures. The per-wallet HTTPS leaf certificate can still be exported with `wallet tls-cert` when you need the exact server certificate instead. The wallet continues to serve the same endpoints and response formats on top of that shared trust root.
+The trust list remains certificate- and service-centric. EUDI-style issuer authorization data such as provider entitlements and `providesAttestations` is published through signed OpenID Credential Issuer metadata and registrar-style responses instead of being added as custom trust-list fields.
+
+The wallet persists an issued-attestation registry alongside the stored credentials. Each issued or imported credential type can register:
+- its attestation identifier (`vct` or `docType`)
+- its registrar entitlements
+- its trust-list profile data such as LoTE type, entity name, and issuance or revocation service type identifiers
+
+Trust lists are created from that registry, not by scanning certificates alone:
+- `wallet generate-pid` and `wallet serve --pid` register PID attestation types with the PID trust-list profile
+- `issue ... --wallet` issues with the wallet issuer context, stores the credential, and registers one issued-attestation entry for its credential type
+- `wallet import` registers a default issued-attestation entry for the imported credential type
+- credentials whose stored trust-list profile fields are identical are grouped into the same trust list
+
+Credential-signing certificates are derived per trust-list profile. The wallet keeps one shared CA root, but credentials for different profiles can present different leaf certificates while still chaining to that same CA.
+
+When a wallet already has persisted issuer or status-list URLs, `wallet serve` reuses them by default so previously generated credentials keep resolving against the same issuer metadata, trust-list, and status-list endpoints. Passing `--base-url` or `--docker` explicitly replaces that default.
+
+The wallet groups registered attestation entries by trust-list profile. Each group is exposed as its own trust list under `/api/trustlists/{id}`. The `id` is a stable profile identifier:
+- `pid` for the built-in PID profile
+- `local` for the built-in local ETSI-shaped profile
+- `tl-<hash>` for any additional custom profile
+
+`/api/trustlist` remains the backward-compatible legacy endpoint. Its selection rules are:
+- if a PID trust-list profile exists, `/api/trustlist` returns that PID trust list
+- if no PID profile exists, `/api/trustlist` returns the first available profile
+- `vct` and `doctype` query parameters can be used to select the trust list for a specific credential type
+
+Examples:
+- `/api/trustlists/pid`
+- `/api/trustlists/local`
+- `/api/trustlist?vct=eu.europa.ec.eudi.pid.1`
+- `/api/trustlist?doctype=org.iso.23220.photoid.1`
+
+When the wallet needs a local default profile, it uses:
+- `LoTEType = http://uri.etsi.org/19602/LoTEType/local`
+- `SvcType/Issuance`
+- `SvcType/Revocation`
 
 Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
@@ -200,12 +238,21 @@ oid4vc-dev wallet scan --screen --auto-accept # auto-approve if it's a presentat
 
 ## `wallet trust-list`
 
-Generates and prints the ETSI trust list JWT containing the wallet's CA certificate (trust anchor). The trust list is used by verifiers to validate the x5c/x5chain certificate chain embedded in credentials. The output can be piped to a file or used directly with `--trust-list` in the `validate` command. Use `--url` to print only the URL for a running wallet server instead.
+Generates and prints the ETSI trust list JWT containing the wallet's CA certificate (trust anchor). The trust list is used by verifiers to validate the x5c/x5chain certificate chain embedded in credentials. It intentionally stays certificate-centric and does not embed issuer authorization data such as provider entitlements or `providesAttestations`; those are exposed through `/.well-known/openid-credential-issuer` and `/api/registrar/wrp`.
+
+`wallet trust-list` prints the same trust list as the legacy `/api/trustlist` endpoint. If the wallet has a PID trust-list profile, that PID trust list is printed. Otherwise the first available profile is printed.
+
+Use `--id`, `--vct`, or `--doctype` when you want a specific trust-list profile instead of the legacy default. Typical profile IDs are `pid` and `local`.
+
+The output can be piped to a file or used directly with `--trust-list` in the `validate` command. Use `--url` to print only the URL for a running wallet server instead.
 
 ```bash
 oid4vc-dev wallet trust-list                          # Print the trust list JWT
 oid4vc-dev wallet trust-list > trustlist.jwt          # Save to file
 oid4vc-dev wallet trust-list --url                    # http://localhost:8085/api/trustlist
+oid4vc-dev wallet trust-list --id pid --url           # http://localhost:8085/api/trustlists/pid
+oid4vc-dev wallet trust-list --id local --url         # http://localhost:8085/api/trustlists/local
+oid4vc-dev wallet trust-list --doctype org.iso.23220.photoid.1 --url
 oid4vc-dev wallet trust-list --url --port 9000        # http://localhost:9000/api/trustlist
 oid4vc-dev wallet trust-list --url --docker           # http://host.docker.internal:8085/api/trustlist
 ```
@@ -213,6 +260,9 @@ oid4vc-dev wallet trust-list --url --docker           # http://host.docker.inter
 | Flag       | Default | Description                                        |
 |------------|---------|----------------------------------------------------|
 | `--url`    | `false` | Print only the trust list URL (for a running server) |
+| `--id`     | —       | Select a trust-list profile ID such as `pid` or `local` |
+| `--vct`    | —       | Select the trust list covering this SD-JWT `vct`    |
+| `--doctype`| —       | Select the trust list covering this mdoc `docType`  |
 | `--port`   | `8085`  | Wallet server port (used with --url)                |
 | `--docker` | `false` | Use `host.docker.internal` instead of `localhost` (used with --url) |
 
@@ -385,8 +435,8 @@ curl -X POST http://localhost:8085/api/credentials \
 
 When you generate PID credentials with `wallet generate-pid` or `wallet serve --pid`, generated credentials include a `status.status_list` claim pointing to the wallet's HTTPS status list endpoint. You can also force the same behavior explicitly with `--status-list`. The URI baked into credentials is `https://<host>:<port+1>/api/statuslist`, derived from the same host-selection logic as the wallet's issuer metadata endpoint.
 
-The HTTPS issuer URL for wallet-generated SD-JWT credentials is derived from the same host-selection mechanism. By default it is `https://localhost:<port+1>` and serves `/.well-known/jwt-vc-issuer`.
-Both endpoints use certificate chains rooted in the shared wallet CA.
+The HTTPS issuer URL for wallet-generated credentials is derived from the same host-selection mechanism. By default it is `https://localhost:<port+1>` and serves both `/.well-known/jwt-vc-issuer` and the signed `/.well-known/openid-credential-issuer` metadata endpoint, plus `/api/registrar/wrp` for registrar-style authorization data.
+Those endpoints use certificate chains rooted in the shared wallet CA.
 
 **Important:** If the verifier runs in Docker (or any environment that can't reach `localhost`), use `--docker` (or `--base-url` for a custom URL) so both the status list URL and the issuer metadata host are reachable:
 

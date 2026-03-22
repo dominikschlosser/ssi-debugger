@@ -38,6 +38,8 @@ Status of implemented features against the relevant specifications.
 | Credential endpoint | Implemented | Uses OID4VCI 1.0 final `proofs.jwt` and sends `credential_identifier` or `credential_configuration_id` as required |
 | Batch credential issuance | Not implemented | Optional per spec |
 | Deferred credential issuance | Not implemented | Optional per spec |
+| Signed OpenID Credential Issuer metadata publication | Implemented | Wallet serves `/.well-known/openid-credential-issuer` as signed `openidvci-issuer-metadata+jwt` with `issuer_info` / `registrar_dataset` |
+| Registrar-style issuer authorization data | Implemented | Wallet serves `/api/registrar/wrp` with dynamic `entitlements` and `providesAttestations` filters for PID and non-PID attestation sets |
 | HTTPS JWT VC issuer metadata publication | Implemented | Wallet serves `/.well-known/jwt-vc-issuer` with JWKS for wallet-issued SD-JWTs |
 
 ## HAIP 1.0 (High Assurance Interoperability Profile, OID4VP subset only)
@@ -86,7 +88,7 @@ The repository does not yet implement the full HAIP 1.0 profile for issuance, Wa
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Trust list JWT generation | Implemented | Wallet generates its own |
-| Trust list JWT parsing | Implemented | Signature not verified (intentional for debugging) |
+| Trust list JWT parsing | Implemented | Signature not verified (intentional for debugging); accepts current BMI sandbox fields such as `ListIssueDateTime` |
 | Certificate chain validation against trust list | Implemented | In `validate` command |
 
 ## Token Status List (RFC 9596)

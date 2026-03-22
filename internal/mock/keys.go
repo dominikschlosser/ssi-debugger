@@ -127,9 +127,28 @@ func GenerateCACert(caKey *ecdsa.PrivateKey) (*x509.Certificate, error) {
 
 // GenerateLeafCert creates a leaf certificate signed by the CA.
 func GenerateLeafCert(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, leafPubKey *ecdsa.PublicKey) (*x509.Certificate, error) {
+	return GenerateLeafCertWithOptions(caKey, caCert, leafPubKey, LeafCertOptions{})
+}
+
+// LeafCertOptions customizes the generated leaf certificate.
+type LeafCertOptions struct {
+	CommonName   string
+	SerialNumber *big.Int
+}
+
+// GenerateLeafCertWithOptions creates a leaf certificate signed by the CA.
+func GenerateLeafCertWithOptions(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, leafPubKey *ecdsa.PublicKey, opts LeafCertOptions) (*x509.Certificate, error) {
+	commonName := opts.CommonName
+	if commonName == "" {
+		commonName = "OID4VC Dev Wallet Issuer"
+	}
+	serialNumber := opts.SerialNumber
+	if serialNumber == nil || serialNumber.Sign() <= 0 {
+		serialNumber = big.NewInt(2)
+	}
 	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(2),
-		Subject:               pkix.Name{CommonName: "OID4VC Dev Wallet Issuer"},
+		SerialNumber:          serialNumber,
+		Subject:               pkix.Name{CommonName: commonName},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,

@@ -150,19 +150,10 @@ func HasEncryptionKeyForParams(reqObj *oid4vc.RequestObjectJWT, clientMetadata m
 	return err == nil
 }
 
-// EncryptResponse encrypts vp_token, optional id_token, and state as a JWE for direct_post.jwt response mode.
-// Returns the JWE string and the derived content encryption key (CEK) for debugging.
-func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
-	log.Printf("[VP] Encrypting response: response_mode=direct_post.jwt")
-	payload := map[string]any{
-		"state": state,
-	}
-	if vpToken != nil {
-		payload["vp_token"] = vpToken
-	}
-	if idToken != "" {
-		payload["id_token"] = idToken
-	}
+// encryptDirectPostJWTPayload encrypts a direct_post.jwt response payload.
+// The caller is responsible for providing top-level JSON members as required
+// by OID4VP 1.0 for both success and error responses.
+func (w *Wallet) encryptDirectPostJWTPayload(payload map[string]any, mdocNonce string, params PresentationParams) (string, []byte, error) {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshaling response payload: %w", err)
@@ -184,6 +175,39 @@ func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce s
 	}
 
 	return EncryptJWE(payloadJSON, keyInfo.Key, keyInfo.Kid, keyInfo.Alg, enc, apu)
+}
+
+// EncryptResponse encrypts vp_token, optional id_token, and state as a JWE for direct_post.jwt response mode.
+// Returns the JWE string and the derived content encryption key (CEK) for debugging.
+func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
+	log.Printf("[VP] Encrypting response: response_mode=direct_post.jwt")
+	payload := map[string]any{
+		"state": state,
+	}
+	if vpToken != nil {
+		payload["vp_token"] = vpToken
+	}
+	if idToken != "" {
+		payload["id_token"] = idToken
+	}
+	return w.encryptDirectPostJWTPayload(payload, mdocNonce, params)
+}
+
+// EncryptErrorResponse encrypts an authorization error response for direct_post.jwt.
+// The encrypted payload includes error, optional error_description, and state as
+// top-level JSON members per OID4VP 1.0.
+func (w *Wallet) EncryptErrorResponse(errorCode, errorDescription, state string, params PresentationParams) (string, []byte, error) {
+	log.Printf("[VP] Encrypting error response: response_mode=direct_post.jwt error=%s", errorCode)
+	payload := map[string]any{
+		"error": errorCode,
+	}
+	if errorDescription != "" {
+		payload["error_description"] = errorDescription
+	}
+	if state != "" {
+		payload["state"] = state
+	}
+	return w.encryptDirectPostJWTPayload(payload, "", params)
 }
 
 // detectEncAlgorithm finds the content encryption algorithm from

@@ -42,6 +42,113 @@ func testEncJWK(t *testing.T, pub *ecdsa.PublicKey) map[string]any {
 	return jwk
 }
 
+func TestEncryptResponse_DirectPostJWTPayloadIncludesStateAsTopLevelMember(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+				"encrypted_response_enc_values_supported": []any{"A128GCM"},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	vpToken := map[string][]string{"pid": {"token1"}}
+	jweStr, _, err := w.EncryptResponse(vpToken, "eyJ.id.token", "state-123", "", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	plaintext, err := DecryptRequestObjectJWE(jweStr, key)
+	if err != nil {
+		t.Fatalf("DecryptRequestObjectJWE error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(plaintext), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if payload["state"] != "state-123" {
+		t.Fatalf("expected state inside encrypted payload, got %v", payload["state"])
+	}
+	if payload["id_token"] != "eyJ.id.token" {
+		t.Fatalf("expected id_token inside encrypted payload, got %v", payload["id_token"])
+	}
+
+	rawVPToken, ok := payload["vp_token"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected vp_token object inside encrypted payload, got %T", payload["vp_token"])
+	}
+	pidValues, ok := rawVPToken["pid"].([]any)
+	if !ok || len(pidValues) != 1 || pidValues[0] != "token1" {
+		t.Fatalf("expected pid array with token1 inside encrypted payload, got %v", rawVPToken["pid"])
+	}
+}
+
+func TestEncryptErrorResponse_DirectPostJWTPayloadIncludesStateAsTopLevelMember(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+				"encrypted_response_enc_values_supported": []any{"A128GCM"},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptErrorResponse("access_denied", "testing", "state-123", params)
+	if err != nil {
+		t.Fatalf("EncryptErrorResponse error: %v", err)
+	}
+
+	plaintext, err := DecryptRequestObjectJWE(jweStr, key)
+	if err != nil {
+		t.Fatalf("DecryptRequestObjectJWE error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(plaintext), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if payload["error"] != "access_denied" {
+		t.Fatalf("expected error inside encrypted payload, got %v", payload["error"])
+	}
+	if payload["error_description"] != "testing" {
+		t.Fatalf("expected error_description inside encrypted payload, got %v", payload["error_description"])
+	}
+	if payload["state"] != "state-123" {
+		t.Fatalf("expected state inside encrypted payload, got %v", payload["state"])
+	}
+}
+
 func TestCreateVPToken_SDJWT(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 

@@ -65,6 +65,39 @@ func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*
 	return result, nil
 }
 
+// SubmitDirectPostError submits an authorization error response via direct_post.
+func SubmitDirectPostError(responseURI, state, errorCode, errorDescription string) (*DirectPostResult, error) {
+	form := url.Values{}
+	form.Set("error", errorCode)
+	if errorDescription != "" {
+		form.Set("error_description", errorDescription)
+	}
+	if state != "" {
+		form.Set("state", state)
+	}
+
+	resp, err := http.PostForm(responseURI, form)
+	if err != nil {
+		return nil, fmt.Errorf("posting to response_uri: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	result := &DirectPostResult{
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
+	if err := applyVerifierResponse(result, resp.Header, body); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // DirectPostResult represents the result of a direct_post submission.
 type DirectPostResult struct {
 	StatusCode  int    `json:"status_code"`
@@ -132,6 +165,20 @@ func BuildFragmentRedirect(redirectURI, state string, vpToken any, idToken strin
 	}
 
 	return redirectURI + "#" + fragment.Encode(), nil
+}
+
+// BuildFragmentErrorRedirect constructs a redirect URL with authorization error
+// parameters as fragment members per OID4VP 1.0 fragment response mode.
+func BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription string) string {
+	fragment := url.Values{}
+	fragment.Set("error", errorCode)
+	if errorDescription != "" {
+		fragment.Set("error_description", errorDescription)
+	}
+	if state != "" {
+		fragment.Set("state", state)
+	}
+	return redirectURI + "#" + fragment.Encode()
 }
 
 // FormatDirectPostResult formats a direct post result for terminal output.

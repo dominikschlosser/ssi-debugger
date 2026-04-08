@@ -908,6 +908,208 @@ func TestConsentFlow_Deny(t *testing.T) {
 	}
 }
 
+func TestPresentationFlow_NextErrorOverride_DirectPostJWT_SubmitsEncryptedErrorWithState(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	var receivedBody string
+	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"redirect_uri":"https://verifier.example/done"}`))
+	}))
+	defer verifier.Close()
+
+	rec := serverRequest(t, srv, "POST", "/api/next-error",
+		`{"error":"access_denied","error_description":"testing"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	clientMetadata, _ := json.Marshal(map[string]any{
+		"jwks": map[string]any{
+			"keys": []any{jwk},
+		},
+		"encrypted_response_enc_values_supported": []any{"A128GCM"},
+	})
+
+	params := url.Values{
+		"client_id":       {"https://verifier.example"},
+		"response_type":   {"vp_token"},
+		"response_mode":   {"direct_post.jwt"},
+		"nonce":           {"nonce"},
+		"state":           {"state-123"},
+		"response_uri":    {verifier.URL},
+		"client_metadata": {string(clientMetadata)},
+	}
+
+	req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if receivedBody == "" {
+		t.Fatal("verifier did not receive error response")
+	}
+
+	parsedForm, err := url.ParseQuery(receivedBody)
+	if err != nil {
+		t.Fatalf("parsing verifier body: %v", err)
+	}
+	if parsedForm.Get("response") == "" {
+		t.Fatal("expected response JWT in verifier request")
+	}
+	if parsedForm.Get("state") != "" {
+		t.Fatalf("expected no top-level state form field, got %q", parsedForm.Get("state"))
+	}
+
+	plaintext, err := DecryptRequestObjectJWE(parsedForm.Get("response"), key)
+	if err != nil {
+		t.Fatalf("decrypting error JWT: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(plaintext), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["error"] != "access_denied" {
+		t.Fatalf("expected error in JWT payload, got %v", payload["error"])
+	}
+	if payload["error_description"] != "testing" {
+		t.Fatalf("expected error_description in JWT payload, got %v", payload["error_description"])
+	}
+	if payload["state"] != "state-123" {
+		t.Fatalf("expected state in JWT payload, got %v", payload["state"])
+	}
+
+	result := decodeJSON(t, w)
+	if result["status"] != "error" {
+		t.Fatalf("expected status 'error', got %v", result["status"])
+	}
+}
+
+func TestConsentFlow_Deny_DirectPostJWT_SubmitsEncryptedErrorWithState(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	var receivedBody string
+	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"redirect_uri":"https://verifier.example/done"}`))
+	}))
+	defer verifier.Close()
+
+	clientMetadata, _ := json.Marshal(map[string]any{
+		"jwks": map[string]any{
+			"keys": []any{jwk},
+		},
+		"encrypted_response_enc_values_supported": []any{"A128GCM"},
+	})
+
+	dcqlQuery := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+			},
+		},
+	}
+	dcqlJSON, _ := json.Marshal(dcqlQuery)
+
+	params := url.Values{
+		"client_id":       {"https://verifier.example"},
+		"response_type":   {"vp_token"},
+		"response_mode":   {"direct_post.jwt"},
+		"nonce":           {"nonce"},
+		"state":           {"state-123"},
+		"response_uri":    {verifier.URL},
+		"client_metadata": {string(clientMetadata)},
+		"dcql_query":      {string(dcqlJSON)},
+	}
+
+	resultCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, req)
+		resultCh <- w
+	}()
+
+	var reqID string
+	for i := 0; i < 100; i++ {
+		time.Sleep(10 * time.Millisecond)
+		pending := srv.wallet.GetPendingRequests()
+		if len(pending) > 0 {
+			reqID = pending[0].ID
+			break
+		}
+	}
+	if reqID == "" {
+		t.Fatal("no pending consent request found")
+	}
+
+	denyReq := httptest.NewRequest("POST", "/api/requests/"+reqID+"/deny", nil)
+	denyRec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(denyRec, denyReq)
+	if denyRec.Code != http.StatusOK {
+		t.Fatalf("deny failed: %d", denyRec.Code)
+	}
+
+	w := <-resultCh
+	if receivedBody == "" {
+		t.Fatal("verifier did not receive denied error response")
+	}
+
+	parsedForm, err := url.ParseQuery(receivedBody)
+	if err != nil {
+		t.Fatalf("parsing verifier body: %v", err)
+	}
+	if parsedForm.Get("response") == "" {
+		t.Fatal("expected response JWT in verifier request")
+	}
+	if parsedForm.Get("state") != "" {
+		t.Fatalf("expected no top-level state form field, got %q", parsedForm.Get("state"))
+	}
+
+	plaintext, err := DecryptRequestObjectJWE(parsedForm.Get("response"), key)
+	if err != nil {
+		t.Fatalf("decrypting error JWT: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(plaintext), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["error"] != "access_denied" {
+		t.Fatalf("expected error in JWT payload, got %v", payload["error"])
+	}
+	if payload["error_description"] != "User denied presentation" {
+		t.Fatalf("expected error_description in JWT payload, got %v", payload["error_description"])
+	}
+	if payload["state"] != "state-123" {
+		t.Fatalf("expected state in JWT payload, got %v", payload["state"])
+	}
+
+	result := decodeJSON(t, w)
+	if result["status"] != "denied" {
+		t.Fatalf("expected status 'denied', got %v", result["status"])
+	}
+}
+
 // --- Trust List API Tests ---
 
 func TestTrustListAPI(t *testing.T) {

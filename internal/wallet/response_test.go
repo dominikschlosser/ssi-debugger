@@ -185,6 +185,40 @@ func TestSubmitDirectPost_NoVPToken(t *testing.T) {
 	}
 }
 
+func TestSubmitDirectPostError_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parsing form: %v", err)
+		}
+		if r.FormValue("error") != "access_denied" {
+			t.Errorf("expected error 'access_denied', got %q", r.FormValue("error"))
+		}
+		if r.FormValue("error_description") != "testing" {
+			t.Errorf("expected error_description 'testing', got %q", r.FormValue("error_description"))
+		}
+		if r.FormValue("state") != "state123" {
+			t.Errorf("expected state 'state123', got %q", r.FormValue("state"))
+		}
+		if r.FormValue("response") != "" {
+			t.Errorf("expected no response field, got %q", r.FormValue("response"))
+		}
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "https://example.com/error-done"})
+	}))
+	defer ts.Close()
+
+	result, err := SubmitDirectPostError(ts.URL, "state123", "access_denied", "testing")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", result.StatusCode)
+	}
+	if result.RedirectURI != "https://example.com/error-done" {
+		t.Errorf("expected redirect URI, got %q", result.RedirectURI)
+	}
+}
+
 func TestSubmitDirectPostJWT_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -192,6 +226,15 @@ func TestSubmitDirectPostJWT_Success(t *testing.T) {
 		}
 		if r.FormValue("response") != "jwe.compact.token" {
 			t.Errorf("expected response 'jwe.compact.token', got %q", r.FormValue("response"))
+		}
+		if r.FormValue("state") != "" {
+			t.Errorf("expected no top-level state form field, got %q", r.FormValue("state"))
+		}
+		if r.FormValue("vp_token") != "" {
+			t.Errorf("expected no top-level vp_token form field, got %q", r.FormValue("vp_token"))
+		}
+		if r.FormValue("id_token") != "" {
+			t.Errorf("expected no top-level id_token form field, got %q", r.FormValue("id_token"))
 		}
 		w.WriteHeader(200)
 		json.NewEncoder(w).Encode(map[string]string{"redirect_uri": "https://example.com/jwt-done"})

@@ -287,6 +287,34 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, 
 	}
 }
 
+// SubmitAuthorizationError submits an authorization error response to the verifier.
+func (w *Wallet) SubmitAuthorizationError(errorCode, errorDescription, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+	switch params.ResponseMode {
+	case "direct_post.jwt":
+		if !HasEncryptionKeyForParams(params.RequestObject, params.ClientMetadata) {
+			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
+		}
+		jwe, cek, err := w.EncryptErrorResponse(errorCode, errorDescription, state, params)
+		if err != nil {
+			return nil, fmt.Errorf("encrypting error response: %w", err)
+		}
+		return SubmitDirectPostJWT(responseURI, jwe, cek)
+
+	case "fragment":
+		redirectURI := params.RedirectURI
+		if redirectURI == "" {
+			redirectURI = responseURI
+		}
+		return &DirectPostResult{
+			StatusCode:  302,
+			RedirectURI: BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription),
+		}, nil
+
+	default:
+		return SubmitDirectPostError(responseURI, state, errorCode, errorDescription)
+	}
+}
+
 func parseIssuerJWTPayload(issuerJWT string) (map[string]any, error) {
 	parts := strings.Split(issuerJWT, ".")
 	if len(parts) != 3 {

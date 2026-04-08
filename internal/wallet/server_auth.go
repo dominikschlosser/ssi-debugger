@@ -50,11 +50,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 	if override := s.wallet.ConsumeNextError(); override != nil {
 		s.log("  Next-error override consumed: %s", override.Error)
 		s.wallet.AddLog("presentation", fmt.Sprintf("Returned error override: %s", override.Error), false)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":            "error",
-			"error":             override.Error,
-			"error_description": override.ErrorDescription,
-		})
+		s.submitAuthorizationError(w, authReq, "error", override.Error, override.ErrorDescription)
 		return
 	}
 
@@ -166,8 +162,8 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		if !result.Approved {
 			s.log("  Consent:       denied")
 			s.wallet.AddLog("presentation", fmt.Sprintf("Denied presentation to %s", authReq.ClientID), false)
-			consentReq.SubmissionCh <- SubmissionResult{Error: "denied"}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "denied"})
+			submission := s.submitAuthorizationError(w, authReq, "denied", "access_denied", "User denied presentation")
+			consentReq.SubmissionCh <- submission
 			return
 		}
 
@@ -218,6 +214,59 @@ func (s *Server) submitPresentationWithNotify(w http.ResponseWriter, authReq *Au
 	result := s.submitPresentation(w, authReq, matches)
 	if submissionCh != nil {
 		submissionCh <- result
+	}
+}
+
+// submitAuthorizationError builds and submits an authorization error response to the verifier.
+func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *AuthorizationRequestParams, status, errorCode, errorDescription string) SubmissionResult {
+	responseURI := authReq.ResponseURI
+	if responseURI == "" {
+		responseURI = authReq.RedirectURI
+	}
+
+	s.log("  Submitting authorization error to %s", responseURI)
+
+	params := PresentationParams{
+		Nonce:          authReq.Nonce,
+		ClientID:       authReq.ClientID,
+		ResponseURI:    responseURI,
+		RedirectURI:    authReq.RedirectURI,
+		ResponseMode:   authReq.ResponseMode,
+		ClientMetadata: authReq.ClientMetadata,
+		RequestObject:  authReq.RequestObject,
+	}
+
+	result, err := s.wallet.SubmitAuthorizationError(errorCode, errorDescription, authReq.State, responseURI, params)
+	if err != nil {
+		s.log("  ERROR: Error submission failed: %v", err)
+		s.wallet.AddLog("presentation", fmt.Sprintf("Error submission failed: %v", err), false)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return SubmissionResult{Error: err.Error()}
+	}
+
+	s.log("  Response:      HTTP %d", result.StatusCode)
+	if result.RedirectURI != "" {
+		s.log("  Redirect:      %s", result.RedirectURI)
+	}
+
+	s.wallet.AddLog("presentation", fmt.Sprintf("Sent authorization error to %s: %s", authReq.ClientID, FormatDirectPostResult(result)), true)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":            status,
+		"error":             errorCode,
+		"error_description": errorDescription,
+		"response":          result,
+	})
+
+	return SubmissionResult{
+		RedirectURI: result.RedirectURI,
+		StatusCode:  result.StatusCode,
+		Error: func() string {
+			if result.StatusCode >= 400 {
+				return result.Body
+			}
+			return ""
+		}(),
 	}
 }
 

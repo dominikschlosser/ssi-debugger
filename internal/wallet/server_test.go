@@ -518,20 +518,17 @@ func TestPresentationFlow_AutoAccept(t *testing.T) {
 		t.Fatal("expected vp_token in verifier request")
 	}
 
-	// Per OID4VP 1.0: vp_token is a JSON object where values are arrays of strings
-	var vpToken map[string][]any
+	// Current OIDF wallet-suite submissions use a JSON object with query IDs as string values.
+	var vpToken map[string]string
 	if err := json.Unmarshal([]byte(vpTokenRaw), &vpToken); err != nil {
 		t.Fatalf("vp_token should be a JSON object: %v", err)
 	}
-	pidArr, ok := vpToken["pid"]
+	pidValue, ok := vpToken["pid"]
 	if !ok {
 		t.Fatal("expected 'pid' key in vp_token")
 	}
-	if len(pidArr) != 1 {
-		t.Errorf("expected single-element array for 'pid', got %d elements", len(pidArr))
-	}
-	if _, ok := pidArr[0].(string); !ok {
-		t.Errorf("expected string presentation in array, got %T", pidArr[0])
+	if pidValue == "" {
+		t.Error("expected non-empty pid presentation")
 	}
 
 	state := parsedForm.Get("state")
@@ -666,10 +663,10 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 		t.Fatalf("parsing verifier body: %v", err)
 	}
 
-	// Per OID4VP 1.0: vp_token is a JSON object with query IDs as keys and arrays as values
-	var vpToken map[string][]any
+	// Current OIDF wallet-suite submissions use direct string values per query ID.
+	var vpToken map[string]string
 	if err := json.Unmarshal([]byte(parsedForm.Get("vp_token")), &vpToken); err != nil {
-		t.Fatalf("vp_token should be a JSON object with array values: %v", err)
+		t.Fatalf("vp_token should be a JSON object with string values: %v", err)
 	}
 
 	// Must have both credential query IDs
@@ -680,14 +677,10 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 		t.Error("expected 'pid_mdoc' key in vp_token")
 	}
 
-	// Each value must be a single-element array (multiple not set)
+	// Each query must map to a single non-empty presentation string.
 	for _, qid := range []string{"pid_sdjwt", "pid_mdoc"} {
-		arr := vpToken[qid]
-		if len(arr) != 1 {
-			t.Errorf("expected single-element array for %q, got %d elements", qid, len(arr))
-		}
-		if _, ok := arr[0].(string); !ok {
-			t.Errorf("expected string presentation for %q, got %T", qid, arr[0])
+		if vpToken[qid] == "" {
+			t.Errorf("expected non-empty presentation for %q", qid)
 		}
 	}
 
@@ -843,6 +836,15 @@ func TestConsentFlow_ApproveAndDeny(t *testing.T) {
 
 func TestConsentFlow_Deny(t *testing.T) {
 	srv := newTestServer(t, false)
+	var receivedBody string
+	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"redirect_uri":"https://verifier.example/done"}`))
+	}))
+	defer verifier.Close()
 
 	dcqlQuery := map[string]any{
 		"credentials": []any{
@@ -865,7 +867,7 @@ func TestConsentFlow_Deny(t *testing.T) {
 		"response_type": {"vp_token"},
 		"nonce":         {"nonce"},
 		"state":         {"state"},
-		"response_uri":  {"https://verifier.example/response"},
+		"response_uri":  {verifier.URL},
 		"dcql_query":    {string(dcqlJSON)},
 	}
 
@@ -900,8 +902,18 @@ func TestConsentFlow_Deny(t *testing.T) {
 	if denyRec.Code != http.StatusOK {
 		t.Fatalf("deny failed: %d", denyRec.Code)
 	}
+	denyResult := decodeJSON(t, denyRec)
+	if denyResult["status"] != "denied" {
+		t.Fatalf("expected deny API status 'denied', got %v", denyResult["status"])
+	}
 
 	w := <-resultCh
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected authorize flow to complete with 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if receivedBody == "" {
+		t.Fatal("verifier did not receive denied error response")
+	}
 	result := decodeJSON(t, w)
 	if result["status"] != "denied" {
 		t.Errorf("expected status 'denied', got %v", result["status"])
@@ -2050,7 +2062,7 @@ func TestPresentationFlow_RequestURIMethodPost_Encrypted(t *testing.T) {
 		})
 
 		// Encrypt the JWT with the wallet's public key
-		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "kid", "ECDH-ES", "A128GCM", nil)
+		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "kid", "ECDH-ES", "A128GCM", nil, nil)
 		if err != nil {
 			t.Fatalf("encrypting request object: %v", err)
 		}

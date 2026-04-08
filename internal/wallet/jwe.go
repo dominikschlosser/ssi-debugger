@@ -36,9 +36,10 @@ import (
 // recipientKey is the verifier's public EC key, kid identifies it,
 // alg is the JWE key agreement algorithm from the JWK (e.g. "ECDH-ES"),
 // enc is the content encryption algorithm (e.g. "A128GCM", "A256GCM", "A128CBC-HS256"),
-// and apu is the Agreement PartyUInfo (set to mdoc_generated_nonce for ISO mode, nil otherwise).
+// apu is the Agreement PartyUInfo (set to mdoc_generated_nonce for ISO mode, nil otherwise),
+// and apv is the Agreement PartyVInfo (set to the authorization request nonce for ISO mode).
 // Returns the JWE compact serialization and the derived content encryption key (CEK).
-func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, alg string, enc string, apu []byte) (string, []byte, error) {
+func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, alg string, enc string, apu, apv []byte) (string, []byte, error) {
 	keyBitLen, err := encKeyBitLen(enc)
 	if err != nil {
 		return "", nil, err
@@ -64,7 +65,7 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, alg s
 	}
 
 	// Derive key via Concat KDF (NIST SP 800-56A, RFC 7518 §4.6)
-	derivedKey := concatKDF(z, enc, apu, nil, keyBitLen)
+	derivedKey := concatKDF(z, enc, apu, apv, keyBitLen)
 
 	// Build protected header
 	epkX, epkY := unmarshalECDHPublicKey(ephemeralPub)
@@ -81,6 +82,9 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, alg s
 	}
 	if apu != nil {
 		header["apu"] = format.EncodeBase64URL(apu)
+	}
+	if apv != nil {
+		header["apv"] = format.EncodeBase64URL(apv)
 	}
 
 	headerJSON, err := json.Marshal(header)

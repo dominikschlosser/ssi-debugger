@@ -103,6 +103,11 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 		return VPTokenResult{}, fmt.Errorf("creating DeviceAuth: %w", err)
 	}
 
+	deviceNamespacesBytes, err := emptyDeviceNamespacesBytes()
+	if err != nil {
+		return VPTokenResult{}, fmt.Errorf("encoding DeviceNameSpaces: %w", err)
+	}
+
 	// Build Document structure
 	document := map[string]any{
 		"docType": docType,
@@ -111,7 +116,7 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 			"issuerAuth": issuerSigned["issuerAuth"],
 		},
 		"deviceSigned": map[string]any{
-			"nameSpaces": map[string]any{},
+			"nameSpaces": cbor.RawMessage(deviceNamespacesBytes),
 			"deviceAuth": map[string]any{
 				"deviceSignature": cbor.RawMessage(deviceAuthBytes),
 			},
@@ -206,8 +211,16 @@ func buildSessionTranscriptOID4VP(clientID, nonce string, jwkThumbprint []byte, 
 	return cbor.Marshal(sessionTranscript)
 }
 
+func emptyDeviceNamespacesBytes() ([]byte, error) {
+	encodedEmptyMap, err := cbor.Marshal(map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	return cbor.Marshal(cbor.Tag{Number: 24, Content: encodedEmptyMap})
+}
+
 // createDeviceAuth creates a COSE_Sign1 DeviceAuth with proper DeviceAuthentication payload.
-// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpaces]
+// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpacesBytes]
 // The payload is Tag24(CBOR(DeviceAuthentication)).
 func (w *Wallet) createDeviceAuth(sessionTranscriptBytes []byte, docType string) ([]byte, error) {
 	signer, err := cose.NewSigner(cose.AlgorithmES256, w.HolderKey)
@@ -218,12 +231,17 @@ func (w *Wallet) createDeviceAuth(sessionTranscriptBytes []byte, docType string)
 	// Decode sessionTranscriptBytes back to structured CBOR value
 	var sessionTranscript cbor.RawMessage = sessionTranscriptBytes
 
-	// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, {}]
+	deviceNamespacesBytes, err := emptyDeviceNamespacesBytes()
+	if err != nil {
+		return nil, fmt.Errorf("encoding DeviceNameSpaces: %w", err)
+	}
+
+	// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpacesBytes]
 	deviceAuth := []any{
 		"DeviceAuthentication",
 		sessionTranscript,
 		docType,
-		map[string]any{}, // empty DeviceNameSpaces
+		cbor.RawMessage(deviceNamespacesBytes),
 	}
 
 	deviceAuthBytes, err := cbor.Marshal(deviceAuth)
@@ -237,13 +255,24 @@ func (w *Wallet) createDeviceAuth(sessionTranscriptBytes []byte, docType string)
 		return nil, fmt.Errorf("encoding Tag24(DeviceAuthentication): %w", err)
 	}
 
-	msg := cose.NewSign1Message()
+	msg := cose.UntaggedSign1Message{
+		Headers: cose.Headers{
+			Protected:   cose.ProtectedHeader{},
+			Unprotected: cose.UnprotectedHeader{},
+		},
+		Payload: tag24Payload,
+	}
 	msg.Headers.Protected.SetAlgorithm(cose.AlgorithmES256)
-	msg.Payload = tag24Payload
 
 	if err := msg.Sign(rand.Reader, nil, signer); err != nil {
 		return nil, fmt.Errorf("COSE signing: %w", err)
 	}
+	msg.Payload = nil
 
-	return msg.MarshalCBOR()
+	sign1Bytes, err := msg.MarshalCBOR()
+	if err != nil {
+		return nil, fmt.Errorf("encoding COSE_Sign1: %w", err)
+	}
+
+	return sign1Bytes, nil
 }

@@ -168,13 +168,16 @@ func (w *Wallet) encryptDirectPostJWTPayload(payload map[string]any, mdocNonce s
 	// OID4VP 1.0: encrypted_response_enc_values_supported (array)
 	enc := detectEncAlgorithm(params.RequestObject, params.ClientMetadata, "A128GCM")
 
-	// For ISO mode with mdoc_generated_nonce, set apu
-	var apu []byte
+	// For ISO mode with mdoc_generated_nonce, set apu and apv per ISO 18013-7 Annex B.
+	var apu, apv []byte
 	if mdocNonce != "" {
 		apu = []byte(mdocNonce)
+		if params.Nonce != "" {
+			apv = []byte(params.Nonce)
+		}
 	}
 
-	return EncryptJWE(payloadJSON, keyInfo.Key, keyInfo.Kid, keyInfo.Alg, enc, apu)
+	return EncryptJWE(payloadJSON, keyInfo.Key, keyInfo.Kid, keyInfo.Alg, enc, apu, apv)
 }
 
 // EncryptResponse encrypts vp_token, optional id_token, and state as a JWE for direct_post.jwt response mode.

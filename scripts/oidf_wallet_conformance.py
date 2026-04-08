@@ -12,11 +12,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 
 MODULE_ID_RE = re.compile(r"Created test module, new id:\s*([A-Za-z0-9]+)")
 IMPLICIT_SUBMIT_RE = re.compile(r"xhr\.open\('POST',\s*([\"'])(.+?)\1", re.DOTALL)
+JSON_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z0-9._-]+\.json)\}")
 TERMINAL_STATES = {"FINISHED", "INTERRUPTED"}
 POLL_INTERVAL = 1.0
 REQUEST_TIMEOUT = 20
@@ -26,6 +28,21 @@ SCREENSHOT_DATA_URL = (
 )
 
 
+@dataclass(frozen=True)
+class PlanScenario:
+    slug: str
+    template_relpath: str
+    plan_name: str
+    variant: dict[str, str]
+    credential_kind: str
+
+
+@dataclass(frozen=True)
+class WalletSubmissionResult:
+    completed: bool
+    retryable: bool
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the official OIDF wallet runner against the local strict wallet")
     parser.add_argument("--suite-dir", required=True, help="Path to the extracted official OIDF conformance suite")
@@ -33,9 +50,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--results-dir", required=True, help="Directory for exported official runner results")
     parser.add_argument("--runner-log", required=True, help="Path for mirrored official runner stdout")
     parser.add_argument(
-        "--include-alpha-unsigned",
+        "--include-unsigned",
         action="store_true",
-        help="Also run the unsigned redirect_uri alpha scenario, which currently fails against strict mode because the upstream alpha plan omits the required typ header",
+        help="Also run the current unsigned request_uri scenarios that use redirect_uri client_id prefixes",
+    )
+    parser.add_argument(
+        "--include-mdoc",
+        action="store_true",
+        help="Also run the current ISO mDoc direct_post.jwt scenario",
     )
     return parser.parse_args()
 
@@ -66,13 +88,161 @@ def wallet_request(wallet_url: str, method: str, path: str, payload: dict | None
         return json.loads(resp.read().decode("utf-8"))
 
 
-def create_config(suite_dir: Path, results_dir: Path) -> Path:
-    source = suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql.json"
-    with source.open() as f:
-        config = json.load(f)
+def should_retry_wallet_submission(status_code: int, body: str) -> bool:
+    if status_code not in {400, 502, 503, 504}:
+        return False
+    lowered = body.lower()
+    return "fetching request_uri" in lowered or "request_uri" in lowered
 
-    config["description"] = "oid4vc-dev strict wallet"
-    config["client"]["dcql"] = {
+
+def detect_suite_layout(suite_dir: Path) -> str:
+    current = suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql-sdjwt.json"
+    legacy = suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql.json"
+    if current.exists():
+        return "id3"
+    if legacy.exists():
+        return "legacy"
+    raise FileNotFoundError("could not detect a supported OIDF wallet test config layout in the extracted suite")
+
+
+def current_suite_scenarios(include_unsigned: bool, include_mdoc: bool) -> list[PlanScenario]:
+    scenarios = [
+        PlanScenario(
+            slug="sdjwt-signed-direct_post",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+            plan_name="oid4vp-id3-wallet-test-plan",
+            variant={
+                "credential_format": "sd_jwt_vc",
+                "client_id_scheme": "x509_san_dns",
+                "request_method": "request_uri_signed",
+                "response_mode": "direct_post",
+                "query_language": "dcql",
+            },
+            credential_kind="sdjwt",
+        ),
+        PlanScenario(
+            slug="sdjwt-signed-direct_post-jwt",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+            plan_name="oid4vp-id3-wallet-test-plan",
+            variant={
+                "credential_format": "sd_jwt_vc",
+                "client_id_scheme": "x509_san_dns",
+                "request_method": "request_uri_signed",
+                "response_mode": "direct_post.jwt",
+                "query_language": "dcql",
+            },
+            credential_kind="sdjwt",
+        ),
+    ]
+    if include_unsigned:
+        scenarios.extend(
+            [
+                PlanScenario(
+                    slug="sdjwt-unsigned-direct_post",
+                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+                    plan_name="oid4vp-id3-wallet-test-plan",
+                    variant={
+                        "credential_format": "sd_jwt_vc",
+                        "client_id_scheme": "redirect_uri",
+                        "request_method": "request_uri_unsigned",
+                        "response_mode": "direct_post",
+                        "query_language": "dcql",
+                    },
+                    credential_kind="sdjwt",
+                ),
+                PlanScenario(
+                    slug="sdjwt-unsigned-direct_post-jwt",
+                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+                    plan_name="oid4vp-id3-wallet-test-plan",
+                    variant={
+                        "credential_format": "sd_jwt_vc",
+                        "client_id_scheme": "redirect_uri",
+                        "request_method": "request_uri_unsigned",
+                        "response_mode": "direct_post.jwt",
+                        "query_language": "dcql",
+                    },
+                    credential_kind="sdjwt",
+                ),
+            ]
+        )
+    if include_mdoc:
+        scenarios.append(
+            PlanScenario(
+                slug="mdoc-signed-direct_post-jwt",
+                template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-mdoc.json",
+                plan_name="oid4vp-id3-wallet-test-plan",
+                variant={
+                    "credential_format": "iso_mdl",
+                    "client_id_scheme": "x509_san_dns",
+                    "request_method": "request_uri_signed",
+                    "response_mode": "direct_post.jwt",
+                    "query_language": "dcql",
+                },
+                credential_kind="mdoc",
+            )
+        )
+    return scenarios
+
+
+def legacy_suite_scenarios(include_unsigned: bool) -> list[PlanScenario]:
+    scenarios = [
+        PlanScenario(
+            slug="sdjwt-signed-direct_post",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql.json",
+            plan_name="oid4vp-1final-wallet-test-plan",
+            variant={
+                "credential_format": "sd_jwt_vc",
+                "client_id_prefix": "x509_hash",
+                "request_method": "request_uri_signed",
+                "vp_profile": "plain_vp",
+                "response_mode": "direct_post",
+            },
+            credential_kind="sdjwt",
+        )
+    ]
+    if include_unsigned:
+        scenarios.append(
+            PlanScenario(
+                slug="sdjwt-unsigned-direct_post",
+                template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql.json",
+                plan_name="oid4vp-1final-wallet-test-plan",
+                variant={
+                    "credential_format": "sd_jwt_vc",
+                    "client_id_prefix": "redirect_uri",
+                    "request_method": "request_uri_unsigned",
+                    "vp_profile": "plain_vp",
+                    "response_mode": "direct_post",
+                },
+                credential_kind="sdjwt",
+            )
+        )
+    return scenarios
+
+
+def suite_scenarios(layout: str, include_unsigned: bool, include_mdoc: bool) -> list[PlanScenario]:
+    if layout == "id3":
+        return current_suite_scenarios(include_unsigned, include_mdoc)
+    return legacy_suite_scenarios(include_unsigned)
+
+
+def build_dcql_query(credential_kind: str) -> dict:
+    if credential_kind == "mdoc":
+        return {
+            "credentials": [
+                {
+                    "id": "pid",
+                    "format": "mso_mdoc",
+                    "meta": {
+                        "doctype_value": "eu.europa.ec.eudi.pid.1",
+                    },
+                    "claims": [
+                        {"path": ["eu.europa.ec.eudi.pid.1", "given_name"]},
+                        {"path": ["eu.europa.ec.eudi.pid.1", "family_name"]},
+                    ],
+                }
+            ]
+        }
+    return {
         "credentials": [
             {
                 "id": "pid",
@@ -88,46 +258,45 @@ def create_config(suite_dir: Path, results_dir: Path) -> Path:
         ]
     }
 
-    output = results_dir / "vp-wallet-test-config-oid4vc-dev.json"
+
+def load_config_template(source: Path) -> dict:
+    raw = source.read_text()
+
+    def replace_placeholder(match: re.Match[str]) -> str:
+        name = match.group(1)
+        candidate = source.parents[1] / "certs-keys" / name
+        if not candidate.exists():
+            raise FileNotFoundError(f"template placeholder {name} does not exist at {candidate}")
+        return candidate.read_text().strip()
+
+    expanded = JSON_PLACEHOLDER_RE.sub(replace_placeholder, raw)
+    return json.loads(expanded)
+
+
+def create_config(suite_dir: Path, results_dir: Path, scenario: PlanScenario) -> Path:
+    source = suite_dir / scenario.template_relpath
+    config = load_config_template(source)
+
+    config["description"] = f"oid4vc-dev strict wallet ({scenario.slug})"
+    config.setdefault("client", {})
+    config["client"]["dcql"] = build_dcql_query(scenario.credential_kind)
+
+    output = results_dir / f"{scenario.slug}-config.json"
     with output.open("w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
     return output
 
 
-def official_runner_args(
-    runner_path: Path,
-    config_path: Path,
-    results_dir: Path,
-    include_alpha_unsigned: bool,
-) -> list[str]:
-    signed = (
-        "oid4vp-1final-wallet-test-plan"
-        "[credential_format=sd_jwt_vc]"
-        "[client_id_prefix=x509_hash]"
-        "[request_method=request_uri_signed]"
-        "[vp_profile=plain_vp]"
-        "[response_mode=direct_post]"
-    )
-    args = [
-        sys.executable,
-        str(runner_path),
-        "--export-dir",
-        str(results_dir),
-        "--no-parallel",
-        signed,
-        str(config_path),
-    ]
-    if include_alpha_unsigned:
-        redirect = (
-            "oid4vp-1final-wallet-test-plan"
-            "[credential_format=sd_jwt_vc]"
-            "[client_id_prefix=redirect_uri]"
-            "[request_method=request_uri_unsigned]"
-            "[vp_profile=plain_vp]"
-            "[response_mode=direct_post]"
-        )
-        args.extend([redirect, str(config_path)])
+def scenario_plan_arg(scenario: PlanScenario) -> str:
+    variant_suffix = "".join(f"[{key}={value}]" for key, value in scenario.variant.items())
+    return f"{scenario.plan_name}{variant_suffix}"
+
+
+def official_runner_args(runner_path: Path, results_dir: Path, config_jobs: list[tuple[PlanScenario, Path]]) -> list[str]:
+    args = [sys.executable, str(runner_path), "--export-dir", str(results_dir), "--no-parallel"]
+    for scenario, config_path in config_jobs:
+        args.extend([scenario_plan_arg(scenario), str(config_path)])
     return args
 
 
@@ -176,13 +345,30 @@ def follow_redirect(redirect_uri: str) -> None:
         pass
 
 
-def submit_wallet_request(wallet_url: str, request_url: str) -> None:
-    try:
-        result = wallet_request(wallet_url, "POST", "/api/presentations", {"uri": request_url})
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        print(f"[monitor] wallet rejected request {request_url}: HTTP {exc.code} {body}", flush=True)
-        return
+def submit_wallet_request(wallet_url: str, request_url: str) -> WalletSubmissionResult:
+    for attempt in range(1, 6):
+        try:
+            result = wallet_request(wallet_url, "POST", "/api/presentations", {"uri": request_url})
+            break
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if should_retry_wallet_submission(exc.code, body):
+                if attempt < 5:
+                    print(
+                        f"[monitor] wallet request not ready yet for {request_url}: "
+                        f"HTTP {exc.code}, retrying ({attempt}/5)",
+                        flush=True,
+                    )
+                    time.sleep(0.4 * attempt)
+                    continue
+                print(
+                    f"[monitor] wallet request still not ready for {request_url}: "
+                    f"HTTP {exc.code}, deferring to next poll",
+                    flush=True,
+                )
+                return WalletSubmissionResult(completed=False, retryable=True)
+            print(f"[monitor] wallet rejected request {request_url}: HTTP {exc.code} {body}", flush=True)
+            return WalletSubmissionResult(completed=True, retryable=False)
 
     response = result.get("response", {})
     redirect_uri = response.get("redirect_uri")
@@ -193,6 +379,7 @@ def submit_wallet_request(wallet_url: str, request_url: str) -> None:
             print(f"[monitor] followed verifier redirect_uri: {redirect_uri}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[monitor] failed to follow redirect_uri {redirect_uri}: {exc}", flush=True)
+    return WalletSubmissionResult(completed=True, retryable=False)
 
 
 def handle_module(base_url: str, token: str, wallet_url: str, module_id: str, state: dict) -> None:
@@ -202,8 +389,9 @@ def handle_module(base_url: str, token: str, wallet_url: str, module_id: str, st
     for entry in logs:
         redirect_to = entry.get("redirect_to")
         if redirect_to and redirect_to not in state["submitted_urls"]:
-            state["submitted_urls"].add(redirect_to)
-            submit_wallet_request(wallet_url, redirect_to)
+            submission = submit_wallet_request(wallet_url, redirect_to)
+            if submission.completed:
+                state["submitted_urls"].add(redirect_to)
 
         placeholder = entry.get("upload")
         if placeholder and placeholder not in state["uploaded_placeholders"]:
@@ -226,9 +414,14 @@ def main() -> int:
     token = os.environ["CONFORMANCE_TOKEN"]
 
     results_dir.mkdir(parents=True, exist_ok=True)
-    config_path = create_config(suite_dir, results_dir)
+    layout = detect_suite_layout(suite_dir)
+    scenarios = suite_scenarios(layout, args.include_unsigned, args.include_mdoc)
+    config_jobs = [(scenario, create_config(suite_dir, results_dir, scenario)) for scenario in scenarios]
+    print(f"[runner] detected OIDF suite layout: {layout}", flush=True)
+    for scenario, config_path in config_jobs:
+        print(f"[runner] scheduled {scenario_plan_arg(scenario)} using {config_path.name}", flush=True)
 
-    cmd = official_runner_args(runner_path, config_path, results_dir, args.include_alpha_unsigned)
+    cmd = official_runner_args(runner_path, results_dir, config_jobs)
     proc = subprocess.Popen(
         cmd,
         cwd=suite_dir / "scripts",

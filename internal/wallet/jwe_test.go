@@ -32,7 +32,7 @@ func TestEncryptJWE_CompactFormat(t *testing.T) {
 	}
 
 	payload := []byte(`{"vp_token":"test","state":"abc123"}`)
-	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil)
+	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestEncryptJWE_WithAPU(t *testing.T) {
 	}
 
 	apu := []byte("mdoc-nonce-value")
-	jwe, _, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid2", "ECDH-ES", "A256GCM", apu)
+	jwe, _, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid2", "ECDH-ES", "A256GCM", apu, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +106,37 @@ func TestEncryptJWE_WithAPU(t *testing.T) {
 	}
 }
 
+func TestEncryptJWE_WithAPV(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apv := []byte("auth-request-nonce")
+	jwe, _, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid3", "ECDH-ES", "A256GCM", nil, apv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parts := strings.Split(jwe, ".")
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+
+	apvVal, ok := header["apv"].(string)
+	if !ok {
+		t.Fatal("expected apv in header")
+	}
+	decoded, err := format.DecodeBase64URL(apvVal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != "auth-request-nonce" {
+		t.Errorf("expected apv=auth-request-nonce, got %s", decoded)
+	}
+}
+
 func TestEncryptJWE_A256GCM(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -113,7 +144,7 @@ func TestEncryptJWE_A256GCM(t *testing.T) {
 	}
 
 	payload := []byte(`{"test":"value"}`)
-	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "kid3", "ECDH-ES", "A256GCM", nil)
+	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "kid3", "ECDH-ES", "A256GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +170,7 @@ func TestEncryptJWE_A128CBC_HS256(t *testing.T) {
 	}
 
 	payload := []byte(`{"vp_token":"test","state":"abc123"}`)
-	jwe, cek, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "ECDH-ES", "A128CBC-HS256", nil)
+	jwe, cek, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "ECDH-ES", "A128CBC-HS256", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +212,7 @@ func TestEncryptJWE_UnsupportedEnc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err = EncryptJWE([]byte(`{}`), &key.PublicKey, "kid", "ECDH-ES", "A192GCM", nil)
+	_, _, err = EncryptJWE([]byte(`{}`), &key.PublicKey, "kid", "ECDH-ES", "A192GCM", nil, nil)
 	if err == nil {
 		t.Error("expected error for unsupported enc algorithm")
 	}
@@ -331,7 +362,7 @@ func TestEncryptJWE_ReturnsCEK(t *testing.T) {
 	payload := []byte(`{"test":"value"}`)
 
 	// A128GCM → 16-byte key
-	_, cek128, err := EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
+	_, cek128, err := EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +371,7 @@ func TestEncryptJWE_ReturnsCEK(t *testing.T) {
 	}
 
 	// A256GCM → 32-byte key
-	_, cek256, err := EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A256GCM", nil)
+	_, cek256, err := EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A256GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -235,14 +235,21 @@ func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
 func parseIssuerAuth(raw any) (*IssuerAuth, error) {
 	// COSE_Sign1 = [protected, unprotected, payload, signature]
 	// coseBytes: the untagged array for internal parsing
-	// rawCOSE: the tagged bytes (Tag 18) for go-cose verification
+	// rawCOSE: the Tag-18 wrapped bytes for go-cose verification
 	var coseBytes []byte
 	var rawCOSE []byte
 
 	switch v := raw.(type) {
 	case []byte:
-		coseBytes = v
-		rawCOSE = v
+		untagged, err := format.StripCBORTag(v, 18)
+		if err != nil {
+			return nil, err
+		}
+		coseBytes = untagged
+		rawCOSE, err = cbor.Marshal(cbor.Tag{Number: 18, Content: cbor.RawMessage(untagged)})
+		if err != nil {
+			return nil, err
+		}
 	case cbor.Tag:
 		// Preserve the full tagged encoding for go-cose
 		tagged, err := cbor.Marshal(v)

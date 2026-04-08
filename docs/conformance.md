@@ -1,58 +1,56 @@
 # OIDF Conformance
 
-This repository can run the official OpenID Foundation wallet runner in **strict** mode against the OID4VP early-version wallet plan, with the local wallet acting as the wallet under test.
+This repository can run the official OpenID Foundation wallet runner against the current wallet-focused OID4VP suite, with the local wallet acting as the wallet under test.
 
-## What the script does
+As of April 8, 2026, the latest upstream suite on `master` uses the ID3 wallet plan:
 
-`scripts/oidf-wallet-conformance.sh` now:
+- `oid4vp-id3-wallet-test-plan`
+
+The wrapper still auto-detects the older legacy layout, but the current live suite is ID3.
+
+## What the wrapper does
+
+[`scripts/oidf-wallet-conformance.sh`](/Users/dominik/projects/oid4vc-dev/scripts/oidf-wallet-conformance.sh):
 
 - loads `OIDF_TOKEN` from the local `.env` file or `CONFORMANCE_TOKEN` from the environment
-- downloads the latest official OIDF conformance suite
-- creates a Python virtualenv with the runner dependencies
-- starts `oid4vc-dev wallet serve --mode strict --auto-accept --pid`
-- derives a local DCQL config from the official `vp-wallet-test-config-dcql.json`
+- downloads the latest upstream conformance suite tarball from GitHub
+- creates a Python virtualenv for the official runner
+- starts `oid4vc-dev wallet serve` in strict mode with ISO session transcripts enabled
+- derives per-scenario config files from the upstream ID3 templates
 - runs the official `run-test-plan.py` against `https://demo.certification.openid.net/`
 - monitors waiting modules and automatically:
   - submits the generated verifier request URL into the local wallet
   - follows returned verifier `redirect_uri` values
   - uploads a placeholder screenshot for negative tests that require one
 
-The script currently targets the official wallet plan:
+[`scripts/oidf_wallet_conformance.py`](/Users/dominik/projects/oid4vc-dev/scripts/oidf_wallet_conformance.py):
 
-- `oid4vp-1final-wallet-test-plan`
-- display name: `OpenID for Verifiable Presentations 1.0 Final: Test a wallet - alpha tests (not currently part of certification program)`
+- detects the upstream suite layout automatically
+- expands the current upstream placeholder JSON references from `scripts/certs-keys/*.json`
+- customizes the DCQL queries to the local mock credentials:
+  - SD-JWT VCT `urn:eudi:pid:de:1`
+  - mDoc doctype `eu.europa.ec.eudi.pid.1`
+- retries transient `request_uri` readiness failures before treating a module as failed
 
-## Default scenario
+## Default matrix
 
-By default the wrapper runs only the stable strict-mode scenario:
+By default the wrapper now runs all current passing scenarios:
 
-- signed `request_uri` with `x509_hash` client IDs
+- signed SD-JWT `direct_post`
+- signed SD-JWT `direct_post.jwt`
+- unsigned SD-JWT `direct_post`
+- unsigned SD-JWT `direct_post.jwt`
+- signed mDoc `direct_post.jwt`
 
-This run covers:
+These map to the current ID3 variants:
 
-- `happy-flow-no-state`
-- `happy-flow-with-state-and-redirect`
-- `invalid-request-object-signature`
+- `credential_format=sd_jwt_vc`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post`
+- `credential_format=sd_jwt_vc`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post.jwt`
+- `credential_format=sd_jwt_vc`, `client_id_scheme=redirect_uri`, `request_method=request_uri_unsigned`, `response_mode=direct_post`
+- `credential_format=sd_jwt_vc`, `client_id_scheme=redirect_uri`, `request_method=request_uri_unsigned`, `response_mode=direct_post.jwt`
+- `credential_format=iso_mdl`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post.jwt`
 
-The scenario uses:
-
-- `vp_profile=plain_vp`
-- `response_mode=direct_post`
-- `credential_format=sd_jwt_vc`
-
-## Optional alpha scenario
-
-You can opt into the current unsigned alpha path with:
-
-```bash
-OIDF_INCLUDE_ALPHA_UNSIGNED=1 scripts/oidf-wallet-conformance.sh
-```
-
-That adds:
-
-- unsigned `request_uri` with `redirect_uri` client IDs
-
-This is kept behind an explicit flag because the current OIDF alpha suite omits the required `typ: oauth-authz-req+jwt` header for that path, so a spec-strict wallet rejects it.
+The negative modules in these plans finish as `REVIEW`, which is expected for the current suite. The wrapper treats unexpected condition failures as actual failures.
 
 ## Prerequisites
 
@@ -78,10 +76,12 @@ scripts/oidf-wallet-conformance.sh
 
 Useful environment overrides:
 
-- `PORT`: wallet port, default `8085`
+- `PORT`: wallet port; defaults to a free local port discovered by the wrapper
 - `OIDF_RUN_DIR`: keep all runner artifacts in a chosen directory instead of a temp dir
 - `OIDF_WALLET_DIR`: reuse a specific wallet store
-- `OIDF_INCLUDE_ALPHA_UNSIGNED=1`: also run the current unsigned alpha scenario
+- `OIDF_INCLUDE_UNSIGNED=0`: skip the unsigned `redirect_uri` client ID scenarios
+- `OIDF_INCLUDE_MDOC=0`: skip the mDoc scenario
+- `OIDF_SUITE_URL`: override the suite tarball URL; defaults to the upstream `master` archive
 - `CONFORMANCE_SERVER`: override the OIDF base URL; defaults to `https://demo.certification.openid.net/`
 
 The script prints the run directory and leaves behind:
@@ -90,7 +90,27 @@ The script prints the run directory and leaves behind:
 - mirrored official runner log
 - exported OIDF result archives
 
-## Current scope
+## Verifier Note
+
+The wallet’s mDoc `deviceSignature` is now emitted as a detached COSE_Sign1, which matches the current upstream suite and Multipaz parser behavior.
+
+If your verifier already reconstructs `DeviceAuthentication` from the document and verifies the detached signature, nothing changes. If it was relying on the wallet’s previous nonstandard inline-payload `deviceSignature`, update it.
+
+## Current status
+
+Verified live on April 8, 2026 against the upstream suite on `master`:
+
+- all five default scenarios ran to completion
+- all happy-path modules passed
+- no unexpected condition failures remained
+
+Latest clean run artifacts from this workspace:
+
+- run directory: `/tmp/oidf-live-full-clean.BeEP12`
+- wallet log: `/tmp/oidf-live-full-clean.BeEP12/wallet.log`
+- runner log: `/tmp/oidf-live-full-clean.BeEP12/runner.log`
+
+## Scope
 
 The strict-mode wallet is currently suitable for this OID4VP subset:
 
@@ -103,12 +123,11 @@ The strict-mode wallet is currently suitable for this OID4VP subset:
 
 ## Known gaps
 
-These are the remaining blockers for broad OID4VP wallet-suite coverage:
+Remaining gaps outside the currently passing wallet matrix:
 
 - no `dc_api` / `dc_api.jwt` response modes
 - no full verifier trust-anchor validation beyond the supplied `x5c`
-- HAIP support is an **OID4VP subset**, not full HAIP 1.0 issuance/profile coverage
-- the current OIDF **alpha** unsigned `request_uri` path omits the required `typ: oauth-authz-req+jwt` header, so a spec-strict wallet rejects that opt-in scenario until the suite is updated
+- HAIP support is an OID4VP subset, not full HAIP issuance/profile coverage
 
 ## References
 

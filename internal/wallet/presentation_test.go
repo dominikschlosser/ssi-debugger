@@ -149,6 +149,75 @@ func TestEncryptErrorResponse_DirectPostJWTPayloadIncludesStateAsTopLevelMember(
 	}
 }
 
+func TestEncryptResponse_MDocISOIncludesAPUAndAPV(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+				"encrypted_response_enc_values_supported": []any{"A128GCM"},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-auth-request-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptResponse(map[string]string{"pid": "token1"}, "", "state-123", "mdoc-generated-nonce", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	parts := strings.Split(jweStr, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected compact JWE with 5 parts, got %d", len(parts))
+	}
+
+	headerJSON, err := format.DecodeBase64URL(parts[0])
+	if err != nil {
+		t.Fatalf("decoding protected header: %v", err)
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatalf("parsing protected header: %v", err)
+	}
+
+	apuVal, ok := header["apu"].(string)
+	if !ok {
+		t.Fatal("expected apu in protected header")
+	}
+	decodedAPU, err := format.DecodeBase64URL(apuVal)
+	if err != nil {
+		t.Fatalf("decoding apu: %v", err)
+	}
+	if string(decodedAPU) != "mdoc-generated-nonce" {
+		t.Fatalf("expected apu=mdoc-generated-nonce, got %q", decodedAPU)
+	}
+
+	apvVal, ok := header["apv"].(string)
+	if !ok {
+		t.Fatal("expected apv in protected header")
+	}
+	decodedAPV, err := format.DecodeBase64URL(apvVal)
+	if err != nil {
+		t.Fatalf("decoding apv: %v", err)
+	}
+	if string(decodedAPV) != "test-auth-request-nonce" {
+		t.Fatalf("expected apv=test-auth-request-nonce, got %q", decodedAPV)
+	}
+}
+
 func TestCreateVPToken_SDJWT(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -408,6 +477,92 @@ func TestCreateVPToken_MDoc(t *testing.T) {
 	// Token should be base64url encoded
 	if strings.Contains(result.Token, " ") || strings.Contains(result.Token, "\n") {
 		t.Error("VP token should not contain whitespace")
+	}
+}
+
+func TestCreateVPToken_MDocUsesTaggedDeviceNamespaces(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	var mdocCred StoredCredential
+	for _, c := range w.GetCredentials() {
+		if c.Format == "mso_mdoc" {
+			mdocCred = c
+			break
+		}
+	}
+	if mdocCred.ID == "" {
+		t.Fatal("no mDoc credential found")
+	}
+
+	match := CredentialMatch{
+		QueryID:      "pid",
+		CredentialID: mdocCred.ID,
+		Format:       "mso_mdoc",
+		SelectedKeys: []string{"eu.europa.ec.eudi.pid.1:given_name", "eu.europa.ec.eudi.pid.1:family_name"},
+	}
+
+	result, err := w.CreateVPToken(match, PresentationParams{
+		Nonce:       "test-nonce",
+		ClientID:    "https://verifier.example",
+		ResponseURI: "https://verifier.example/response",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPToken error: %v", err)
+	}
+
+	deviceResponseBytes, err := format.DecodeBase64URL(result.Token)
+	if err != nil {
+		t.Fatalf("decode DeviceResponse: %v", err)
+	}
+
+	var deviceResponse map[any]any
+	if err := cbor.Unmarshal(deviceResponseBytes, &deviceResponse); err != nil {
+		t.Fatalf("parse DeviceResponse: %v", err)
+	}
+
+	documents, ok := deviceResponse["documents"].([]any)
+	if !ok || len(documents) != 1 {
+		t.Fatalf("expected 1 document, got %v", deviceResponse["documents"])
+	}
+	document, ok := documents[0].(map[any]any)
+	if !ok {
+		t.Fatalf("invalid document type %T", documents[0])
+	}
+	deviceSigned, ok := document["deviceSigned"].(map[any]any)
+	if !ok {
+		t.Fatalf("missing deviceSigned: %T", document["deviceSigned"])
+	}
+
+	nameSpacesTag, ok := deviceSigned["nameSpaces"].(cbor.Tag)
+	if !ok {
+		t.Fatalf("expected deviceSigned.nameSpaces Tag 24, got %T", deviceSigned["nameSpaces"])
+	}
+	if nameSpacesTag.Number != 24 {
+		t.Fatalf("expected deviceSigned.nameSpaces tag 24, got %d", nameSpacesTag.Number)
+	}
+
+	deviceAuth, ok := deviceSigned["deviceAuth"].(map[any]any)
+	if !ok {
+		t.Fatalf("missing deviceAuth: %T", deviceSigned["deviceAuth"])
+	}
+	var sign1 []cbor.RawMessage
+	sign1Content, err := cbor.Marshal(deviceAuth["deviceSignature"])
+	if err != nil {
+		t.Fatalf("re-encode deviceSignature: %v", err)
+	}
+	if err := cbor.Unmarshal(sign1Content, &sign1); err != nil {
+		t.Fatalf("parse deviceSignature COSE array: %v", err)
+	}
+	if len(sign1) != 4 {
+		t.Fatalf("expected deviceSignature COSE_Sign1 with 4 elements, got %d", len(sign1))
+	}
+
+	var detachedPayload any
+	if err := cbor.Unmarshal(sign1[2], &detachedPayload); err != nil {
+		t.Fatalf("decode deviceSignature payload slot: %v", err)
+	}
+	if detachedPayload != nil {
+		t.Fatalf("expected detached deviceSignature payload, got %T (%v)", detachedPayload, detachedPayload)
 	}
 }
 
@@ -1015,6 +1170,25 @@ func TestVPTokenMapResult_VPToken_Empty(t *testing.T) {
 	}
 }
 
+func TestVPTokenMapResult_SubmissionVPToken(t *testing.T) {
+	r := &VPTokenMapResult{
+		TokenMap: map[string]string{
+			"pid": "token1",
+			"mdl": "token2",
+		},
+	}
+	vp := r.SubmissionVPToken()
+	if len(vp) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(vp))
+	}
+	if vp["pid"] != "token1" {
+		t.Errorf("wrong pid token: %v", vp["pid"])
+	}
+	if vp["mdl"] != "token2" {
+		t.Errorf("wrong mdl token: %v", vp["mdl"])
+	}
+}
+
 func TestVPTokenMapResult_QueryIDs(t *testing.T) {
 	r := &VPTokenMapResult{
 		TokenMap: map[string]string{"pid": "t1", "mdl": "t2"},
@@ -1047,7 +1221,7 @@ func TestEncryptJWE_A128CBCHS256(t *testing.T) {
 	key, _ := mock.GenerateKey()
 	payload := []byte(`{"vp_token":"test","state":"s"}`)
 
-	jweStr, cek, err := EncryptJWE(payload, &key.PublicKey, "kid1", "ECDH-ES", "A128CBC-HS256", nil)
+	jweStr, cek, err := EncryptJWE(payload, &key.PublicKey, "kid1", "ECDH-ES", "A128CBC-HS256", nil, nil)
 	if err != nil {
 		t.Fatalf("EncryptJWE error: %v", err)
 	}

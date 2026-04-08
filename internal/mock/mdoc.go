@@ -25,6 +25,8 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // MDOCConfig holds options for generating a mock mDOC credential.
@@ -152,6 +154,11 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 		return "", fmt.Errorf("encoding MSO: %w", err)
 	}
 
+	taggedMSOBytes, err := cbor.Marshal(cbor.Tag{Number: 24, Content: msoBytes})
+	if err != nil {
+		return "", fmt.Errorf("encoding Tag-24 MSO: %w", err)
+	}
+
 	// Sign MSO with COSE_Sign1
 	signer, err := cose.NewSigner(cose.AlgorithmES256, cfg.Key)
 	if err != nil {
@@ -160,7 +167,7 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 
 	msg := cose.NewSign1Message()
 	msg.Headers.Protected.SetAlgorithm(cose.AlgorithmES256)
-	msg.Payload = msoBytes
+	msg.Payload = taggedMSOBytes
 
 	// Add x5chain (label 33) to unprotected header
 	if len(cfg.CertChain) > 0 {
@@ -184,6 +191,10 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 	issuerAuthBytes, err := msg.MarshalCBOR()
 	if err != nil {
 		return "", fmt.Errorf("encoding COSE_Sign1: %w", err)
+	}
+	issuerAuthBytes, err = format.StripCBORTag(issuerAuthBytes, 18)
+	if err != nil {
+		return "", fmt.Errorf("normalizing COSE_Sign1 tag: %w", err)
 	}
 
 	// Build IssuerSigned structure

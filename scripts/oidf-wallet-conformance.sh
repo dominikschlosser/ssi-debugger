@@ -2,13 +2,43 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-PORT=${PORT:-8085}
+pick_port_pair() {
+  python3 - <<'PY'
+import socket
+
+def port_free(port: int) -> bool:
+    with socket.socket() as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+for _ in range(128):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    if port < 1024 or port >= 65534:
+        continue
+    if port_free(port) and port_free(port + 1):
+        print(port)
+        raise SystemExit(0)
+
+raise SystemExit("failed to find a free local port pair")
+PY
+}
+
+PORT=${PORT:-$(pick_port_pair)}
 RUN_DIR=${OIDF_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/oidf-wallet-conformance.XXXXXX")}
 SUITE_URL=${OIDF_SUITE_URL:-https://github.com/openid-certification/conformance-suite/archive/refs/heads/master.tar.gz}
 WALLET_DIR=${OIDF_WALLET_DIR:-"$RUN_DIR/wallet"}
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
 CONFORMANCE_SERVER=${CONFORMANCE_SERVER:-https://demo.certification.openid.net/}
-OIDF_INCLUDE_ALPHA_UNSIGNED=${OIDF_INCLUDE_ALPHA_UNSIGNED:-0}
+CONFORMANCE_SERVER_LOCAL=${CONFORMANCE_SERVER_LOCAL:-$CONFORMANCE_SERVER}
+CONFORMANCE_SERVER_MTLS=${CONFORMANCE_SERVER_MTLS:-$CONFORMANCE_SERVER}
+OIDF_INCLUDE_UNSIGNED=${OIDF_INCLUDE_UNSIGNED:-1}
+OIDF_INCLUDE_MDOC=${OIDF_INCLUDE_MDOC:-1}
 
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -58,6 +88,7 @@ echo "Starting strict wallet on $WALLET_URL"
     --auto-accept \
     --pid \
     --preferred-format dc+sd-jwt \
+    --session-transcript iso \
     --wallet-dir "$WALLET_DIR" \
     --port "$PORT"
 ) >"$WALLET_LOG" 2>&1 &
@@ -66,6 +97,11 @@ WALLET_PID=$!
 attempt=0
 until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
+  if ! kill -0 "$WALLET_PID" 2>/dev/null; then
+    echo "error: wallet exited before becoming ready" >&2
+    cat "$WALLET_LOG" >&2
+    exit 1
+  fi
   if [ "$attempt" -ge 60 ]; then
     echo "error: wallet did not become ready" >&2
     exit 1
@@ -74,11 +110,16 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1; do
 done
 
 echo "Running official OIDF wallet plan via demo.certification.openid.net"
-if [ "$OIDF_INCLUDE_ALPHA_UNSIGNED" = "1" ]; then
-  EXTRA_ARGS="--include-alpha-unsigned"
+if [ "$OIDF_INCLUDE_UNSIGNED" = "1" ]; then
+  EXTRA_ARGS="$EXTRA_ARGS --include-unsigned"
+fi
+if [ "$OIDF_INCLUDE_MDOC" = "1" ]; then
+  EXTRA_ARGS="$EXTRA_ARGS --include-mdoc"
 fi
 
 CONFORMANCE_SERVER="$CONFORMANCE_SERVER" \
+CONFORMANCE_SERVER_LOCAL="$CONFORMANCE_SERVER_LOCAL" \
+CONFORMANCE_SERVER_MTLS="$CONFORMANCE_SERVER_MTLS" \
 CONFORMANCE_TOKEN="$CONFORMANCE_TOKEN" \
 "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/oidf_wallet_conformance.py" \
   --suite-dir "$SUITE_DIR" \

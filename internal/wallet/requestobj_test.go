@@ -315,7 +315,7 @@ func TestDecryptRequestObjectJWE(t *testing.T) {
 	})
 
 	// Encrypt the JWT using the wallet's public key (simulating verifier behavior)
-	jweStr, _, err := EncryptJWE([]byte(jwt), &walletKey.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil)
+	jweStr, _, err := EncryptJWE([]byte(jwt), &walletKey.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestMakeFetchRequestURI_POST_Encrypted(t *testing.T) {
 		})
 
 		// Encrypt the JWT with the wallet's public key
-		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "verifier-kid", "ECDH-ES", "A128GCM", nil)
+		jweStr, _, err := EncryptJWE([]byte(jwt), pubKey, "verifier-kid", "ECDH-ES", "A128GCM", nil, nil)
 		if err != nil {
 			t.Fatalf("encrypting request object: %v", err)
 		}

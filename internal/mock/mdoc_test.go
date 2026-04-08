@@ -15,8 +15,11 @@
 package mock
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 )
@@ -306,6 +309,57 @@ func TestGenerateMDOC_OutputIsBase64URL(t *testing.T) {
 		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
 			t.Fatalf("output is not base64url: found character %q", string(c))
 		}
+	}
+}
+
+func TestGenerateMDOC_IssuerAuthPayloadIsTag24MSO(t *testing.T) {
+	key, _ := GenerateKey()
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatalf("GenerateMDOC: %v", err)
+	}
+
+	data, err := base64.RawURLEncoding.DecodeString(result)
+	if err != nil {
+		t.Fatalf("decode credential: %v", err)
+	}
+
+	var issuerSigned map[any]any
+	if err := cbor.Unmarshal(data, &issuerSigned); err != nil {
+		t.Fatalf("decode IssuerSigned: %v", err)
+	}
+
+	var sign1 []cbor.RawMessage
+	issuerAuthBytes, err := cbor.Marshal(issuerSigned["issuerAuth"])
+	if err != nil {
+		t.Fatalf("re-encode issuerAuth: %v", err)
+	}
+	if err := cbor.Unmarshal(issuerAuthBytes, &sign1); err != nil {
+		t.Fatalf("decode issuerAuth COSE_Sign1: %v", err)
+	}
+	if len(sign1) != 4 {
+		t.Fatalf("expected COSE_Sign1 with 4 elements, got %d", len(sign1))
+	}
+
+	var payload []byte
+	if err := cbor.Unmarshal(sign1[2], &payload); err != nil {
+		t.Fatalf("decode issuerAuth payload bstr: %v", err)
+	}
+
+	var tagged cbor.Tag
+	if err := cbor.Unmarshal(payload, &tagged); err != nil {
+		t.Fatalf("decode issuerAuth payload as Tag 24: %v", err)
+	}
+	if tagged.Number != 24 {
+		t.Fatalf("expected issuerAuth payload tag 24, got %d", tagged.Number)
 	}
 }
 

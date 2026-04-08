@@ -304,8 +304,12 @@ func ValidateRequestObject(clientID string, reqObj *oid4vc.RequestObjectJWT) str
 		return "Request Object has no header"
 	}
 
+	alg := jsonutil.GetString(reqObj.Header, "alg")
 	typ := jsonutil.GetString(reqObj.Header, "typ")
 	if typ == "" {
+		if alg == "none" {
+			return ""
+		}
 		return "Request Object missing 'typ' header (OID4VP 1.0 requires typ: oauth-authz-req+jwt)"
 	}
 	if typ != "oauth-authz-req+jwt" {

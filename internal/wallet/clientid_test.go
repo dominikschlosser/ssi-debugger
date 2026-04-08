@@ -205,6 +205,12 @@ func TestValidateRequestObject(t *testing.T) {
 			wantMsg:  "missing 'typ'",
 		},
 		{
+			name:      "missing typ allowed for alg none",
+			clientID:  "redirect_uri:https://verifier.example/cb",
+			reqObj:    &oid4vc.RequestObjectJWT{Header: map[string]any{"alg": "none"}},
+			wantEmpty: true,
+		},
+		{
 			name:     "wrong typ",
 			clientID: "x509_san_dns:example.com",
 			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"typ": "JWT"}},

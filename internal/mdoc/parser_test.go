@@ -166,6 +166,29 @@ func TestParseIssuerAuth_BytesInput(t *testing.T) {
 	}
 }
 
+func TestParseIssuerAuth_UntaggedBytesInput(t *testing.T) {
+	coseArr := []any{
+		[]byte{0xa1, 0x01, 0x26},
+		map[any]any{},
+		[]byte("payload"),
+		make([]byte, 64),
+	}
+	data, err := cbor.Marshal(coseArr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ia, err := parseIssuerAuth(data)
+	if err != nil {
+		t.Fatalf("parseIssuerAuth(untagged []byte) error: %v", err)
+	}
+
+	var msg cose.Sign1Message
+	if err := msg.UnmarshalCBOR(ia.RawCOSE); err != nil {
+		t.Errorf("go-cose UnmarshalCBOR failed on RawCOSE from untagged []byte input: %v", err)
+	}
+}
+
 func TestParseIssuerSignedItem_RawCBORContainsTag24(t *testing.T) {
 	// Verify that after parsing, RawCBOR contains the full Tag-24 encoding
 	// (not just the inner bytes), since MSO ValueDigests hash the complete

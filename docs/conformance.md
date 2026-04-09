@@ -1,56 +1,64 @@
 # OIDF Conformance
 
-This repository can run the official OpenID Foundation wallet runner against the current wallet-focused OID4VP suite, with the local wallet acting as the wallet under test.
+This repository can run the current OpenID Foundation wallet plans for OID4VP 1.0 Final and OID4VCI 1.0 Final against the local wallet implementation.
 
-As of April 8, 2026, the latest upstream suite on `master` uses the ID3 wallet plan:
+The wrapper is intentionally Final-only by default:
 
-- `oid4vp-id3-wallet-test-plan`
+- `oid4vp-1final-wallet-test-plan`
+- `oid4vci-1_0-wallet-test-plan`
 
-The wrapper still auto-detects the older legacy layout, but the current live suite is ID3.
+It does not use the older ID3 wallet plan, and it does not add suite-specific behavior to the wallet. The runner adapts the OIDF config to the wallet's normal keys, CA, credentials, and HTTPS issuer metadata.
 
 ## What the wrapper does
 
 [`scripts/oidf-wallet-conformance.sh`](/Users/dominik/projects/oid4vc-dev/scripts/oidf-wallet-conformance.sh):
 
-- loads `OIDF_TOKEN` from the local `.env` file or `CONFORMANCE_TOKEN` from the environment
+- loads `OIDF_TOKEN` from `.env` or `CONFORMANCE_TOKEN` from the environment
 - downloads the latest upstream conformance suite tarball from GitHub
 - creates a Python virtualenv for the official runner
-- starts `oid4vc-dev wallet serve` in strict mode with ISO session transcripts enabled
-- derives per-scenario config files from the upstream ID3 templates
+- starts `oid4vc-dev wallet serve` in strict mode with default PID credentials
+- configures the wallet's normal OID4VCI authorization-code client settings
 - runs the official `run-test-plan.py` against `https://demo.certification.openid.net/`
-- monitors waiting modules and automatically:
-  - submits the generated verifier request URL into the local wallet
-  - follows returned verifier `redirect_uri` values
-  - uploads a placeholder screenshot for negative tests that require one
 
 [`scripts/oidf_wallet_conformance.py`](/Users/dominik/projects/oid4vc-dev/scripts/oidf_wallet_conformance.py):
 
-- detects the upstream suite layout automatically
-- expands the current upstream placeholder JSON references from `scripts/certs-keys/*.json`
-- customizes the DCQL queries to the local mock credentials:
-  - SD-JWT VCT `urn:eudi:pid:de:1`
-  - mDoc doctype `eu.europa.ec.eudi.pid.1`
-- retries transient `request_uri` readiness failures before treating a module as failed
+- verifies the extracted suite contains the current Final wallet plans and templates
+- reads the wallet's holder binding key from `/api/credentials`
+- reads the wallet's issuer signing JWK from `/.well-known/jwt-vc-issuer`
+- uses the shared wallet CA as the attestation and trust anchor PEM
+- generates per-scenario OIDF config files from the upstream templates
+- keeps the VCI suite alias aligned with the configured `redirect_uri` / helper-page paths
+- disables the suite's VCI browser helper page and drives the same offer URL directly through the wallet API
+- monitors waiting modules and automatically:
+  - submits presentation requests to `/api/presentations`
+  - submits credential offers to `/api/offers`
+  - follows returned verifier `redirect_uri` values
+  - uploads placeholder screenshots for negative-review modules
+- prints the created private OIDF `plan-detail.html?plan=...` URLs
 
 ## Default matrix
 
-By default the wrapper now runs all current passing scenarios:
+The default run covers the current Final scenarios this wallet is expected to pass:
 
-- signed SD-JWT `direct_post`
-- signed SD-JWT `direct_post.jwt`
-- unsigned SD-JWT `direct_post`
-- unsigned SD-JWT `direct_post.jwt`
-- signed mDoc `direct_post.jwt`
+- VP Final: SD-JWT `direct_post`, signed `request_uri`, `x509_hash`
+- VP Final: SD-JWT `direct_post.jwt`, signed `request_uri`, `x509_hash`
+- VP Final: SD-JWT `direct_post`, unsigned `request_uri`, `redirect_uri`
+- VP Final: mDoc `direct_post.jwt`, signed `request_uri`, `x509_hash`
+- VCI Final: SD-JWT authorization-code issuer-initiated flow with client attestation + DPoP
+- VCI Final: mDoc authorization-code issuer-initiated flow with client attestation + DPoP
 
-These map to the current ID3 variants:
+Those runs are fixed in the wrapper. There is no plan selector and no ID3 fallback.
 
-- `credential_format=sd_jwt_vc`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post`
-- `credential_format=sd_jwt_vc`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post.jwt`
-- `credential_format=sd_jwt_vc`, `client_id_scheme=redirect_uri`, `request_method=request_uri_unsigned`, `response_mode=direct_post`
-- `credential_format=sd_jwt_vc`, `client_id_scheme=redirect_uri`, `request_method=request_uri_unsigned`, `response_mode=direct_post.jwt`
-- `credential_format=iso_mdl`, `client_id_scheme=x509_san_dns`, `request_method=request_uri_signed`, `response_mode=direct_post.jwt`
+## Optional HAIP
 
-The negative modules in these plans finish as `REVIEW`, which is expected for the current suite. The wrapper treats unexpected condition failures as actual failures.
+Set `OIDF_INCLUDE_HAIP=1` to add the currently supported HAIP-oriented scenarios on top of the Final matrix.
+
+Today that means:
+
+- VP HAIP `direct_post.jwt` runs that stay on the current wallet-supported OID4VP path
+- one VCI HAIP key-attestation scenario on the current authorization-code + DPoP path
+
+This is not a full HAIP certification sweep. In particular, the wrapper does not currently try to drive the broader HAIP matrices that depend on wallet capabilities this repo does not yet implement end to end, such as DC API presentation flows or encrypted VCI credential responses.
 
 ## Prerequisites
 
@@ -59,8 +67,6 @@ Create a local `.env` file with your OIDF bearer token:
 ```bash
 OIDF_TOKEN=...
 ```
-
-`.env` is gitignored in this repository.
 
 You also need:
 
@@ -76,11 +82,15 @@ scripts/oidf-wallet-conformance.sh
 
 Useful environment overrides:
 
-- `PORT`: wallet port; defaults to a free local port discovered by the wrapper
+- `PORT`: wallet port; defaults to a free local port
 - `OIDF_RUN_DIR`: keep all runner artifacts in a chosen directory instead of a temp dir
 - `OIDF_WALLET_DIR`: reuse a specific wallet store
-- `OIDF_INCLUDE_UNSIGNED=0`: skip the unsigned `redirect_uri` client ID scenarios
-- `OIDF_INCLUDE_MDOC=0`: skip the mDoc scenario
+- `OIDF_WALLET_ISSUER_URL`: override the wallet HTTPS issuer URL if needed
+- `OIDF_WALLET_CA_CERT`: override the shared wallet CA PEM path
+- `OIDF_VCI_CLIENT_ID`: override the configured OID4VCI client ID
+- `OIDF_VCI_REDIRECT_URI`: override the configured OID4VCI redirect URI
+- `OIDF_VCI_ALIAS`: convenience alias used by the default `OIDF_VCI_REDIRECT_URI`
+- `OIDF_INCLUDE_HAIP=1`: add the currently supported HAIP scenarios
 - `OIDF_SUITE_URL`: override the suite tarball URL; defaults to the upstream `master` archive
 - `CONFORMANCE_SERVER`: override the OIDF base URL; defaults to `https://demo.certification.openid.net/`
 
@@ -89,45 +99,37 @@ The script prints the run directory and leaves behind:
 - wallet log
 - mirrored official runner log
 - exported OIDF result archives
+- generated OIDF config files
 
-## Verifier Note
+## OIDF Website Results
 
-The wallet’s mDoc `deviceSignature` is now emitted as a detached COSE_Sign1, which matches the current upstream suite and Multipaz parser behavior.
+The wrapper creates private plans on the OIDF service. It does not:
 
-If your verifier already reconstructs `DeviceAuthentication` from the document and verifies the detached signature, nothing changes. If it was relying on the wallet’s previous nonstandard inline-payload `deviceSignature`, update it.
+- delete plans
+- publish plans
+- create certification packages
 
-## Current status
+If you do not see runs on the public OIDF pages, that is expected. Use the printed `plan-detail.html?plan=...` URLs, and make sure you are signed into the same OIDF account that owns the bearer token.
 
-Verified live on April 8, 2026 against the upstream suite on `master`:
+## Design Rule
 
-- all five default scenarios ran to completion
-- all happy-path modules passed
-- no unexpected condition failures remained
+There is no conformance-only wallet mode in this flow.
 
-Latest clean run artifacts from this workspace:
+The wallet uses:
 
-- run directory: `/tmp/oidf-live-full-clean.BeEP12`
-- wallet log: `/tmp/oidf-live-full-clean.BeEP12/wallet.log`
-- runner log: `/tmp/oidf-live-full-clean.BeEP12/runner.log`
+- its normal holder key for DPoP and proof binding
+- its normal issuer signing key and certificate chain for client attestation and key attestation
+- its normal shared wallet CA as the trust anchor
 
-## Scope
-
-The strict-mode wallet is currently suitable for this OID4VP subset:
-
-- `openid4vp://`, `haip-vp://`, `eudi-openid4vp://`
-- `direct_post` and `direct_post.jwt`
-- signed and unsigned `request_uri`
-- `request_uri_method=post`
-- DCQL-based matching
-- SD-JWT and mDoc presentation
+That keeps the conformance run aligned with real wallet behavior instead of carrying suite-only signing paths.
 
 ## Known gaps
 
-Remaining gaps outside the currently passing wallet matrix:
+Current gaps outside the default Final matrix:
 
-- no `dc_api` / `dc_api.jwt` response modes
-- no full verifier trust-anchor validation beyond the supplied `x5c`
-- HAIP support is an OID4VP subset, not full HAIP issuance/profile coverage
+- no DC API presentation flow support
+- no end-to-end encrypted VCI credential response handling
+- no full HAIP certification sweep
 
 ## References
 

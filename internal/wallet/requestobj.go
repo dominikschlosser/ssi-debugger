@@ -174,11 +174,11 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 		return "", fmt.Errorf("request_uri response did not resolve to a compact JWT")
 	}
 
-	// Validate wallet_nonce in the response JWT
+	// wallet_nonce is optional in the returned request object. If the verifier
+	// echoes it back, it must match the value sent in the POST body.
+	// The returned request object itself may be either signed or unsecured,
+	// depending on the request_uri variant under test.
 	if header, payload, _, err := format.ParseJWTParts(result); err == nil {
-		if alg, _ := header["alg"].(string); alg == "" || alg == "none" {
-			return "", fmt.Errorf("request_uri response must contain a signed request object JWT")
-		}
 		if returnedNonce, ok := payload["wallet_nonce"].(string); ok {
 			if returnedNonce != walletNonce {
 				return "", fmt.Errorf("wallet_nonce mismatch in request object: expected %s, got %s", walletNonce, returnedNonce)
@@ -186,8 +186,11 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 			if logFn != nil {
 				logFn("  wallet_nonce validated in request object")
 			}
-		} else {
-			return "", fmt.Errorf("request object does not contain wallet_nonce")
+		} else if logFn != nil {
+			if alg, _ := header["alg"].(string); alg != "" {
+				logFn("  request object alg:      %s", alg)
+			}
+			logFn("  request object did not include wallet_nonce")
 		}
 	}
 

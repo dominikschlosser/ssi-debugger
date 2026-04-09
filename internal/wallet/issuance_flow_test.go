@@ -15,12 +15,14 @@
 package wallet
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,6 +165,219 @@ func generateTestCredential(t *testing.T, w *Wallet) string {
 	return cred
 }
 
+func decodeJWTPart(t *testing.T, token string, index int) map[string]any {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected compact JWT, got %q", token)
+	}
+	if index < 0 || index > 1 {
+		t.Fatalf("invalid JWT part index %d", index)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[index])
+	if err != nil {
+		t.Fatalf("decoding JWT part %d: %v", index, err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parsing JWT part %d JSON: %v", index, err)
+	}
+	return out
+}
+
+func TestCreateClientAttestationHeaders(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://wallet.example"
+
+	headers, err := createClientAttestationHeaders(w, "wallet-client", "https://issuer.example", "challenge-123")
+	if err != nil {
+		t.Fatalf("createClientAttestationHeaders: %v", err)
+	}
+
+	attestationJWT := headers["OAuth-Client-Attestation"]
+	popJWT := headers["OAuth-Client-Attestation-PoP"]
+	if attestationJWT == "" || popJWT == "" {
+		t.Fatalf("expected both attestation headers, got %v", headers)
+	}
+
+	attestationHeader := decodeJWTPart(t, attestationJWT, 0)
+	attestationPayload := decodeJWTPart(t, attestationJWT, 1)
+	if attestationHeader["typ"] != "oauth-client-attestation+jwt" {
+		t.Fatalf("expected oauth client attestation typ, got %v", attestationHeader["typ"])
+	}
+	if attestationPayload["iss"] != "https://wallet.example" {
+		t.Fatalf("expected attestation iss to use wallet issuer URL, got %v", attestationPayload["iss"])
+	}
+	if attestationPayload["sub"] != "wallet-client" {
+		t.Fatalf("expected attestation sub wallet-client, got %v", attestationPayload["sub"])
+	}
+	cnf, ok := attestationPayload["cnf"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cnf object, got %T", attestationPayload["cnf"])
+	}
+	jwk, ok := cnf["jwk"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cnf.jwk object, got %T", cnf["jwk"])
+	}
+	if jwk["kty"] != "EC" {
+		t.Fatalf("expected holder EC JWK, got %v", jwk["kty"])
+	}
+
+	popHeader := decodeJWTPart(t, popJWT, 0)
+	popPayload := decodeJWTPart(t, popJWT, 1)
+	if popHeader["typ"] != "oauth-client-attestation-pop+jwt" {
+		t.Fatalf("expected attestation pop typ, got %v", popHeader["typ"])
+	}
+	if popPayload["iss"] != "wallet-client" {
+		t.Fatalf("expected pop iss wallet-client, got %v", popPayload["iss"])
+	}
+	if popPayload["aud"] != "https://issuer.example" {
+		t.Fatalf("expected pop aud https://issuer.example, got %v", popPayload["aud"])
+	}
+	if popPayload["challenge"] != "challenge-123" {
+		t.Fatalf("expected pop challenge challenge-123, got %v", popPayload["challenge"])
+	}
+}
+
+func TestCreateClientAttestationHeaders_UniquePoPJTI(t *testing.T) {
+	w := generateTestWallet(t)
+	w.IssuerURL = "https://wallet.example"
+
+	first, err := createClientAttestationHeaders(w, "wallet-client", "https://issuer.example", "challenge-123")
+	if err != nil {
+		t.Fatalf("first createClientAttestationHeaders: %v", err)
+	}
+	second, err := createClientAttestationHeaders(w, "wallet-client", "https://issuer.example", "challenge-123")
+	if err != nil {
+		t.Fatalf("second createClientAttestationHeaders: %v", err)
+	}
+
+	firstPayload := decodeJWTPart(t, first["OAuth-Client-Attestation-PoP"], 1)
+	secondPayload := decodeJWTPart(t, second["OAuth-Client-Attestation-PoP"], 1)
+	if firstPayload["jti"] == secondPayload["jti"] {
+		t.Fatalf("expected distinct PoP jti values, got %v", firstPayload["jti"])
+	}
+}
+
+func TestFetchAttestationChallenge_AttestationChallengeField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST challenge request, got %s", r.Method)
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(map[string]any{
+			"attestation_challenge": "challenge-123",
+		})
+	}))
+	defer srv.Close()
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	challenge, err := fetchAttestationChallenge(map[string]any{"challenge_endpoint": srv.URL})
+	if err != nil {
+		t.Fatalf("fetchAttestationChallenge: %v", err)
+	}
+	if challenge != "challenge-123" {
+		t.Fatalf("expected challenge-123, got %q", challenge)
+	}
+}
+
+func TestDoDPoPRequest_RegeneratesExtraHeadersOnRetry(t *testing.T) {
+	w := generateTestWallet(t)
+
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		value := r.Header.Get("OAuth-Client-Attestation-PoP")
+		if value == "" {
+			t.Fatal("expected OAuth-Client-Attestation-PoP header")
+		}
+
+		mu.Lock()
+		seen = append(seen, value)
+		attempt := len(seen)
+		mu.Unlock()
+
+		if attempt == 1 {
+			rw.Header().Set("Content-Type", "application/json")
+			rw.Header().Set("DPoP-Nonce", "nonce-1")
+			rw.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(rw).Encode(map[string]any{"error": "use_dpop_nonce"})
+			return
+		}
+
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true})
+	}))
+	defer srv.Close()
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	nonce := ""
+	_, _, err := doDPoPRequest(http.MethodPost, srv.URL, "application/json", []byte(`{}`), "", "", w.HolderKey, &nonce, func() (map[string]string, error) {
+		return createClientAttestationHeaders(w, "wallet-client", srv.URL, "")
+	})
+	if err != nil {
+		t.Fatalf("doDPoPRequest: %v", err)
+	}
+	if nonce != "nonce-1" {
+		t.Fatalf("expected DPoP nonce to be updated, got %q", nonce)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(seen))
+	}
+	if seen[0] == seen[1] {
+		t.Fatal("expected retried request to use a fresh client attestation PoP JWT")
+	}
+}
+
+func TestCreateCredentialProofHeader_KeyAttestation(t *testing.T) {
+	w := generateTestWallet(t)
+	metadata := map[string]any{
+		"credential_configurations_supported": map[string]any{
+			"pid": map[string]any{
+				"proof_types_supported": map[string]any{
+					"jwt": map[string]any{
+						"key_attestations_required": []any{"jwt"},
+					},
+				},
+			},
+		},
+	}
+
+	header, err := createCredentialProofHeader(w, metadata, "pid", "nonce-123")
+	if err != nil {
+		t.Fatalf("createCredentialProofHeader: %v", err)
+	}
+	if header == nil {
+		t.Fatal("expected key attestation header")
+	}
+	keyAttestationJWT, ok := header["key_attestation"].(string)
+	if !ok || keyAttestationJWT == "" {
+		t.Fatalf("expected key_attestation JWT, got %v", header["key_attestation"])
+	}
+
+	keyAttestationHeader := decodeJWTPart(t, keyAttestationJWT, 0)
+	keyAttestationPayload := decodeJWTPart(t, keyAttestationJWT, 1)
+	if keyAttestationHeader["typ"] != "key-attestation+jwt" {
+		t.Fatalf("expected key attestation typ, got %v", keyAttestationHeader["typ"])
+	}
+	if keyAttestationPayload["nonce"] != "nonce-123" {
+		t.Fatalf("expected nonce nonce-123, got %v", keyAttestationPayload["nonce"])
+	}
+	attestedKeys, ok := keyAttestationPayload["attested_keys"].([]any)
+	if !ok || len(attestedKeys) != 1 {
+		t.Fatalf("expected one attested key, got %v", keyAttestationPayload["attested_keys"])
+	}
+}
+
 func TestProcessCredentialOffer_HappyPath(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -275,12 +490,48 @@ func TestProcessCredentialOffer_Draft14CredentialsArray(t *testing.T) {
 	}
 }
 
-func TestProcessCredentialOffer_AuthCodeOnlyRejected(t *testing.T) {
+func TestProcessCredentialOffer_AuthCodeRequiresClientConfiguration(t *testing.T) {
 	w := generateTestWallet(t)
 
-	// Build an offer with only authorization_code grant (no pre-authorized code)
+	var serverURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"credential_issuer":     serverURL,
+				"authorization_servers": []string{serverURL},
+				"credential_endpoint":   serverURL + "/credential",
+				"credential_configurations_supported": map[string]any{
+					"test-config": map[string]any{
+						"format": "dc+sd-jwt",
+						"scope":  "test-scope",
+					},
+				},
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"issuer":                                serverURL,
+				"authorization_endpoint":                serverURL + "/authorize",
+				"pushed_authorization_request_endpoint": serverURL + "/par",
+				"token_endpoint":                        serverURL + "/token",
+				"token_endpoint_auth_methods_supported": []string{"attest_jwt_client_auth"},
+				"dpop_signing_alg_values_supported":     []string{"ES256"},
+			})
+		default:
+			rw.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	serverURL = srv.URL
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
 	offer := map[string]any{
-		"credential_issuer":            "https://issuer.example",
+		"credential_issuer":            serverURL,
 		"credential_configuration_ids": []string{"test-config"},
 		"grants": map[string]any{
 			"authorization_code": map[string]any{
@@ -293,10 +544,10 @@ func TestProcessCredentialOffer_AuthCodeOnlyRejected(t *testing.T) {
 
 	_, err := w.ProcessCredentialOffer(offerURI)
 	if err == nil {
-		t.Fatal("expected error for authorization_code-only offer")
+		t.Fatal("expected error when authorization_code flow has no wallet client configuration")
 	}
-	if !strings.Contains(err.Error(), "authorization_code") {
-		t.Errorf("expected error about authorization_code, got: %v", err)
+	if !strings.Contains(err.Error(), "configured wallet client_id and redirect_uri") {
+		t.Errorf("expected error about missing client configuration, got: %v", err)
 	}
 }
 

@@ -45,6 +45,8 @@ func walletServeCmd() *cobra.Command {
 		preferredFormat         string
 		requireEncryptedRequest bool
 		haip                    bool
+		vciClientID             string
+		vciRedirectURI          string
 	)
 
 	cmd := &cobra.Command{
@@ -112,10 +114,16 @@ so the wallet automatically receives incoming protocol requests.`,
 			if haip {
 				w.RequireHAIP = true
 			}
+			if vciClientID != "" {
+				w.VCIClientID = vciClientID
+			}
+			if vciRedirectURI != "" {
+				w.VCIRedirectURI = vciRedirectURI
+			}
 
 			if cmd.Flags().Changed("base-url") {
 				w.BaseURL = baseURL
-			} else if (statusList || pid) && strings.TrimSpace(w.BaseURL) == "" {
+			} else if statusList && strings.TrimSpace(w.BaseURL) == "" {
 				if baseURL == "" {
 					if docker {
 						baseURL = fmt.Sprintf("http://host.docker.internal:%d", port)
@@ -274,5 +282,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().StringVar(&preferredFormat, "preferred-format", "", "Preferred credential format when multiple match: 'dc+sd-jwt', 'mso_mdoc', or 'jwt_vc_json'")
 	cmd.Flags().BoolVar(&requireEncryptedRequest, "require-encrypted-request", false, "Require verifiers to encrypt request objects (sends encryption key in wallet_metadata)")
 	cmd.Flags().BoolVar(&haip, "haip", false, "Enforce HAIP 1.0 compliance (x509_hash, direct_post.jwt, DCQL, JAR, ES256)")
+	cmd.Flags().StringVar(&vciClientID, "vci-client-id", "", "Client ID the wallet should use for OID4VCI authorization-code flows")
+	cmd.Flags().StringVar(&vciRedirectURI, "vci-redirect-uri", "", "Redirect URI the wallet should use for OID4VCI authorization-code flows")
 	return cmd
 }

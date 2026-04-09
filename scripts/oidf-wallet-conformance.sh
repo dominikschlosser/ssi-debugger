@@ -2,6 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
 pick_port_pair() {
   python3 - <<'PY'
 import socket
@@ -34,11 +35,14 @@ RUN_DIR=${OIDF_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/oidf-wallet-conformance.XXX
 SUITE_URL=${OIDF_SUITE_URL:-https://github.com/openid-certification/conformance-suite/archive/refs/heads/master.tar.gz}
 WALLET_DIR=${OIDF_WALLET_DIR:-"$RUN_DIR/wallet"}
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
+WALLET_ISSUER_URL=${OIDF_WALLET_ISSUER_URL:-"https://localhost:$((PORT + 1))"}
+WALLET_CA_CERT=${OIDF_WALLET_CA_CERT:-"$RUN_DIR/wallet-ca-cert.pem"}
 CONFORMANCE_SERVER=${CONFORMANCE_SERVER:-https://demo.certification.openid.net/}
 CONFORMANCE_SERVER_LOCAL=${CONFORMANCE_SERVER_LOCAL:-$CONFORMANCE_SERVER}
 CONFORMANCE_SERVER_MTLS=${CONFORMANCE_SERVER_MTLS:-$CONFORMANCE_SERVER}
-OIDF_INCLUDE_UNSIGNED=${OIDF_INCLUDE_UNSIGNED:-1}
-OIDF_INCLUDE_MDOC=${OIDF_INCLUDE_MDOC:-1}
+OIDF_INCLUDE_HAIP=${OIDF_INCLUDE_HAIP:-0}
+OIDF_VCI_CLIENT_ID=${OIDF_VCI_CLIENT_ID:-52480754053}
+OIDF_VCI_ALIAS=${OIDF_VCI_ALIAS:-"oid4vc-dev-vci-${PORT}"}
 
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -54,6 +58,8 @@ if [ -z "${CONFORMANCE_TOKEN:-}" ]; then
   echo "error: set OIDF_TOKEN in .env or export CONFORMANCE_TOKEN" >&2
   exit 1
 fi
+
+OIDF_VCI_REDIRECT_URI=${OIDF_VCI_REDIRECT_URI:-"${CONFORMANCE_SERVER_LOCAL%/}/test/a/${OIDF_VCI_ALIAS}/callback"}
 
 SUITE_DIR="$RUN_DIR/conformance-suite-master"
 VENV_DIR="$RUN_DIR/venv"
@@ -80,7 +86,7 @@ echo "Installing runner dependencies..."
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --quiet -r "$SUITE_DIR/scripts/requirements.txt"
 
-echo "Starting strict wallet on $WALLET_URL"
+echo "Starting wallet on $WALLET_URL"
 (
   cd "$ROOT_DIR"
   exec go run . wallet serve \
@@ -88,9 +94,10 @@ echo "Starting strict wallet on $WALLET_URL"
     --auto-accept \
     --pid \
     --preferred-format dc+sd-jwt \
-    --session-transcript iso \
     --wallet-dir "$WALLET_DIR" \
-    --port "$PORT"
+    --port "$PORT" \
+    --vci-client-id "$OIDF_VCI_CLIENT_ID" \
+    --vci-redirect-uri "$OIDF_VCI_REDIRECT_URI"
 ) >"$WALLET_LOG" 2>&1 &
 WALLET_PID=$!
 
@@ -109,14 +116,11 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1; do
   sleep 1
 done
 
-echo "Running official OIDF wallet plan via demo.certification.openid.net"
-if [ "$OIDF_INCLUDE_UNSIGNED" = "1" ]; then
-  EXTRA_ARGS="$EXTRA_ARGS --include-unsigned"
-fi
-if [ "$OIDF_INCLUDE_MDOC" = "1" ]; then
-  EXTRA_ARGS="$EXTRA_ARGS --include-mdoc"
+if [ "$OIDF_INCLUDE_HAIP" = "1" ]; then
+  EXTRA_ARGS="$EXTRA_ARGS --include-haip"
 fi
 
+echo "Running OIDF Final wallet plans via demo.certification.openid.net"
 CONFORMANCE_SERVER="$CONFORMANCE_SERVER" \
 CONFORMANCE_SERVER_LOCAL="$CONFORMANCE_SERVER_LOCAL" \
 CONFORMANCE_SERVER_MTLS="$CONFORMANCE_SERVER_MTLS" \
@@ -124,6 +128,10 @@ CONFORMANCE_TOKEN="$CONFORMANCE_TOKEN" \
 "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/oidf_wallet_conformance.py" \
   --suite-dir "$SUITE_DIR" \
   --wallet-url "$WALLET_URL" \
+  --wallet-issuer-url "$WALLET_ISSUER_URL" \
+  --wallet-ca-cert "$WALLET_CA_CERT" \
+  --vci-client-id "$OIDF_VCI_CLIENT_ID" \
+  --vci-redirect-uri "$OIDF_VCI_REDIRECT_URI" \
   --results-dir "$RESULTS_DIR" \
   --runner-log "$RUNNER_LOG" \
   $EXTRA_ARGS

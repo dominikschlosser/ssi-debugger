@@ -107,7 +107,7 @@ func TestSubmitDirectPost_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	result, err := SubmitDirectPost(ts.URL, "state123", map[string]string{"pid": "token1"}, "")
+	result, err := SubmitDirectPost(ts.URL, "state123", map[string][]string{"pid": {"token1"}}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestSubmitDirectPost_WithIDToken(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	result, err := SubmitDirectPost(ts.URL, "s1", map[string]string{"pid": "tok"}, "eyJ.test.token")
+	result, err := SubmitDirectPost(ts.URL, "s1", map[string][]string{"pid": {"tok"}}, "eyJ.test.token")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSubmitDirectPost_LocationHeader(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	result, err := SubmitDirectPost(ts.URL, "state1", map[string]string{"pid": "tok"}, "")
+	result, err := SubmitDirectPost(ts.URL, "state1", map[string][]string{"pid": {"tok"}}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestSubmitDirectPost_RejectsRelativeRedirectURI(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := SubmitDirectPost(ts.URL, "state123", map[string]string{"pid": "token1"}, "")
+	_, err := SubmitDirectPost(ts.URL, "state123", map[string][]string{"pid": {"token1"}}, "")
 	if err == nil {
 		t.Fatal("expected error for relative redirect_uri")
 	}
@@ -289,7 +289,7 @@ func TestSubmitDirectPost_RejectsRelativeRedirectURI(t *testing.T) {
 }
 
 func TestBuildFragmentRedirect_WithIDTokenAndVPToken(t *testing.T) {
-	got, err := BuildFragmentRedirect("https://verifier.example/callback", "s1", map[string]string{"pid": "tok1"}, "eyJ.id.token")
+	got, err := BuildFragmentRedirect("https://verifier.example/callback", "s1", map[string][]string{"pid": {"tok1"}}, "eyJ.id.token")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -238,16 +238,6 @@ func (r *VPTokenMapResult) VPToken() map[string][]string {
 	return vpToken
 }
 
-// SubmissionVPToken builds the wire-format vp_token JSON object used when
-// submitting responses to current verifier test suites.
-func (r *VPTokenMapResult) SubmissionVPToken() map[string]string {
-	vpToken := make(map[string]string, len(r.TokenMap))
-	for k, v := range r.TokenMap {
-		vpToken[k] = v
-	}
-	return vpToken
-}
-
 // QueryIDs returns the credential query IDs in the token map.
 func (r *VPTokenMapResult) QueryIDs() []string {
 	return mapKeys(r.TokenMap)
@@ -258,7 +248,7 @@ func (r *VPTokenMapResult) QueryIDs() []string {
 func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
 	var vpToken any
 	if vpResult != nil {
-		vpToken = vpResult.SubmissionVPToken()
+		vpToken = vpResult.VPToken()
 	}
 	var mdocNonce string
 	if vpResult != nil {

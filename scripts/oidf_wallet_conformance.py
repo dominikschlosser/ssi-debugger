@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import re
+import ssl
 import subprocess
 import sys
 import threading
@@ -17,6 +18,7 @@ from pathlib import Path
 
 
 MODULE_ID_RE = re.compile(r"Created test module, new id:\s*([A-Za-z0-9]+)")
+PLAN_URL_RE = re.compile(r"(https://[^\s]+plan-detail\.html\?plan=[A-Za-z0-9]+)")
 IMPLICIT_SUBMIT_RE = re.compile(r"xhr\.open\('POST',\s*([\"'])(.+?)\1", re.DOTALL)
 JSON_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z0-9._-]+\.json)\}")
 TERMINAL_STATES = {"FINISHED", "INTERRUPTED"}
@@ -31,10 +33,19 @@ SCREENSHOT_DATA_URL = (
 @dataclass(frozen=True)
 class PlanScenario:
     slug: str
+    kind: str
     template_relpath: str
     plan_name: str
     variant: dict[str, str]
     credential_kind: str
+    requires_haip: bool = False
+
+
+@dataclass(frozen=True)
+class WalletMaterials:
+    holder_jwk: dict
+    issuer_jwk: dict
+    ca_pem: str
 
 
 @dataclass(frozen=True)
@@ -44,20 +55,19 @@ class WalletSubmissionResult:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the official OIDF wallet runner against the local strict wallet")
+    parser = argparse.ArgumentParser(description="Run the official OIDF Final wallet plans against the local wallet")
     parser.add_argument("--suite-dir", required=True, help="Path to the extracted official OIDF conformance suite")
     parser.add_argument("--wallet-url", required=True, help="Base URL of the local wallet server")
+    parser.add_argument("--wallet-issuer-url", required=True, help="HTTPS issuer URL served by the local wallet")
+    parser.add_argument("--wallet-ca-cert", required=True, help="Path to the shared wallet CA PEM")
+    parser.add_argument("--vci-client-id", required=True, help="OID4VCI authorization-code client_id to configure in the suite")
+    parser.add_argument("--vci-redirect-uri", required=True, help="OID4VCI authorization-code redirect_uri to configure in the suite")
     parser.add_argument("--results-dir", required=True, help="Directory for exported official runner results")
     parser.add_argument("--runner-log", required=True, help="Path for mirrored official runner stdout")
     parser.add_argument(
-        "--include-unsigned",
+        "--include-haip",
         action="store_true",
-        help="Also run the current unsigned request_uri scenarios that use redirect_uri client_id prefixes",
-    )
-    parser.add_argument(
-        "--include-mdoc",
-        action="store_true",
-        help="Also run the current ISO mDoc direct_post.jwt scenario",
+        help="Also run the currently supported HAIP wallet scenarios on top of the Final matrix",
     )
     return parser.parse_args()
 
@@ -70,10 +80,16 @@ def api_request(base_url: str, token: str, method: str, path: str, body: bytes |
     req = urllib.request.Request(url, data=body, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
         data = resp.read()
-        content_type = resp.headers.get("Content-Type", "")
-        if "application/json" in content_type:
+        response_content_type = resp.headers.get("Content-Type", "")
+        if "application/json" in response_content_type:
             return json.loads(data.decode("utf-8"))
         return data.decode("utf-8")
+
+
+def request_json(url: str, context: ssl.SSLContext | None = None):
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=context) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def wallet_request(wallet_url: str, method: str, path: str, payload: dict | None = None):
@@ -95,137 +111,180 @@ def should_retry_wallet_submission(status_code: int, body: str) -> bool:
     return "fetching request_uri" in lowered or "request_uri" in lowered
 
 
-def detect_suite_layout(suite_dir: Path) -> str:
-    current = suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql-sdjwt.json"
-    legacy = suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql.json"
-    if current.exists():
-        return "id3"
-    if legacy.exists():
-        return "legacy"
-    raise FileNotFoundError("could not detect a supported OIDF wallet test config layout in the extracted suite")
-
-
-def current_suite_scenarios(include_unsigned: bool, include_mdoc: bool) -> list[PlanScenario]:
-    scenarios = [
-        PlanScenario(
-            slug="sdjwt-signed-direct_post",
-            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
-            plan_name="oid4vp-id3-wallet-test-plan",
-            variant={
-                "credential_format": "sd_jwt_vc",
-                "client_id_scheme": "x509_san_dns",
-                "request_method": "request_uri_signed",
-                "response_mode": "direct_post",
-                "query_language": "dcql",
-            },
-            credential_kind="sdjwt",
-        ),
-        PlanScenario(
-            slug="sdjwt-signed-direct_post-jwt",
-            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
-            plan_name="oid4vp-id3-wallet-test-plan",
-            variant={
-                "credential_format": "sd_jwt_vc",
-                "client_id_scheme": "x509_san_dns",
-                "request_method": "request_uri_signed",
-                "response_mode": "direct_post.jwt",
-                "query_language": "dcql",
-            },
-            credential_kind="sdjwt",
-        ),
+def verify_suite_support(suite_dir: Path, include_haip: bool) -> None:
+    required = [
+        suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql-sdjwt.json",
+        suite_dir / "scripts" / "test-configs-rp-against-op" / "vp-wallet-test-config-dcql-mdoc.json",
+        suite_dir / "scripts" / "test-configs-rp-against-op" / "vci-wallet-test-config.json",
+        suite_dir / "src" / "main" / "java" / "net" / "openid" / "conformance" / "vp1finalwallet" / "VP1FinalWalletTestPlan.java",
+        suite_dir / "src" / "main" / "java" / "net" / "openid" / "conformance" / "vci10wallet" / "VCIWalletTestPlan.java",
     ]
-    if include_unsigned:
-        scenarios.extend(
+    if include_haip:
+        required.extend(
             [
-                PlanScenario(
-                    slug="sdjwt-unsigned-direct_post",
-                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
-                    plan_name="oid4vp-id3-wallet-test-plan",
-                    variant={
-                        "credential_format": "sd_jwt_vc",
-                        "client_id_scheme": "redirect_uri",
-                        "request_method": "request_uri_unsigned",
-                        "response_mode": "direct_post",
-                        "query_language": "dcql",
-                    },
-                    credential_kind="sdjwt",
-                ),
-                PlanScenario(
-                    slug="sdjwt-unsigned-direct_post-jwt",
-                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
-                    plan_name="oid4vp-id3-wallet-test-plan",
-                    variant={
-                        "credential_format": "sd_jwt_vc",
-                        "client_id_scheme": "redirect_uri",
-                        "request_method": "request_uri_unsigned",
-                        "response_mode": "direct_post.jwt",
-                        "query_language": "dcql",
-                    },
-                    credential_kind="sdjwt",
-                ),
+                suite_dir / "src" / "main" / "java" / "net" / "openid" / "conformance" / "vp1finalwallet" / "VP1FinalWalletTestPlanHaip.java",
+                suite_dir / "src" / "main" / "java" / "net" / "openid" / "conformance" / "vci10wallet" / "VCIWalletTestPlanHaip.java",
             ]
         )
-    if include_mdoc:
-        scenarios.append(
-            PlanScenario(
-                slug="mdoc-signed-direct_post-jwt",
-                template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-mdoc.json",
-                plan_name="oid4vp-id3-wallet-test-plan",
-                variant={
-                    "credential_format": "iso_mdl",
-                    "client_id_scheme": "x509_san_dns",
-                    "request_method": "request_uri_signed",
-                    "response_mode": "direct_post.jwt",
-                    "query_language": "dcql",
-                },
-                credential_kind="mdoc",
-            )
-        )
-    return scenarios
+    missing = [path for path in required if not path.exists()]
+    if missing:
+        formatted = "\n".join(f"- {path}" for path in missing)
+        raise FileNotFoundError(f"the extracted OIDF suite is missing required Final plan files:\n{formatted}")
 
 
-def legacy_suite_scenarios(include_unsigned: bool) -> list[PlanScenario]:
+def final_scenarios(include_haip: bool) -> list[PlanScenario]:
     scenarios = [
         PlanScenario(
-            slug="sdjwt-signed-direct_post",
-            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql.json",
+            slug="vp-final-sdjwt-signed-direct-post",
+            kind="vp",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
             plan_name="oid4vp-1final-wallet-test-plan",
             variant={
+                "vp_profile": "plain_vp",
                 "credential_format": "sd_jwt_vc",
                 "client_id_prefix": "x509_hash",
                 "request_method": "request_uri_signed",
-                "vp_profile": "plain_vp",
                 "response_mode": "direct_post",
             },
             credential_kind="sdjwt",
-        )
+        ),
+        PlanScenario(
+            slug="vp-final-sdjwt-signed-direct-post-jwt",
+            kind="vp",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+            plan_name="oid4vp-1final-wallet-test-plan",
+            variant={
+                "vp_profile": "plain_vp",
+                "credential_format": "sd_jwt_vc",
+                "client_id_prefix": "x509_hash",
+                "request_method": "request_uri_signed",
+                "response_mode": "direct_post.jwt",
+            },
+            credential_kind="sdjwt",
+        ),
+        PlanScenario(
+            slug="vp-final-sdjwt-unsigned-direct-post",
+            kind="vp",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+            plan_name="oid4vp-1final-wallet-test-plan",
+            variant={
+                "vp_profile": "plain_vp",
+                "credential_format": "sd_jwt_vc",
+                "client_id_prefix": "redirect_uri",
+                "request_method": "request_uri_unsigned",
+                "response_mode": "direct_post",
+            },
+            credential_kind="sdjwt",
+        ),
+        PlanScenario(
+            slug="vp-final-mdoc-signed-direct-post-jwt",
+            kind="vp",
+            template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-mdoc.json",
+            plan_name="oid4vp-1final-wallet-test-plan",
+            variant={
+                "vp_profile": "plain_vp",
+                "credential_format": "iso_mdl",
+                "client_id_prefix": "x509_hash",
+                "request_method": "request_uri_signed",
+                "response_mode": "direct_post.jwt",
+            },
+            credential_kind="mdoc",
+        ),
+        PlanScenario(
+            slug="vci-final-sdjwt",
+            kind="vci",
+            template_relpath="scripts/test-configs-rp-against-op/vci-wallet-test-config.json",
+            plan_name="oid4vci-1_0-wallet-test-plan",
+            variant={
+                "client_auth_type": "client_attestation",
+                "fapi_request_method": "unsigned",
+                "sender_constrain": "dpop",
+                "authorization_request_type": "simple",
+                "fapi_profile": "vci",
+                "vci_grant_type": "authorization_code",
+                "vci_authorization_code_flow_variant": "issuer_initiated",
+                "vci_credential_offer_variant": "by_value",
+                "credential_format": "sd_jwt_vc",
+                "vci_credential_issuance_mode": "immediate",
+                "vci_credential_encryption": "plain",
+            },
+            credential_kind="sdjwt",
+        ),
+        PlanScenario(
+            slug="vci-final-mdoc",
+            kind="vci",
+            template_relpath="scripts/test-configs-rp-against-op/vci-wallet-test-config.json",
+            plan_name="oid4vci-1_0-wallet-test-plan",
+            variant={
+                "client_auth_type": "client_attestation",
+                "fapi_request_method": "unsigned",
+                "sender_constrain": "dpop",
+                "authorization_request_type": "simple",
+                "fapi_profile": "vci",
+                "vci_grant_type": "authorization_code",
+                "vci_authorization_code_flow_variant": "issuer_initiated",
+                "vci_credential_offer_variant": "by_value",
+                "credential_format": "mdoc",
+                "vci_credential_issuance_mode": "immediate",
+                "vci_credential_encryption": "plain",
+            },
+            credential_kind="mdoc",
+        ),
     ]
-    if include_unsigned:
-        scenarios.append(
-            PlanScenario(
-                slug="sdjwt-unsigned-direct_post",
-                template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql.json",
-                plan_name="oid4vp-1final-wallet-test-plan",
-                variant={
-                    "credential_format": "sd_jwt_vc",
-                    "client_id_prefix": "redirect_uri",
-                    "request_method": "request_uri_unsigned",
-                    "vp_profile": "plain_vp",
-                    "response_mode": "direct_post",
-                },
-                credential_kind="sdjwt",
-            )
+    if include_haip:
+        scenarios.extend(
+            [
+                PlanScenario(
+                    slug="vp-haip-sdjwt-direct-post-jwt",
+                    kind="vp",
+                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-sdjwt.json",
+                    plan_name="oid4vp-1final-wallet-haip-test-plan",
+                    variant={
+                        "credential_format": "sd_jwt_vc",
+                        "response_mode": "direct_post.jwt",
+                    },
+                    credential_kind="sdjwt",
+                    requires_haip=True,
+                ),
+                PlanScenario(
+                    slug="vp-haip-mdoc-direct-post-jwt",
+                    kind="vp",
+                    template_relpath="scripts/test-configs-rp-against-op/vp-wallet-test-config-dcql-mdoc.json",
+                    plan_name="oid4vp-1final-wallet-haip-test-plan",
+                    variant={
+                        "credential_format": "iso_mdl",
+                        "response_mode": "direct_post.jwt",
+                    },
+                    credential_kind="mdoc",
+                    requires_haip=True,
+                ),
+                PlanScenario(
+                    slug="vci-haip-sdjwt",
+                    kind="vci",
+                    template_relpath="scripts/test-configs-rp-against-op/vci-wallet-test-config.json",
+                    plan_name="oid4vci-1_0-wallet-haip-test-plan",
+                    variant={
+                        "client_auth_type": "client_attestation",
+                        "fapi_request_method": "unsigned",
+                        "sender_constrain": "dpop",
+                        "authorization_request_type": "simple",
+                        "fapi_profile": "vci_haip",
+                        "vci_grant_type": "authorization_code",
+                        "vci_authorization_code_flow_variant": "issuer_initiated",
+                        "vci_credential_offer_variant": "by_value",
+                        "credential_format": "sd_jwt_vc",
+                        "vci_credential_issuance_mode": "immediate",
+                        "vci_credential_encryption": "plain",
+                    },
+                    credential_kind="sdjwt",
+                    requires_haip=True,
+                ),
+            ]
         )
     return scenarios
 
 
-def suite_scenarios(layout: str, include_unsigned: bool, include_mdoc: bool) -> list[PlanScenario]:
-    if layout == "id3":
-        return current_suite_scenarios(include_unsigned, include_mdoc)
-    return legacy_suite_scenarios(include_unsigned)
-
-
-def build_dcql_query(credential_kind: str) -> dict:
+def build_vp_dcql_query(credential_kind: str) -> dict:
     if credential_kind == "mdoc":
         return {
             "credentials": [
@@ -273,18 +332,118 @@ def load_config_template(source: Path) -> dict:
     return json.loads(expanded)
 
 
-def create_config(suite_dir: Path, results_dir: Path, scenario: PlanScenario) -> Path:
-    source = suite_dir / scenario.template_relpath
-    config = load_config_template(source)
+def ssl_context_for_ca(ca_path: Path) -> ssl.SSLContext:
+    context = ssl.create_default_context(cafile=str(ca_path))
+    context.check_hostname = False
+    return context
 
-    config["description"] = f"oid4vc-dev strict wallet ({scenario.slug})"
+
+def public_jwk(jwk: dict) -> dict:
+    return {key: value for key, value in jwk.items() if key not in {"d", "p", "q", "dp", "dq", "qi", "oth", "k"}}
+
+
+def fetch_wallet_materials(wallet_url: str, wallet_issuer_url: str, wallet_ca_cert: Path) -> WalletMaterials:
+    credentials = wallet_request(wallet_url, "GET", "/api/credentials")
+    holder_jwk = None
+    for credential in credentials:
+        claims = credential.get("claims", {})
+        cnf = claims.get("cnf", {})
+        candidate = cnf.get("jwk")
+        if isinstance(candidate, dict):
+            holder_jwk = candidate
+            break
+    if holder_jwk is None:
+        raise RuntimeError("wallet did not expose a holder cnf.jwk in /api/credentials")
+
+    issuer_meta = request_json(
+        wallet_issuer_url.rstrip("/") + "/.well-known/jwt-vc-issuer",
+        context=ssl_context_for_ca(wallet_ca_cert),
+    )
+    keys = issuer_meta.get("jwks", {}).get("keys", [])
+    if len(keys) != 1 or not isinstance(keys[0], dict):
+        raise RuntimeError(f"wallet issuer metadata did not expose exactly one issuer JWK: {keys!r}")
+
+    ca_pem = wallet_ca_cert.read_text()
+    return WalletMaterials(
+        holder_jwk=public_jwk(holder_jwk),
+        issuer_jwk=public_jwk(keys[0]),
+        ca_pem=ca_pem,
+    )
+
+
+def create_vp_config(suite_dir: Path, scenario: PlanScenario, materials: WalletMaterials, output: Path) -> None:
+    config = load_config_template(suite_dir / scenario.template_relpath)
+    config["alias"] = f"oid4vc-dev-{scenario.slug}"
+    config["description"] = f"oid4vc-dev wallet ({scenario.slug})"
     config.setdefault("client", {})
-    config["client"]["dcql"] = build_dcql_query(scenario.credential_kind)
+    config["client"]["dcql"] = build_vp_dcql_query(scenario.credential_kind)
+    response_mode = scenario.variant.get("response_mode", "")
+    if response_mode.endswith(".jwt"):
+        config["client"]["authorization_encrypted_response_alg"] = "ECDH-ES"
+        config["client"]["authorization_encrypted_response_enc"] = "A128GCM"
+    if scenario.requires_haip:
+        config.setdefault("credential", {})
+        config["credential"]["trust_anchor_pem"] = materials.ca_pem
+        config["credential"]["status_list_trust_anchor_pem"] = materials.ca_pem
+    with output.open("w") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
 
+
+def create_vci_config(args: argparse.Namespace, suite_dir: Path, scenario: PlanScenario, materials: WalletMaterials, output: Path) -> None:
+    config = load_config_template(suite_dir / scenario.template_relpath)
+    redirect_uri = args.vci_redirect_uri
+    parsed_redirect = urllib.parse.urlsplit(redirect_uri)
+    if not parsed_redirect.path.endswith("/callback"):
+        raise ValueError(f"VCI redirect_uri must end with /callback: {redirect_uri}")
+    alias_prefix = parsed_redirect.path[: -len("/callback")].rstrip("/")
+    alias = alias_prefix.rsplit("/", 1)[-1]
+    if not alias:
+        raise ValueError(f"VCI redirect_uri must include an alias path segment before /callback: {redirect_uri}")
+
+    config["alias"] = alias
+    config["description"] = f"oid4vc-dev wallet ({scenario.slug})"
+    config["waitTimeoutSeconds"] = 10
+    config["maxWaitForAdditionalRequestSeconds"] = 20
+
+    offer_path = parsed_redirect.path[: -len("/callback")] + "/credential_offer"
+    credential_offer_endpoint = urllib.parse.urlunsplit(
+        (parsed_redirect.scheme, parsed_redirect.netloc, offer_path, "", "")
+    )
+
+    config.setdefault("client", {})
+    config["client"]["client_id"] = args.vci_client_id
+    config["client"]["redirect_uri"] = redirect_uri
+    config["client"]["jwks"] = {"keys": [materials.holder_jwk]}
+
+    config.setdefault("server", {})
+    config.setdefault("credential", {})
+    config.setdefault("vci", {})
+    config["vci"]["credential_offer_endpoint"] = credential_offer_endpoint
+    if scenario.credential_kind == "mdoc":
+        config["vci"]["credential_configuration_id"] = "eu.europa.ec.eudi.pid.mdoc.1.jwt.keyattest"
+    else:
+        config["vci"]["credential_configuration_id"] = "eu.europa.ec.eudi.pid.1"
+    config["vci"]["client_attestation_issuer"] = args.wallet_issuer_url
+    config["vci"]["client_attestation_trust_anchor"] = materials.ca_pem
+    config["vci"]["client_attester_keys_jwks"] = {"keys": [materials.issuer_jwk]}
+    config["vci"]["key_attestation_jwks"] = {"keys": [materials.issuer_jwk]}
+    config["vci"]["key_attestation_trust_anchor_pem"] = materials.ca_pem
+    config["browser"] = []
+
+    with output.open("w") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
+
+
+def create_config(args: argparse.Namespace, suite_dir: Path, results_dir: Path, scenario: PlanScenario, materials: WalletMaterials) -> Path:
     output = results_dir / f"{scenario.slug}-config.json"
-    with output.open("w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
+    if scenario.kind == "vp":
+        create_vp_config(suite_dir, scenario, materials, output)
+    elif scenario.kind == "vci":
+        create_vci_config(args, suite_dir, scenario, materials, output)
+    else:
+        raise RuntimeError(f"unknown scenario kind {scenario.kind}")
     return output
 
 
@@ -345,10 +504,23 @@ def follow_redirect(redirect_uri: str) -> None:
         pass
 
 
+def wallet_api_path_for_request(request_url: str) -> str:
+    parsed = urllib.parse.urlsplit(request_url)
+    if parsed.scheme in {"openid-credential-offer", "haip-vci"}:
+        return "/api/offers"
+    if parsed.scheme in {"openid4vp", "eudi-openid4vp", "haip-vp"}:
+        return "/api/presentations"
+    query = urllib.parse.parse_qs(parsed.query)
+    if "credential_offer" in query or "credential_offer_uri" in query or "credential_offer" in parsed.path:
+        return "/api/offers"
+    return "/api/presentations"
+
+
 def submit_wallet_request(wallet_url: str, request_url: str) -> WalletSubmissionResult:
+    api_path = wallet_api_path_for_request(request_url)
     for attempt in range(1, 6):
         try:
-            result = wallet_request(wallet_url, "POST", "/api/presentations", {"uri": request_url})
+            result = wallet_request(wallet_url, "POST", api_path, {"uri": request_url})
             break
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
@@ -370,9 +542,9 @@ def submit_wallet_request(wallet_url: str, request_url: str) -> WalletSubmission
             print(f"[monitor] wallet rejected request {request_url}: HTTP {exc.code} {body}", flush=True)
             return WalletSubmissionResult(completed=True, retryable=False)
 
+    print(f"[monitor] submitted {api_path} request to wallet: {request_url}", flush=True)
     response = result.get("response", {})
     redirect_uri = response.get("redirect_uri")
-    print(f"[monitor] submitted verifier request to wallet: {request_url}", flush=True)
     if redirect_uri:
         try:
             follow_redirect(redirect_uri)
@@ -387,11 +559,10 @@ def handle_module(base_url: str, token: str, wallet_url: str, module_id: str, st
     logs = api_request(base_url, token, "GET", f"api/log/{module_id}")
 
     for entry in logs:
-        redirect_to = entry.get("redirect_to")
-        if redirect_to and redirect_to not in state["submitted_urls"]:
-            submission = submit_wallet_request(wallet_url, redirect_to)
-            if submission.completed:
-                state["submitted_urls"].add(redirect_to)
+        request_url = entry.get("redirect_to") or entry.get("credential_offer_redirect_url")
+        if request_url and request_url not in state["submitted_urls"]:
+            state["submitted_urls"].add(request_url)
+            submit_wallet_request(wallet_url, request_url)
 
         placeholder = entry.get("upload")
         if placeholder and placeholder not in state["uploaded_placeholders"]:
@@ -413,11 +584,13 @@ def main() -> int:
     base_url = os.environ["CONFORMANCE_SERVER"]
     token = os.environ["CONFORMANCE_TOKEN"]
 
+    verify_suite_support(suite_dir, args.include_haip)
     results_dir.mkdir(parents=True, exist_ok=True)
-    layout = detect_suite_layout(suite_dir)
-    scenarios = suite_scenarios(layout, args.include_unsigned, args.include_mdoc)
-    config_jobs = [(scenario, create_config(suite_dir, results_dir, scenario)) for scenario in scenarios]
-    print(f"[runner] detected OIDF suite layout: {layout}", flush=True)
+    materials = fetch_wallet_materials(args.wallet_url, args.wallet_issuer_url, Path(args.wallet_ca_cert))
+    scenarios = final_scenarios(args.include_haip)
+    config_jobs = [(scenario, create_config(args, suite_dir, results_dir, scenario, materials)) for scenario in scenarios]
+
+    print("[runner] detected OIDF Final wallet plans in the extracted suite", flush=True)
     for scenario, config_path in config_jobs:
         print(f"[runner] scheduled {scenario_plan_arg(scenario)} using {config_path.name}", flush=True)
 
@@ -437,6 +610,7 @@ def main() -> int:
     thread.start()
 
     module_state: dict[str, dict] = {}
+    plan_urls: list[str] = []
 
     with runner_log.open("w") as log_file:
         while True:
@@ -458,6 +632,11 @@ def main() -> int:
                                 "terminal": False,
                             },
                         )
+                    plan_match = PLAN_URL_RE.search(line)
+                    if plan_match:
+                        plan_url = plan_match.group(1)
+                        if plan_url not in plan_urls:
+                            plan_urls.append(plan_url)
             except queue.Empty:
                 pass
 
@@ -473,6 +652,11 @@ def main() -> int:
                 break
 
             time.sleep(POLL_INTERVAL)
+
+    if plan_urls:
+        print("[runner] OIDF plan URLs:", flush=True)
+        for plan_url in plan_urls:
+            print(f"[runner]   {plan_url}", flush=True)
 
     return proc.wait()
 

@@ -518,16 +518,15 @@ func TestPresentationFlow_AutoAccept(t *testing.T) {
 		t.Fatal("expected vp_token in verifier request")
 	}
 
-	// Current OIDF wallet-suite submissions use a JSON object with query IDs as string values.
-	var vpToken map[string]string
+	var vpToken map[string][]string
 	if err := json.Unmarshal([]byte(vpTokenRaw), &vpToken); err != nil {
 		t.Fatalf("vp_token should be a JSON object: %v", err)
 	}
-	pidValue, ok := vpToken["pid"]
+	pidValues, ok := vpToken["pid"]
 	if !ok {
 		t.Fatal("expected 'pid' key in vp_token")
 	}
-	if pidValue == "" {
+	if len(pidValues) != 1 || pidValues[0] == "" {
 		t.Error("expected non-empty pid presentation")
 	}
 
@@ -663,10 +662,9 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 		t.Fatalf("parsing verifier body: %v", err)
 	}
 
-	// Current OIDF wallet-suite submissions use direct string values per query ID.
-	var vpToken map[string]string
+	var vpToken map[string][]string
 	if err := json.Unmarshal([]byte(parsedForm.Get("vp_token")), &vpToken); err != nil {
-		t.Fatalf("vp_token should be a JSON object with string values: %v", err)
+		t.Fatalf("vp_token should be a JSON object with array values: %v", err)
 	}
 
 	// Must have both credential query IDs
@@ -679,7 +677,7 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 
 	// Each query must map to a single non-empty presentation string.
 	for _, qid := range []string{"pid_sdjwt", "pid_mdoc"} {
-		if vpToken[qid] == "" {
+		if len(vpToken[qid]) != 1 || vpToken[qid][0] == "" {
 			t.Errorf("expected non-empty presentation for %q", qid)
 		}
 	}

@@ -68,27 +68,26 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 		return nil, fmt.Errorf("unexpected result type")
 	}
 
-	// Reject offers that only have authorization_code grant (not supported)
-	if offer.Grants.PreAuthorizedCode == "" {
-		return nil, fmt.Errorf("credential offer requires authorization_code grant which is not supported; only pre-authorized_code flow is implemented")
-	}
-
 	// Fetch issuer metadata
 	metadata, err := fetchIssuerMetadata(offer.CredentialIssuer)
 	if err != nil {
 		return nil, fmt.Errorf("fetching issuer metadata: %w", err)
 	}
 
-	// Get token endpoint
-	tokenEndpoint := getTokenEndpoint(metadata, offer.CredentialIssuer)
+	authServer := getAuthorizationServer(metadata, offer.CredentialIssuer)
+	oauthMeta, _ := fetchOAuthMetadata(authServer)
+	tokenEndpoint := getTokenEndpoint(metadata, oauthMeta, offer.CredentialIssuer)
 	credentialEndpoint := getCredentialEndpoint(metadata, offer.CredentialIssuer)
+	if offer.Grants.PreAuthorizedCode == "" {
+		return w.processAuthorizationCodeOffer(offer, metadata, oauthMeta, tokenEndpoint, credentialEndpoint)
+	}
 
 	// Token exchange (pre-authorized code flow)
 	w.mu.Lock()
 	txCode := w.TxCode
 	w.TxCode = "" // clear after use
 	w.mu.Unlock()
-	tokenResp, err := exchangeToken(tokenEndpoint, offer, txCode)
+	tokenResp, err := exchangePreAuthorizedToken(tokenEndpoint, offer, txCode)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -104,7 +103,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	}
 
 	// Create proof of possession JWT
-	proofJWT, err := createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce)
+	proofJWT, err := createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating proof JWT: %w", err)
 	}
@@ -128,7 +127,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	if cNonce == "" {
 		cNonce = fetchNonce(metadata, offer.CredentialIssuer)
 		if cNonce != "" {
-			proofJWT, err = createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce)
+			proofJWT, err = createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce, nil)
 			if err != nil {
 				return nil, fmt.Errorf("creating proof JWT with nonce: %w", err)
 			}
@@ -146,7 +145,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 				cNonce = n
 				log.Printf("[VCI] Got c_nonce from error response: %s", cNonce)
 				// Recreate proof with the real nonce
-				proofJWT, err = createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce)
+				proofJWT, err = createProofJWT(w.HolderKey, offer.CredentialIssuer, cNonce, nil)
 				if err != nil {
 					return nil, fmt.Errorf("creating proof JWT with nonce: %w", err)
 				}
@@ -237,7 +236,10 @@ func verifyImportedJWTMetadataSignature(raw string) (string, string) {
 
 // fetchIssuerMetadata fetches the OpenID Credential Issuer metadata.
 func fetchIssuerMetadata(issuer string) (map[string]any, error) {
-	metadataURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-credential-issuer"
+	metadataURL, err := wellKnownURL(issuer, "openid-credential-issuer")
+	if err != nil {
+		return nil, fmt.Errorf("building issuer metadata URL: %w", err)
+	}
 
 	req, err := http.NewRequest("GET", metadataURL, nil)
 	if err != nil {
@@ -259,6 +261,18 @@ func fetchIssuerMetadata(issuer string) (map[string]any, error) {
 		return nil, fmt.Errorf("reading metadata: %w", err)
 	}
 	return parseIssuerMetadataResponse(body, resp.Header.Get("Content-Type"))
+}
+
+func wellKnownURL(issuerOrServer, wellKnownType string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(issuerOrServer))
+	if err != nil {
+		return "", fmt.Errorf("parsing issuer URL: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("issuer URL must be absolute")
+	}
+	path := parsed.EscapedPath()
+	return fmt.Sprintf("%s://%s/.well-known/%s%s", parsed.Scheme, parsed.Host, wellKnownType, path), nil
 }
 
 func parseIssuerMetadataResponse(body []byte, contentType string) (map[string]any, error) {
@@ -335,30 +349,27 @@ func normalizeMetadataX5CEntries(raw any) ([]string, error) {
 	}
 }
 
-func getTokenEndpoint(metadata map[string]any, issuer string) string {
+func getAuthorizationServer(metadata map[string]any, issuer string) string {
+	authServer := issuer
+	if servers, ok := metadata["authorization_servers"].([]any); ok && len(servers) > 0 {
+		if s, ok := servers[0].(string); ok && s != "" {
+			authServer = s
+		}
+	}
+	return authServer
+}
+
+func getTokenEndpoint(metadata map[string]any, oauthMeta map[string]any, issuer string) string {
 	// OID4VCI: token_endpoint may be directly in credential issuer metadata
 	if ep, ok := metadata["token_endpoint"].(string); ok {
 		return ep
 	}
 
-	// Determine the authorization server URL. Per OID4VCI spec, if
-	// authorization_servers is present, use the first entry; otherwise
-	// the credential issuer URL itself acts as the authorization server.
-	authServer := strings.TrimRight(issuer, "/")
-	if servers, ok := metadata["authorization_servers"].([]any); ok && len(servers) > 0 {
-		if s, ok := servers[0].(string); ok {
-			authServer = strings.TrimRight(s, "/")
-		}
+	if ep, ok := oauthMeta["token_endpoint"].(string); ok {
+		return ep
 	}
 
-	// Fetch the OAuth authorization server metadata to find the token endpoint
-	oauthMeta, err := fetchOAuthMetadata(authServer)
-	if err == nil {
-		if ep, ok := oauthMeta["token_endpoint"].(string); ok {
-			return ep
-		}
-	}
-
+	authServer := getAuthorizationServer(metadata, issuer)
 	return authServer + "/token"
 }
 
@@ -366,11 +377,11 @@ func getTokenEndpoint(metadata map[string]any, issuer string) string {
 // Tries /.well-known/openid-configuration first, falls back to
 // /.well-known/oauth-authorization-server.
 func fetchOAuthMetadata(authServer string) (map[string]any, error) {
-	base := strings.TrimRight(authServer, "/")
-	urls := []string{
-		base + "/.well-known/openid-configuration",
-		base + "/.well-known/oauth-authorization-server",
+	oauthURL, err := wellKnownURL(authServer, "oauth-authorization-server")
+	if err != nil {
+		return nil, err
 	}
+	urls := []string{oauthURL}
 
 	for _, u := range urls {
 		req, err := http.NewRequest("GET", u, nil)
@@ -422,8 +433,8 @@ func resolveCredentialFormat(metadata map[string]any, configID string) string {
 	return f
 }
 
-// exchangeToken performs the pre-authorized code token exchange.
-func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer, txCode string) (map[string]any, error) {
+// exchangePreAuthorizedToken performs the pre-authorized code token exchange.
+func exchangePreAuthorizedToken(tokenEndpoint string, offer *oid4vc.CredentialOffer, txCode string) (map[string]any, error) {
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 	form.Set("pre-authorized_code", offer.Grants.PreAuthorizedCode)
@@ -462,7 +473,7 @@ func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer, txCode s
 }
 
 // createProofJWT creates an OID4VCI proof of possession JWT.
-func createProofJWT(holderKey *ecdsa.PrivateKey, audience, cNonce string) (string, error) {
+func createProofJWT(holderKey *ecdsa.PrivateKey, audience, cNonce string, extraHeader map[string]any) (string, error) {
 	// Build JWK for holder public key
 	jwkJSON := mock.PublicKeyJWK(&holderKey.PublicKey)
 	var jwk map[string]any
@@ -474,6 +485,9 @@ func createProofJWT(holderKey *ecdsa.PrivateKey, audience, cNonce string) (strin
 		"alg": "ES256",
 		"typ": "openid4vci-proof+jwt",
 		"jwk": jwk,
+	}
+	for key, value := range extraHeader {
+		header[key] = value
 	}
 
 	payload := map[string]any{

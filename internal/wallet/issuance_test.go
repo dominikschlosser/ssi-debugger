@@ -180,7 +180,7 @@ func TestGetTokenEndpoint_DirectInMetadata(t *testing.T) {
 	metadata := map[string]any{
 		"token_endpoint": "https://issuer.example/token",
 	}
-	got := getTokenEndpoint(metadata, "https://issuer.example")
+	got := getTokenEndpoint(metadata, nil, "https://issuer.example")
 	if got != "https://issuer.example/token" {
 		t.Errorf("expected direct token_endpoint, got %s", got)
 	}
@@ -188,7 +188,7 @@ func TestGetTokenEndpoint_DirectInMetadata(t *testing.T) {
 
 func TestGetTokenEndpoint_Fallback(t *testing.T) {
 	metadata := map[string]any{}
-	got := getTokenEndpoint(metadata, "https://issuer.example")
+	got := getTokenEndpoint(metadata, nil, "https://issuer.example")
 	// Falls back to issuer + /token when no OAuth metadata can be fetched
 	if got != "https://issuer.example/token" {
 		t.Errorf("expected fallback token endpoint, got %s", got)
@@ -218,6 +218,43 @@ func TestGetCredentialEndpoint_TrailingSlash(t *testing.T) {
 	got := getCredentialEndpoint(metadata, "https://issuer.example/")
 	if got != "https://issuer.example/credential" {
 		t.Errorf("expected trimmed trailing slash, got %s", got)
+	}
+}
+
+func TestGetAuthorizationServer_PreservesTrailingSlash(t *testing.T) {
+	got := getAuthorizationServer(map[string]any{}, "https://issuer.example/test/")
+	if got != "https://issuer.example/test/" {
+		t.Fatalf("expected trailing slash to be preserved, got %s", got)
+	}
+}
+
+func TestGetAuthorizationServer_FromMetadataPreservesTrailingSlash(t *testing.T) {
+	metadata := map[string]any{
+		"authorization_servers": []any{"https://issuer.example/authz/"},
+	}
+	got := getAuthorizationServer(metadata, "https://issuer.example/test/")
+	if got != "https://issuer.example/authz/" {
+		t.Fatalf("expected authorization_servers entry to be preserved, got %s", got)
+	}
+}
+
+func TestWellKnownURL_PathlessIssuer(t *testing.T) {
+	got, err := wellKnownURL("https://issuer.example", "openid-credential-issuer")
+	if err != nil {
+		t.Fatalf("wellKnownURL: %v", err)
+	}
+	if got != "https://issuer.example/.well-known/openid-credential-issuer" {
+		t.Fatalf("expected pathless well-known URL, got %s", got)
+	}
+}
+
+func TestWellKnownURL_PreservesTrailingSlashInIssuerPath(t *testing.T) {
+	got, err := wellKnownURL("https://issuer.example/test/issuer/", "openid-credential-issuer")
+	if err != nil {
+		t.Fatalf("wellKnownURL: %v", err)
+	}
+	if got != "https://issuer.example/.well-known/openid-credential-issuer/test/issuer/" {
+		t.Fatalf("expected trailing slash to be preserved, got %s", got)
 	}
 }
 

@@ -218,7 +218,7 @@ func TestMakeFetchRequestURI_POST_WalletNonceMismatch(t *testing.T) {
 	}
 }
 
-func TestMakeFetchRequestURI_POST_StrictRequiresWalletNonce(t *testing.T) {
+func TestMakeFetchRequestURI_POST_AllowsMissingWalletNonce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id": "test-client",
@@ -230,12 +230,33 @@ func TestMakeFetchRequestURI_POST_StrictRequiresWalletNonce(t *testing.T) {
 
 	wallet := &Wallet{}
 	fetch := MakeFetchRequestURI(wallet, nil)
-	_, err := fetch(srv.URL, "post")
-	if err == nil {
-		t.Fatal("expected error when wallet_nonce is missing")
-	}
-	if !contains(err.Error(), "wallet_nonce") {
+	result, err := fetch(srv.URL, "post")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isJWT(result) {
+		t.Fatalf("expected JWT result, got %q", result)
+	}
+}
+
+func TestMakeFetchRequestURI_POST_AllowsUnsignedRequestObject(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
+			"client_id": "test-client",
+		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	wallet := &Wallet{}
+	fetch := MakeFetchRequestURI(wallet, nil)
+	result, err := fetch(srv.URL, "post")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isJWT(result) {
+		t.Fatalf("expected JWT result, got %q", result)
 	}
 }
 

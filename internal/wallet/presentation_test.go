@@ -173,7 +173,7 @@ func TestEncryptResponse_MDocISOIncludesAPUAndAPV(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	jweStr, _, err := w.EncryptResponse(map[string]string{"pid": "token1"}, "", "state-123", "mdoc-generated-nonce", params)
+	jweStr, _, err := w.EncryptResponse(map[string][]string{"pid": {"token1"}}, "", "state-123", "mdoc-generated-nonce", params)
 	if err != nil {
 		t.Fatalf("EncryptResponse error: %v", err)
 	}
@@ -1167,25 +1167,6 @@ func TestVPTokenMapResult_VPToken_Empty(t *testing.T) {
 	vp := r.VPToken()
 	if len(vp) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(vp))
-	}
-}
-
-func TestVPTokenMapResult_SubmissionVPToken(t *testing.T) {
-	r := &VPTokenMapResult{
-		TokenMap: map[string]string{
-			"pid": "token1",
-			"mdl": "token2",
-		},
-	}
-	vp := r.SubmissionVPToken()
-	if len(vp) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(vp))
-	}
-	if vp["pid"] != "token1" {
-		t.Errorf("wrong pid token: %v", vp["pid"])
-	}
-	if vp["mdl"] != "token2" {
-		t.Errorf("wrong mdl token: %v", vp["mdl"])
 	}
 }
 

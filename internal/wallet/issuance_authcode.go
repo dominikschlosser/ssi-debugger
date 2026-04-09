@@ -167,6 +167,7 @@ func (w *Wallet) processAuthorizationCodeOffer(
 	if credentialIdentifier == "" && len(offer.CredentialConfigurationIDs) > 0 {
 		credentialConfigurationID = offer.CredentialConfigurationIDs[0]
 	}
+	responseEncryption := buildCredentialResponseEncryptionRequest(metadata, w.HolderKey)
 
 	if cNonce == "" {
 		cNonce = fetchNonceWithDPoP(metadata, accessToken, w.HolderKey, &nonces.resource)
@@ -188,6 +189,7 @@ func (w *Wallet) processAuthorizationCodeOffer(
 		proofJWT,
 		credentialIdentifier,
 		credentialConfigurationID,
+		responseEncryption,
 		w.HolderKey,
 		&nonces.resource,
 	)
@@ -505,7 +507,7 @@ func postFormWithDPoP(target string, form url.Values, key *ecdsa.PrivateKey, acc
 	return out, nil
 }
 
-func requestCredentialWithDPoP(endpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID string, key *ecdsa.PrivateKey, nonce *string) (map[string]any, error) {
+func requestCredentialWithDPoP(endpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID string, credentialResponseEncryption map[string]any, key *ecdsa.PrivateKey, nonce *string) (map[string]any, error) {
 	reqBody := map[string]any{
 		"proofs": map[string]any{
 			"jwt": []string{proofJWT},
@@ -516,6 +518,9 @@ func requestCredentialWithDPoP(endpoint, accessToken, proofJWT, credentialIdenti
 	} else if credentialConfigurationID != "" {
 		reqBody["credential_configuration_id"] = credentialConfigurationID
 	}
+	if credentialResponseEncryption != nil {
+		reqBody["credential_response_encryption"] = credentialResponseEncryption
+	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling credential request: %w", err)
@@ -524,9 +529,9 @@ func requestCredentialWithDPoP(endpoint, accessToken, proofJWT, credentialIdenti
 	if err != nil {
 		return nil, err
 	}
-	var out map[string]any
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		return nil, fmt.Errorf("parsing credential response: %w", err)
+	out, err := parseCredentialResponseBody(respBody, key)
+	if err != nil {
+		return nil, err
 	}
 	if errMsg, _ := out["error"].(string); errMsg != "" {
 		desc, _ := out["error_description"].(string)
@@ -545,8 +550,8 @@ func requestDeferredCredentialWithDPoP(endpoint, accessToken, transactionID stri
 		if err != nil {
 			return nil, err
 		}
-		var out map[string]any
-		if err := json.Unmarshal(respBody, &out); err != nil {
+		out, err := parseCredentialResponseBody(respBody, key)
+		if err != nil {
 			return nil, fmt.Errorf("parsing deferred credential response: %w", err)
 		}
 		if txID, _ := out["transaction_id"].(string); txID != "" {

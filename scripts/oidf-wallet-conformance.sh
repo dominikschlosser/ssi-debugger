@@ -40,7 +40,6 @@ WALLET_CA_CERT=${OIDF_WALLET_CA_CERT:-"$RUN_DIR/wallet-ca-cert.pem"}
 CONFORMANCE_SERVER=${CONFORMANCE_SERVER:-https://demo.certification.openid.net/}
 CONFORMANCE_SERVER_LOCAL=${CONFORMANCE_SERVER_LOCAL:-$CONFORMANCE_SERVER}
 CONFORMANCE_SERVER_MTLS=${CONFORMANCE_SERVER_MTLS:-$CONFORMANCE_SERVER}
-OIDF_INCLUDE_HAIP=${OIDF_INCLUDE_HAIP:-0}
 OIDF_VCI_CLIENT_ID=${OIDF_VCI_CLIENT_ID:-52480754053}
 OIDF_VCI_ALIAS=${OIDF_VCI_ALIAS:-"oid4vc-dev-vci-${PORT}"}
 
@@ -66,7 +65,6 @@ VENV_DIR="$RUN_DIR/venv"
 RESULTS_DIR="$RUN_DIR/results"
 RUNNER_LOG="$RUN_DIR/runner.log"
 WALLET_LOG="$RUN_DIR/wallet.log"
-EXTRA_ARGS=""
 
 mkdir -p "$RESULTS_DIR" "$WALLET_DIR"
 
@@ -116,11 +114,7 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1; do
   sleep 1
 done
 
-if [ "$OIDF_INCLUDE_HAIP" = "1" ]; then
-  EXTRA_ARGS="$EXTRA_ARGS --include-haip"
-fi
-
-echo "Running OIDF Final wallet plans via demo.certification.openid.net"
+echo "Running OIDF Final + HAIP wallet plans via demo.certification.openid.net"
 CONFORMANCE_SERVER="$CONFORMANCE_SERVER" \
 CONFORMANCE_SERVER_LOCAL="$CONFORMANCE_SERVER_LOCAL" \
 CONFORMANCE_SERVER_MTLS="$CONFORMANCE_SERVER_MTLS" \
@@ -133,8 +127,7 @@ CONFORMANCE_TOKEN="$CONFORMANCE_TOKEN" \
   --vci-client-id "$OIDF_VCI_CLIENT_ID" \
   --vci-redirect-uri "$OIDF_VCI_REDIRECT_URI" \
   --results-dir "$RESULTS_DIR" \
-  --runner-log "$RUNNER_LOG" \
-  $EXTRA_ARGS
+  --runner-log "$RUNNER_LOG"
 
 echo "Wallet log:   $WALLET_LOG"
 echo "Runner log:   $RUNNER_LOG"

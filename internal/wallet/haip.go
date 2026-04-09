@@ -25,29 +25,32 @@ import (
 // ValidateHAIPCompliance checks an authorization request against HAIP 1.0 requirements.
 // Returns a list of violation messages. Empty list means compliant.
 //
-// HAIP 1.0 requires:
-//   - response_mode MUST be direct_post.jwt (encrypted responses)
-//   - client_id MUST use x509_hash: scheme
-//   - Signed Request Objects (JAR) MUST be used
+// HAIP requires:
+//   - response_mode MUST be an encrypted mode: direct_post.jwt or dc_api.jwt
+//   - client_id MUST use an allowed HAIP scheme
+//   - Signed Request Objects (JAR) MUST be used except for web-origin Browser API requests
 //   - DCQL query MUST be used (not presentation_definition)
-//   - Request Object alg MUST be ES256
+//   - Request Object alg MUST be ES256 when a Request Object is present
 func ValidateHAIPCompliance(params *AuthorizationRequestParams, reqObj *oid4vc.RequestObjectJWT) []string {
 	var violations []string
 
-	// §5.1.2.3: response_mode MUST be direct_post.jwt
-	if params.ResponseMode != "direct_post.jwt" {
+	// Encrypted response modes are required.
+	if params.ResponseMode != "direct_post.jwt" && params.ResponseMode != "dc_api.jwt" {
 		violations = append(violations, fmt.Sprintf(
-			"HAIP: response_mode MUST be 'direct_post.jwt', got %q", params.ResponseMode))
+			"HAIP: response_mode MUST be 'direct_post.jwt' or 'dc_api.jwt', got %q", params.ResponseMode))
 	}
 
-	// §5.2.3: client_id MUST use x509_hash: prefix
-	if !strings.HasPrefix(params.ClientID, "x509_hash:") {
+	// Current HAIP wallet profiles use x509-bound or web-origin client identifiers.
+	if !strings.HasPrefix(params.ClientID, "x509_hash:") &&
+		!strings.HasPrefix(params.ClientID, "x509_san_dns:") &&
+		!strings.HasPrefix(params.ClientID, "web-origin:") {
 		violations = append(violations, fmt.Sprintf(
-			"HAIP: client_id MUST use 'x509_hash:' scheme, got %q", params.ClientID))
+			"HAIP: client_id MUST use 'x509_hash:', 'x509_san_dns:', or 'web-origin:' scheme, got %q", params.ClientID))
 	}
 
-	// §5.1.2.2: Signed Request Objects (JAR) MUST be used
-	if reqObj == nil || reqObj.Header == nil {
+	// Browser API web-origin requests may be unsigned; other HAIP requests require JAR.
+	requiresJAR := !(params.ResponseMode == "dc_api.jwt" && strings.HasPrefix(params.ClientID, "web-origin:"))
+	if requiresJAR && (reqObj == nil || reqObj.Header == nil) {
 		violations = append(violations, "HAIP: signed Request Object (JAR) MUST be used")
 	}
 

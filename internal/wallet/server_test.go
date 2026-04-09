@@ -445,6 +445,172 @@ func TestPresentationAPI_InvalidURI(t *testing.T) {
 	}
 }
 
+func TestBrowserPresentationAPI_DCAPIUnsigned(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	body := `{
+		"digital": {
+			"requests": [
+				{
+					"protocol": "openid4vp-v1-unsigned",
+					"data": {
+						"client_id": "web-origin:https://rp.example",
+						"response_type": "vp_token",
+						"response_mode": "dc_api",
+						"nonce": "browser-nonce",
+						"state": "browser-state",
+						"dcql_query": {
+							"credentials": [
+								{
+									"id": "pid",
+									"format": "dc+sd-jwt",
+									"meta": {"vct_values": ["` + mock.DefaultPIDVCT + `"]},
+									"claims": [{"path": ["given_name"]}]
+								}
+							]
+						}
+					}
+				}
+			]
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/api/dc-api", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://rp.example")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if result["protocol"] != BrowserAPIProtocolOpenID4VPUnsigned {
+		t.Fatalf("expected unsigned protocol, got %v", result["protocol"])
+	}
+
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected browser data object, got %T", result["data"])
+	}
+	if data["state"] != "browser-state" {
+		t.Fatalf("expected state in browser result, got %v", data["state"])
+	}
+
+	vpToken, ok := data["vp_token"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected vp_token object, got %T", data["vp_token"])
+	}
+	pidEntries, ok := vpToken["pid"].([]any)
+	if !ok || len(pidEntries) != 1 {
+		t.Fatalf("expected vp_token.pid with one entry, got %v", vpToken["pid"])
+	}
+}
+
+func TestBrowserPresentationAPI_DCAPISignedJWT(t *testing.T) {
+	srv := newTestServer(t, true)
+	encKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating encryption key: %v", err)
+	}
+	jwk := testEncJWK(t, &encKey.PublicKey)
+
+	requestJWT := makeTestJWT(
+		map[string]any{"alg": "ES256", "typ": "oauth-authz-req+jwt"},
+		map[string]any{
+			"client_id":     "https://verifier.example",
+			"response_type": "vp_token",
+			"response_mode": "dc_api.jwt",
+			"nonce":         "browser-nonce",
+			"state":         "browser-state",
+			"dcql_query": map[string]any{
+				"credentials": []any{
+					map[string]any{
+						"id":     "pid",
+						"format": "dc+sd-jwt",
+						"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+						"claims": []any{map[string]any{"path": []any{"given_name"}}},
+					},
+				},
+			},
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+				"encrypted_response_enc_values_supported": []any{"A128GCM"},
+			},
+		},
+	)
+
+	payload := map[string]any{
+		"digital": map[string]any{
+			"requests": []any{
+				map[string]any{
+					"protocol": BrowserAPIProtocolOpenID4VPSigned,
+					"data": map[string]any{
+						"request": requestJWT,
+					},
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshaling payload: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/dc-api", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if result["protocol"] != BrowserAPIProtocolOpenID4VPSigned {
+		t.Fatalf("expected signed protocol, got %v", result["protocol"])
+	}
+
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected browser data object, got %T", result["data"])
+	}
+	responseJWT, ok := data["response"].(string)
+	if !ok || responseJWT == "" {
+		t.Fatalf("expected encrypted response JWT, got %v", data["response"])
+	}
+
+	plaintext, err := DecryptRequestObjectJWE(responseJWT, encKey)
+	if err != nil {
+		t.Fatalf("decrypting browser response: %v", err)
+	}
+
+	var decrypted map[string]any
+	if err := json.Unmarshal([]byte(plaintext), &decrypted); err != nil {
+		t.Fatalf("parsing decrypted response: %v", err)
+	}
+	if decrypted["state"] != "browser-state" {
+		t.Fatalf("expected state in encrypted response, got %v", decrypted["state"])
+	}
+	vpToken, ok := decrypted["vp_token"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected encrypted vp_token object, got %T", decrypted["vp_token"])
+	}
+	pidEntries, ok := vpToken["pid"].([]any)
+	if !ok || len(pidEntries) != 1 {
+		t.Fatalf("expected encrypted vp_token.pid with one entry, got %v", vpToken["pid"])
+	}
+}
+
 // --- Full Presentation E2E Test (auto-accept) ---
 
 func TestPresentationFlow_AutoAccept(t *testing.T) {

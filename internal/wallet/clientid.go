@@ -80,12 +80,14 @@ func VerifyRequestObjectSignature(reqObj *oid4vc.RequestObjectJWT) string {
 // VerifyClientID validates the client_id prefix against the request object and
 // response URI per OID4VP 1.0 Client Identifier Prefixes.
 // Returns a warning string if there's a mismatch, or "" if OK / not applicable.
-func VerifyClientID(clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) string {
+func VerifyClientID(clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string, requestOrigin string) string {
 	switch {
 	case strings.HasPrefix(clientID, "x509_san_dns:"):
 		return verifyX509SAN(clientID, "x509_san_dns:", "dns", reqObj)
 	case strings.HasPrefix(clientID, "x509_hash:"):
 		return verifyX509Hash(clientID, reqObj)
+	case strings.HasPrefix(clientID, "web-origin:"):
+		return verifyWebOrigin(clientID, requestOrigin)
 	case strings.HasPrefix(clientID, "redirect_uri:"):
 		return verifyRedirectURI(clientID, reqObj, responseURI)
 	case strings.HasPrefix(clientID, "verifier_attestation:"):
@@ -95,6 +97,20 @@ func VerifyClientID(clientID string, reqObj *oid4vc.RequestObjectJWT, responseUR
 	default:
 		return ""
 	}
+}
+
+func verifyWebOrigin(clientID, requestOrigin string) string {
+	expected := strings.TrimPrefix(clientID, "web-origin:")
+	if expected == "" {
+		return "web-origin: client_id value is empty"
+	}
+	if requestOrigin == "" {
+		return "web-origin: client_id requires the caller origin but none was provided"
+	}
+	if expected != requestOrigin {
+		return fmt.Sprintf("web-origin: client_id origin %q does not match caller origin %q", expected, requestOrigin)
+	}
+	return ""
 }
 
 // verifyX509SAN checks that the leaf certificate SAN contains the expected DNS name.

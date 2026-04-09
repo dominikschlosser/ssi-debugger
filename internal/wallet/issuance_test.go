@@ -136,6 +136,58 @@ func TestExtractCredential_EmptyCredentialsArray(t *testing.T) {
 	}
 }
 
+func TestBuildCredentialResponseEncryptionRequest(t *testing.T) {
+	holderKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	metadata := map[string]any{
+		"credential_response_encryption": map[string]any{
+			"alg_values_supported": []any{"ECDH-ES+A256KW", "ECDH-ES"},
+			"enc_values_supported": []any{"A256GCM", "A128GCM"},
+		},
+	}
+
+	got := buildCredentialResponseEncryptionRequest(metadata, holderKey)
+	if got == nil {
+		t.Fatal("expected credential response encryption request")
+	}
+	if got["enc"] != "A128GCM" {
+		t.Fatalf("expected preferred enc A128GCM, got %v", got["enc"])
+	}
+	jwk, ok := got["jwk"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected jwk object, got %T", got["jwk"])
+	}
+	if jwk["alg"] != "ECDH-ES" {
+		t.Fatalf("expected preferred alg ECDH-ES, got %v", jwk["alg"])
+	}
+	if jwk["use"] != "enc" {
+		t.Fatalf("expected use=enc, got %v", jwk["use"])
+	}
+}
+
+func TestParseCredentialResponseBody_EncryptedJWE(t *testing.T) {
+	holderKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	jwe, _, err := EncryptJWE([]byte(`{"credential":"encrypted-credential"}`), &holderKey.PublicKey, "kid1", "ECDH-ES", "A128GCM", nil, nil)
+	if err != nil {
+		t.Fatalf("EncryptJWE: %v", err)
+	}
+
+	got, err := parseCredentialResponseBody([]byte(jwe), holderKey)
+	if err != nil {
+		t.Fatalf("parseCredentialResponseBody: %v", err)
+	}
+	if got["credential"] != "encrypted-credential" {
+		t.Fatalf("expected decrypted credential, got %v", got["credential"])
+	}
+}
+
 func TestResolveCredentialFormat(t *testing.T) {
 	metadata := map[string]any{
 		"credential_configurations_supported": map[string]any{

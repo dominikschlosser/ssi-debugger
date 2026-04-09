@@ -33,6 +33,9 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
 
+var preferredCredentialResponseEncryptionAlgs = []string{"ECDH-ES"}
+var preferredCredentialResponseEncryptionEncs = []string{"A128GCM", "A256GCM", "A128CBC-HS256"}
+
 // HTTPClient is the interface used for HTTP requests during issuance flows.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
@@ -114,6 +117,7 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	if len(offer.CredentialConfigurationIDs) > 0 {
 		credFormat = resolveCredentialFormat(metadata, offer.CredentialConfigurationIDs[0])
 	}
+	responseEncryption := buildCredentialResponseEncryptionRequest(metadata, w.HolderKey)
 
 	// Extract credential_identifiers from authorization_details in token response
 	credentialIdentifier := resolveCredentialIdentifier(tokenResp, offer.CredentialConfigurationIDs)
@@ -138,7 +142,15 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	if cNonce == "" {
 		// Try credential request without proof to get c_nonce from error response
 		log.Printf("[VCI] No c_nonce available, attempting credential request to obtain one")
-		nonceResp, nonceErr := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID)
+		nonceResp, nonceErr := requestCredential(
+			credentialEndpoint,
+			accessToken,
+			proofJWT,
+			credentialIdentifier,
+			credentialConfigurationID,
+			responseEncryption,
+			w.HolderKey,
+		)
 		if nonceErr != nil {
 			// Check if the error response contained a c_nonce
 			if n, ok := nonceResp["c_nonce"].(string); ok && n != "" {
@@ -176,7 +188,15 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 		}
 	}
 
-	credResp, err := requestCredential(credentialEndpoint, accessToken, proofJWT, credentialIdentifier, credentialConfigurationID)
+	credResp, err := requestCredential(
+		credentialEndpoint,
+		accessToken,
+		proofJWT,
+		credentialIdentifier,
+		credentialConfigurationID,
+		responseEncryption,
+		w.HolderKey,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("requesting credential: %w", err)
 	}
@@ -521,6 +541,55 @@ func resolveCredentialIdentifier(tokenResp map[string]any, configIDs []string) s
 	return ""
 }
 
+func buildCredentialResponseEncryptionRequest(metadata map[string]any, holderKey *ecdsa.PrivateKey) map[string]any {
+	if holderKey == nil {
+		return nil
+	}
+	raw, ok := metadata["credential_response_encryption"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	alg := firstSupportedString(raw["alg_values_supported"], preferredCredentialResponseEncryptionAlgs)
+	enc := firstSupportedString(raw["enc_values_supported"], preferredCredentialResponseEncryptionEncs)
+	if alg == "" || enc == "" {
+		return nil
+	}
+
+	return map[string]any{
+		"jwk": publicCredentialResponseEncryptionJWK(&holderKey.PublicKey, alg),
+		"enc": enc,
+	}
+}
+
+func publicCredentialResponseEncryptionJWK(key *ecdsa.PublicKey, alg string) map[string]any {
+	jwk := mock.PublicKeyJWKMap(key)
+	return map[string]any{
+		"kty": jwk["kty"],
+		"crv": jwk["crv"],
+		"x":   jwk["x"],
+		"y":   jwk["y"],
+		"kid": mock.KeyIDForPublicKey(key),
+		"use": "enc",
+		"alg": alg,
+	}
+}
+
+func firstSupportedString(raw any, preferred []string) string {
+	values, ok := raw.([]any)
+	if !ok {
+		return ""
+	}
+	for _, want := range preferred {
+		for _, candidate := range values {
+			if got, _ := candidate.(string); got == want {
+				return got
+			}
+		}
+	}
+	return ""
+}
+
 // extractCredential extracts the credential string from a credential response.
 // Supports both the single "credential" field and the "credentials" array format.
 func extractCredential(resp map[string]any) string {
@@ -543,6 +612,25 @@ func extractCredential(resp map[string]any) string {
 	}
 
 	return ""
+}
+
+func parseCredentialResponseBody(body []byte, holderKey *ecdsa.PrivateKey) (map[string]any, error) {
+	trimmed := strings.TrimSpace(string(body))
+	var out map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &out); err == nil {
+		return out, nil
+	}
+	if holderKey == nil {
+		return nil, fmt.Errorf("credential response is not valid JSON")
+	}
+	decrypted, err := DecryptCompactJWE(trimmed, holderKey)
+	if err != nil {
+		return nil, fmt.Errorf("credential response is neither valid JSON nor decryptable compact JWE: %w", err)
+	}
+	if err := json.Unmarshal([]byte(decrypted), &out); err != nil {
+		return nil, fmt.Errorf("parsing decrypted credential response JSON: %w", err)
+	}
+	return out, nil
 }
 
 // fetchNonce tries to obtain a c_nonce from a dedicated nonce endpoint.
@@ -584,7 +672,15 @@ func fetchNonce(metadata map[string]any, issuer string) string {
 }
 
 // requestCredential sends a credential request to the issuer.
-func requestCredential(credentialEndpoint, accessToken, proofJWT string, credentialIdentifier string, credentialConfigurationID string) (map[string]any, error) {
+func requestCredential(
+	credentialEndpoint,
+	accessToken,
+	proofJWT string,
+	credentialIdentifier string,
+	credentialConfigurationID string,
+	credentialResponseEncryption map[string]any,
+	holderKey *ecdsa.PrivateKey,
+) (map[string]any, error) {
 	reqBody := map[string]any{
 		"proofs": map[string]any{
 			"jwt": []string{proofJWT},
@@ -595,6 +691,9 @@ func requestCredential(credentialEndpoint, accessToken, proofJWT string, credent
 		reqBody["credential_identifier"] = credentialIdentifier
 	} else if credentialConfigurationID != "" {
 		reqBody["credential_configuration_id"] = credentialConfigurationID
+	}
+	if credentialResponseEncryption != nil {
+		reqBody["credential_response_encryption"] = credentialResponseEncryption
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)
@@ -620,10 +719,9 @@ func requestCredential(credentialEndpoint, accessToken, proofJWT string, credent
 		return nil, fmt.Errorf("reading credential response: %w", err)
 	}
 
-	var credResp map[string]any
-	if err := json.Unmarshal(body, &credResp); err != nil {
-		// If not JSON, try treating the body as the raw credential
-		return map[string]any{"credential": string(body)}, nil
+	credResp, err := parseCredentialResponseBody(body, holderKey)
+	if err != nil {
+		return nil, err
 	}
 
 	if errMsg, ok := credResp["error"].(string); ok {

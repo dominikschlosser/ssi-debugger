@@ -81,6 +81,7 @@ func (s *Server) setupRoutes() {
 
 	// API: feed authorization request URIs
 	s.mux.HandleFunc("POST /api/presentations", s.handlePresentationAPI)
+	s.mux.HandleFunc("POST /api/dc-api", s.handleBrowserPresentationAPI)
 
 	// API: credential offers
 	s.mux.HandleFunc("POST /api/offers", s.handleOfferAPI)

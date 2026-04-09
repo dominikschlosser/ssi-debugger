@@ -1,11 +1,13 @@
 # OIDF Conformance
 
-This repository can run the current OpenID Foundation wallet plans for OID4VP 1.0 Final and OID4VCI 1.0 Final against the local wallet implementation.
+This repository can run the current OpenID Foundation wallet plans for OID4VP 1.0 Final, OID4VCI 1.0 Final, and the current HAIP wallet variants against the local wallet implementation.
 
-The wrapper is intentionally Final-only by default:
+The wrapper uses the current Final wallet plans plus the current HAIP wallet plans:
 
 - `oid4vp-1final-wallet-test-plan`
 - `oid4vci-1_0-wallet-test-plan`
+- `oid4vp-1final-wallet-haip-test-plan`
+- `oid4vci-1_0-wallet-haip-test-plan`
 
 It does not use the older ID3 wallet plan, and it does not add suite-specific behavior to the wallet. The runner adapts the OIDF config to the wallet's normal keys, CA, credentials, and HTTPS issuer metadata.
 
@@ -29,8 +31,10 @@ It does not use the older ID3 wallet plan, and it does not add suite-specific be
 - generates per-scenario OIDF config files from the upstream templates
 - keeps the VCI suite alias aligned with the configured `redirect_uri` / helper-page paths
 - disables the suite's VCI browser helper page and drives the same offer URL directly through the wallet API
+- drives Browser API `dc_api` / `dc_api.jwt` presentation requests through the wallet's `/api/dc-api` endpoint
 - monitors waiting modules and automatically:
   - submits presentation requests to `/api/presentations`
+  - executes Browser API presentation requests from `browser.browserApiRequests`
   - submits credential offers to `/api/offers`
   - follows returned verifier `redirect_uri` values
   - uploads placeholder screenshots for negative-review modules
@@ -38,27 +42,22 @@ It does not use the older ID3 wallet plan, and it does not add suite-specific be
 
 ## Default matrix
 
-The default run covers the current Final scenarios this wallet is expected to pass:
+The default run covers the current Final and HAIP scenarios this wallet is expected to pass:
 
 - VP Final: SD-JWT `direct_post`, signed `request_uri`, `x509_hash`
 - VP Final: SD-JWT `direct_post.jwt`, signed `request_uri`, `x509_hash`
 - VP Final: SD-JWT `direct_post`, unsigned `request_uri`, `redirect_uri`
 - VP Final: mDoc `direct_post.jwt`, signed `request_uri`, `x509_hash`
+- VP HAIP: SD-JWT `direct_post.jwt`
+- VP HAIP: mDoc `direct_post.jwt`
+- VP HAIP: SD-JWT `dc_api.jwt` plan, covering both unsigned `web-origin` and signed `x509_san_dns` Browser API modules
+- VP HAIP: mDoc `dc_api.jwt` plan, covering both unsigned `web-origin` and signed `x509_san_dns` Browser API modules
 - VCI Final: SD-JWT authorization-code issuer-initiated flow with client attestation + DPoP
 - VCI Final: mDoc authorization-code issuer-initiated flow with client attestation + DPoP
+- VCI HAIP: SD-JWT plan, covering immediate plain, deferred plain, and immediate encrypted responses
+- VCI HAIP: mDoc plan, covering immediate plain, deferred plain, and immediate encrypted responses
 
 Those runs are fixed in the wrapper. There is no plan selector and no ID3 fallback.
-
-## Optional HAIP
-
-Set `OIDF_INCLUDE_HAIP=1` to add the currently supported HAIP-oriented scenarios on top of the Final matrix.
-
-Today that means:
-
-- VP HAIP `direct_post.jwt` runs that stay on the current wallet-supported OID4VP path
-- one VCI HAIP key-attestation scenario on the current authorization-code + DPoP path
-
-This is not a full HAIP certification sweep. In particular, the wrapper does not currently try to drive the broader HAIP matrices that depend on wallet capabilities this repo does not yet implement end to end, such as DC API presentation flows or encrypted VCI credential responses.
 
 ## Prerequisites
 
@@ -90,7 +89,6 @@ Useful environment overrides:
 - `OIDF_VCI_CLIENT_ID`: override the configured OID4VCI client ID
 - `OIDF_VCI_REDIRECT_URI`: override the configured OID4VCI redirect URI
 - `OIDF_VCI_ALIAS`: convenience alias used by the default `OIDF_VCI_REDIRECT_URI`
-- `OIDF_INCLUDE_HAIP=1`: add the currently supported HAIP scenarios
 - `OIDF_SUITE_URL`: override the suite tarball URL; defaults to the upstream `master` archive
 - `CONFORMANCE_SERVER`: override the OIDF base URL; defaults to `https://demo.certification.openid.net/`
 
@@ -125,11 +123,9 @@ That keeps the conformance run aligned with real wallet behavior instead of carr
 
 ## Known gaps
 
-Current gaps outside the default Final matrix:
+Current remaining gap in the hosted OIDF service:
 
-- no DC API presentation flow support
-- no end-to-end encrypted VCI credential response handling
-- no full HAIP certification sweep
+- the OIDF site's plain `direct_post` alternate-happy-flow VP Final modules still fail before the wallet receives a request because the hosted suite currently tries to replace an encryption step that does not exist for unencrypted response modes
 
 ## References
 

@@ -23,7 +23,7 @@ import (
 func haipCompliantParams() (*AuthorizationRequestParams, *oid4vc.RequestObjectJWT) {
 	params := &AuthorizationRequestParams{
 		ClientID:     "x509_hash:abc123",
-		ResponseMode: "direct_post.jwt",
+		ResponseMode: "dc_api.jwt",
 		DCQLQuery:    map[string]any{"credentials": []any{}},
 	}
 	reqObj := &oid4vc.RequestObjectJWT{
@@ -54,9 +54,9 @@ func TestValidateHAIPCompliance(t *testing.T) {
 		},
 		{
 			name:           "wrong client_id scheme",
-			modifyParams:   func(p *AuthorizationRequestParams) { p.ClientID = "x509_san_dns:example.com" },
+			modifyParams:   func(p *AuthorizationRequestParams) { p.ClientID = "redirect_uri:https://example.com" },
 			wantViolations: 1,
-			wantContain:    "x509_hash",
+			wantContain:    "client_id",
 		},
 		{
 			name:           "missing request object (JAR)",
@@ -69,6 +69,15 @@ func TestValidateHAIPCompliance(t *testing.T) {
 			modifyParams:   func(p *AuthorizationRequestParams) { p.DCQLQuery = nil },
 			wantViolations: 1,
 			wantContain:    "DCQL",
+		},
+		{
+			name: "web-origin unsigned browser flow",
+			modifyParams: func(p *AuthorizationRequestParams) {
+				p.ClientID = "web-origin:https://wallet.example"
+				p.ResponseMode = "dc_api.jwt"
+			},
+			useNilReqObj:   true,
+			wantViolations: 0,
 		},
 		{
 			name:           "wrong algorithm",

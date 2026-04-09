@@ -36,12 +36,20 @@ type AuthorizationRequestParams struct {
 	ResponseMode     string
 	Nonce            string
 	State            string
+	RequestOrigin    string
 	RedirectURI      string
 	ResponseURI      string
 	RequestURIMethod string
 	ClientMetadata   map[string]any
 	DCQLQuery        map[string]any
 	RequestObject    *oid4vc.RequestObjectJWT
+}
+
+type preparedPresentation struct {
+	ResponseURI string
+	Params      PresentationParams
+	VPResult    *VPTokenMapResult
+	IDToken     string
 }
 
 // handleAuthFlow is the core OID4VP flow handler.
@@ -217,6 +225,79 @@ func (s *Server) submitPresentationWithNotify(w http.ResponseWriter, authReq *Au
 	}
 }
 
+func (s *Server) preparePresentation(authReq *AuthorizationRequestParams, matches []CredentialMatch) (*preparedPresentation, error) {
+	responseURI := authReq.ResponseURI
+	if responseURI == "" {
+		responseURI = authReq.RedirectURI
+	}
+
+	params := PresentationParams{
+		Nonce:          authReq.Nonce,
+		ClientID:       authReq.ClientID,
+		ResponseURI:    responseURI,
+		RedirectURI:    authReq.RedirectURI,
+		ResponseMode:   authReq.ResponseMode,
+		ClientMetadata: authReq.ClientMetadata,
+		RequestObject:  authReq.RequestObject,
+	}
+
+	prepared := &preparedPresentation{
+		ResponseURI: responseURI,
+		Params:      params,
+	}
+
+	if ResponseTypeContains(authReq.ResponseType, "vp_token") || authReq.ResponseType == "" {
+		vpResult, err := s.wallet.CreateVPTokenMap(matches, params)
+		if err != nil {
+			return nil, fmt.Errorf("creating VP token map: %w", err)
+		}
+		prepared.VPResult = vpResult
+	}
+
+	if ResponseTypeContains(authReq.ResponseType, "id_token") {
+		idToken, err := s.wallet.CreateSelfIssuedIDToken(authReq.Nonce, authReq.ClientID)
+		if err != nil {
+			return nil, fmt.Errorf("creating id_token: %w", err)
+		}
+		prepared.IDToken = idToken
+	}
+
+	return prepared, nil
+}
+
+func (s *Server) buildBrowserPresentationResult(authReq *AuthorizationRequestParams, protocol string, matches []CredentialMatch) (*BrowserAPIResult, *preparedPresentation, error) {
+	prepared, err := s.preparePresentation(authReq, matches)
+	if err != nil {
+		return nil, nil, err
+	}
+	response, err := s.wallet.BuildAuthorizationResponse(prepared.VPResult, prepared.IDToken, authReq.State, prepared.Params)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := BuildBrowserAPIResult(protocol, response)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, prepared, nil
+}
+
+func (s *Server) buildBrowserAuthorizationErrorResult(authReq *AuthorizationRequestParams, protocol, errorCode, errorDescription string) (*BrowserAPIResult, error) {
+	params := PresentationParams{
+		Nonce:          authReq.Nonce,
+		ClientID:       authReq.ClientID,
+		ResponseURI:    authReq.ResponseURI,
+		RedirectURI:    authReq.RedirectURI,
+		ResponseMode:   authReq.ResponseMode,
+		ClientMetadata: authReq.ClientMetadata,
+		RequestObject:  authReq.RequestObject,
+	}
+	response, err := s.wallet.BuildAuthorizationErrorResponse(errorCode, errorDescription, authReq.State, params)
+	if err != nil {
+		return nil, err
+	}
+	return BuildBrowserAPIResult(protocol, response)
+}
+
 // submitAuthorizationError builds and submits an authorization error response to the verifier.
 func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *AuthorizationRequestParams, status, errorCode, errorDescription string) SubmissionResult {
 	responseURI := authReq.ResponseURI
@@ -279,44 +360,21 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 
 	s.log("  Submitting VP token to %s", responseURI)
 
-	var err error
-	// Create VP tokens
-	params := PresentationParams{
-		Nonce:          authReq.Nonce,
-		ClientID:       authReq.ClientID,
-		ResponseURI:    responseURI,
-		RedirectURI:    authReq.RedirectURI,
-		ResponseMode:   authReq.ResponseMode,
-		ClientMetadata: authReq.ClientMetadata,
-		RequestObject:  authReq.RequestObject,
+	prepared, err := s.preparePresentation(authReq, matches)
+	if err != nil {
+		s.log("  ERROR: Presentation preparation failed: %v", err)
+		s.wallet.AddLog("presentation", fmt.Sprintf("Presentation preparation failed: %v", err), false)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return SubmissionResult{Error: err.Error()}
 	}
-	var vpResult *VPTokenMapResult
-	if ResponseTypeContains(authReq.ResponseType, "vp_token") || authReq.ResponseType == "" {
-		vpResult, err = s.wallet.CreateVPTokenMap(matches, params)
-		if err != nil {
-			s.log("  ERROR: VP token creation failed: %v", err)
-			s.wallet.AddLog("presentation", fmt.Sprintf("VP token creation failed: %v", err), false)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return SubmissionResult{Error: err.Error()}
-		}
-		s.log("  VP tokens:     %d created", len(vpResult.TokenMap))
+	if prepared.VPResult != nil {
+		s.log("  VP tokens:     %d created", len(prepared.VPResult.TokenMap))
 	}
-
-	// Create self-issued id_token if requested
-	var idToken string
-	if ResponseTypeContains(authReq.ResponseType, "id_token") {
-		idToken, err = s.wallet.CreateSelfIssuedIDToken(authReq.Nonce, authReq.ClientID)
-		if err != nil {
-			s.log("  ERROR: id_token creation failed: %v", err)
-			s.wallet.AddLog("presentation", fmt.Sprintf("id_token creation failed: %v", err), false)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return SubmissionResult{Error: err.Error()}
-		}
+	if prepared.IDToken != "" {
 		s.log("  id_token:      created (SIOPv2)")
 	}
 
-	// Submit to verifier (encrypts if direct_post.jwt with encryption key)
-	result, err := s.wallet.SubmitPresentation(vpResult, idToken, authReq.State, responseURI, params)
+	result, err := s.wallet.SubmitPresentation(prepared.VPResult, prepared.IDToken, authReq.State, responseURI, prepared.Params)
 	if err != nil {
 		s.log("  ERROR: Submission failed: %v", err)
 		s.wallet.AddLog("presentation", fmt.Sprintf("Submission failed: %v", err), false)
@@ -335,9 +393,14 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 	s.wallet.AddLog("presentation", fmt.Sprintf("Presented to %s: %s", authReq.ClientID, FormatDirectPostResult(result)), true)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":        "submitted",
-		"response":      result,
-		"vp_token_keys": vpResult.QueryIDs(),
+		"status":   "submitted",
+		"response": result,
+		"vp_token_keys": func() []string {
+			if prepared.VPResult == nil {
+				return nil
+			}
+			return prepared.VPResult.QueryIDs()
+		}(),
 	})
 
 	return SubmissionResult{

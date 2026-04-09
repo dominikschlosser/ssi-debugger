@@ -25,22 +25,22 @@ import (
 	"strings"
 )
 
-// SubmitDirectPost submits a VP token and optional id_token via direct_post to the response URI.
-func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*DirectPostResult, error) {
+// SubmitDirectPostObject submits an authorization response object via direct_post.
+func SubmitDirectPostObject(responseURI string, payload map[string]any) (*DirectPostResult, error) {
 	form := url.Values{}
-	if state != "" {
-		form.Set("state", state)
-	}
-
-	if vpToken != nil {
-		tokenJSON, err := json.Marshal(vpToken)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling vp_token: %w", err)
+	for key, value := range payload {
+		switch key {
+		case "vp_token":
+			tokenJSON, err := json.Marshal(value)
+			if err != nil {
+				return nil, fmt.Errorf("marshaling vp_token: %w", err)
+			}
+			form.Set(key, string(tokenJSON))
+		case "id_token", "state", "error", "error_description":
+			if text, ok := value.(string); ok && text != "" {
+				form.Set(key, text)
+			}
 		}
-		form.Set("vp_token", string(tokenJSON))
-	}
-	if idToken != "" {
-		form.Set("id_token", idToken)
 	}
 
 	resp, err := http.PostForm(responseURI, form)
@@ -65,37 +65,14 @@ func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*
 	return result, nil
 }
 
+// SubmitDirectPost submits a VP token and optional id_token via direct_post to the response URI.
+func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*DirectPostResult, error) {
+	return SubmitDirectPostObject(responseURI, buildPlainAuthorizationResponse(vpToken, idToken, state))
+}
+
 // SubmitDirectPostError submits an authorization error response via direct_post.
 func SubmitDirectPostError(responseURI, state, errorCode, errorDescription string) (*DirectPostResult, error) {
-	form := url.Values{}
-	form.Set("error", errorCode)
-	if errorDescription != "" {
-		form.Set("error_description", errorDescription)
-	}
-	if state != "" {
-		form.Set("state", state)
-	}
-
-	resp, err := http.PostForm(responseURI, form)
-	if err != nil {
-		return nil, fmt.Errorf("posting to response_uri: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	result := &DirectPostResult{
-		StatusCode: resp.StatusCode,
-		Body:       string(body),
-	}
-	if err := applyVerifierResponse(result, resp.Header, body); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return SubmitDirectPostObject(responseURI, buildPlainAuthorizationErrorResponse(errorCode, errorDescription, state))
 }
 
 // DirectPostResult represents the result of a direct_post submission.

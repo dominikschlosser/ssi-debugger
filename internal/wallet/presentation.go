@@ -243,9 +243,37 @@ func (r *VPTokenMapResult) QueryIDs() []string {
 	return mapKeys(r.TokenMap)
 }
 
-// SubmitPresentation builds the vp_token, optionally encrypts it, and submits to the verifier.
-// If idToken is non-empty, it is included alongside vp_token in the response.
-func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+func buildPlainAuthorizationResponse(vpToken any, idToken, state string) map[string]any {
+	payload := map[string]any{}
+	if state != "" {
+		payload["state"] = state
+	}
+	if vpToken != nil {
+		payload["vp_token"] = vpToken
+	}
+	if idToken != "" {
+		payload["id_token"] = idToken
+	}
+	return payload
+}
+
+func buildPlainAuthorizationErrorResponse(errorCode, errorDescription, state string) map[string]any {
+	payload := map[string]any{
+		"error": errorCode,
+	}
+	if errorDescription != "" {
+		payload["error_description"] = errorDescription
+	}
+	if state != "" {
+		payload["state"] = state
+	}
+	return payload
+}
+
+// BuildAuthorizationResponse constructs the authorization response without
+// submitting it to the verifier. The result can then be delivered via
+// direct_post, fragment, or a Browser API wrapper.
+func (w *Wallet) BuildAuthorizationResponse(vpResult *VPTokenMapResult, idToken, state string, params PresentationParams) (*AuthorizationResponseEnvelope, error) {
 	var vpToken any
 	if vpResult != nil {
 		vpToken = vpResult.VPToken()
@@ -255,63 +283,136 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, 
 		mdocNonce = vpResult.MDocNonce
 	}
 
-	switch params.ResponseMode {
-	case "direct_post.jwt":
+	responseMode := params.ResponseMode
+	if responseMode == "" {
+		responseMode = "direct_post"
+	}
+
+	plain := buildPlainAuthorizationResponse(vpToken, idToken, state)
+
+	switch responseMode {
+	case "direct_post.jwt", "dc_api.jwt":
 		if !HasEncryptionKeyForParams(params.RequestObject, params.ClientMetadata) {
-			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
+			return nil, fmt.Errorf("response_mode is %s but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0", responseMode)
 		}
 		jwe, cek, err := w.EncryptResponse(vpToken, idToken, state, mdocNonce, params)
 		if err != nil {
 			return nil, fmt.Errorf("encrypting response: %w", err)
 		}
-		return SubmitDirectPostJWT(responseURI, jwe, cek)
-
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			ResponseJWT:  jwe,
+			CEK:          cek,
+		}, nil
 	case "fragment":
 		redirectURI := params.RedirectURI
 		if redirectURI == "" {
-			redirectURI = responseURI
+			redirectURI = params.ResponseURI
 		}
 		redirectURL, err := BuildFragmentRedirect(redirectURI, state, vpToken, idToken)
 		if err != nil {
 			return nil, fmt.Errorf("building fragment redirect: %w", err)
 		}
 		log.Printf("[VP] Fragment response mode: redirect to %s", format.Truncate(redirectURL, 120))
-		return &DirectPostResult{
-			StatusCode:  302,
-			RedirectURI: redirectURL,
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			RedirectURI:  redirectURL,
 		}, nil
-
+	case "direct_post", "dc_api":
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			Plain:        plain,
+		}, nil
 	default:
-		// direct_post (default)
-		return SubmitDirectPost(responseURI, state, vpToken, idToken)
+		return nil, fmt.Errorf("unsupported response_mode %q", responseMode)
 	}
 }
 
-// SubmitAuthorizationError submits an authorization error response to the verifier.
-func (w *Wallet) SubmitAuthorizationError(errorCode, errorDescription, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
-	switch params.ResponseMode {
-	case "direct_post.jwt":
+// BuildAuthorizationErrorResponse constructs an authorization error response
+// without submitting it to the verifier.
+func (w *Wallet) BuildAuthorizationErrorResponse(errorCode, errorDescription, state string, params PresentationParams) (*AuthorizationResponseEnvelope, error) {
+	responseMode := params.ResponseMode
+	if responseMode == "" {
+		responseMode = "direct_post"
+	}
+
+	switch responseMode {
+	case "direct_post.jwt", "dc_api.jwt":
 		if !HasEncryptionKeyForParams(params.RequestObject, params.ClientMetadata) {
-			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
+			return nil, fmt.Errorf("response_mode is %s but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0", responseMode)
 		}
 		jwe, cek, err := w.EncryptErrorResponse(errorCode, errorDescription, state, params)
 		if err != nil {
 			return nil, fmt.Errorf("encrypting error response: %w", err)
 		}
-		return SubmitDirectPostJWT(responseURI, jwe, cek)
-
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			ResponseJWT:  jwe,
+			CEK:          cek,
+		}, nil
 	case "fragment":
 		redirectURI := params.RedirectURI
 		if redirectURI == "" {
-			redirectURI = responseURI
+			redirectURI = params.ResponseURI
 		}
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			RedirectURI:  BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription),
+		}, nil
+	case "direct_post", "dc_api":
+		return &AuthorizationResponseEnvelope{
+			ResponseMode: responseMode,
+			Plain:        buildPlainAuthorizationErrorResponse(errorCode, errorDescription, state),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported response_mode %q", responseMode)
+	}
+}
+
+// SubmitPresentation builds the vp_token, optionally encrypts it, and submits to the verifier.
+// If idToken is non-empty, it is included alongside vp_token in the response.
+func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+	response, err := w.BuildAuthorizationResponse(vpResult, idToken, state, params)
+	if err != nil {
+		return nil, err
+	}
+	switch response.ResponseMode {
+	case "direct_post.jwt":
+		return SubmitDirectPostJWT(responseURI, response.ResponseJWT, response.CEK)
+	case "fragment":
 		return &DirectPostResult{
 			StatusCode:  302,
-			RedirectURI: BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription),
+			RedirectURI: response.RedirectURI,
 		}, nil
-
+	case "direct_post":
+		return SubmitDirectPostObject(responseURI, response.Plain)
+	case "dc_api", "dc_api.jwt":
+		return nil, fmt.Errorf("response_mode %q must be returned via Browser API, not direct submission", response.ResponseMode)
 	default:
-		return SubmitDirectPostError(responseURI, state, errorCode, errorDescription)
+		return nil, fmt.Errorf("unsupported response_mode %q", response.ResponseMode)
+	}
+}
+
+// SubmitAuthorizationError submits an authorization error response to the verifier.
+func (w *Wallet) SubmitAuthorizationError(errorCode, errorDescription, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+	response, err := w.BuildAuthorizationErrorResponse(errorCode, errorDescription, state, params)
+	if err != nil {
+		return nil, err
+	}
+	switch response.ResponseMode {
+	case "direct_post.jwt":
+		return SubmitDirectPostJWT(responseURI, response.ResponseJWT, response.CEK)
+	case "fragment":
+		return &DirectPostResult{
+			StatusCode:  302,
+			RedirectURI: response.RedirectURI,
+		}, nil
+	case "direct_post":
+		return SubmitDirectPostObject(responseURI, response.Plain)
+	case "dc_api", "dc_api.jwt":
+		return nil, fmt.Errorf("response_mode %q must be returned via Browser API, not direct submission", response.ResponseMode)
+	default:
+		return nil, fmt.Errorf("unsupported response_mode %q", response.ResponseMode)
 	}
 }
 

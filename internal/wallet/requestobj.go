@@ -223,9 +223,9 @@ func isJWE(s string) bool {
 	return len(parts) == 5 && len(parts[0]) > 0
 }
 
-// DecryptRequestObjectJWE decrypts a JWE-encrypted request object using the wallet's
-// EC private key via ECDH-ES key agreement. Returns the decrypted JWT string.
-func DecryptRequestObjectJWE(jwe string, key *ecdsa.PrivateKey) (string, error) {
+// DecryptCompactJWE decrypts a compact JWE using the wallet's EC private key
+// via ECDH-ES key agreement and returns the plaintext.
+func DecryptCompactJWE(jwe string, key *ecdsa.PrivateKey) (string, error) {
 	parts := strings.Split(jwe, ".")
 	if len(parts) != 5 {
 		return "", fmt.Errorf("invalid JWE: expected 5 parts, got %d", len(parts))
@@ -311,6 +311,12 @@ func DecryptRequestObjectJWE(jwe string, key *ecdsa.PrivateKey) (string, error) 
 	}
 
 	return strings.TrimSpace(string(plaintext)), nil
+}
+
+// DecryptRequestObjectJWE decrypts a JWE-encrypted request object using the wallet's
+// EC private key via ECDH-ES key agreement. Returns the decrypted JWT string.
+func DecryptRequestObjectJWE(jwe string, key *ecdsa.PrivateKey) (string, error) {
+	return DecryptCompactJWE(jwe, key)
 }
 
 // parseECPublicKeyFromEPK parses an EC public key from a JWK map (epk field).

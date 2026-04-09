@@ -43,6 +43,7 @@ func ValidateAuthorizationRequest(mode ValidationMode, params *AuthorizationRequ
 
 	responseURI := ""
 	clientID := ""
+	requestOrigin := ""
 	var reqObj *oid4vc.RequestObjectJWT
 	if params != nil {
 		responseURI = params.ResponseURI
@@ -50,21 +51,22 @@ func ValidateAuthorizationRequest(mode ValidationMode, params *AuthorizationRequ
 			responseURI = params.RedirectURI
 		}
 		clientID = params.ClientID
+		requestOrigin = params.RequestOrigin
 		reqObj = params.RequestObject
 	}
-	return validatePresentationRequestCore(mode, clientID, reqObj, responseURI)
+	return validatePresentationRequestCore(mode, clientID, reqObj, responseURI, requestOrigin)
 }
 
 // ValidatePresentationRequest evaluates client_id, request-object metadata, and signature checks.
 // In debug mode findings are returned as warnings; in strict mode any finding is fatal.
 func ValidatePresentationRequest(mode ValidationMode, clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) ([]string, error) {
-	return validatePresentationRequestCore(mode, clientID, reqObj, responseURI)
+	return validatePresentationRequestCore(mode, clientID, reqObj, responseURI, "")
 }
 
-func validatePresentationRequestCore(mode ValidationMode, clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) ([]string, error) {
+func validatePresentationRequestCore(mode ValidationMode, clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string, requestOrigin string) ([]string, error) {
 	var findings []string
 
-	if finding := VerifyClientID(clientID, reqObj, responseURI); finding != "" {
+	if finding := VerifyClientID(clientID, reqObj, responseURI, requestOrigin); finding != "" {
 		findings = append(findings, finding)
 	}
 	if finding := ValidateRequestObject(clientID, reqObj); finding != "" {
@@ -140,6 +142,8 @@ func validateResponseMode(responseMode, responseURI, redirectURI string) error {
 		if responseMode != "" && responseURI == "" {
 			return fmt.Errorf("response_mode %q requires response_uri", responseMode)
 		}
+	case "dc_api", "dc_api.jwt":
+		return nil
 	case "fragment":
 		if redirectURI == "" {
 			return fmt.Errorf("response_mode %q requires redirect_uri", responseMode)

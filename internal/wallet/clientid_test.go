@@ -103,7 +103,7 @@ func TestVerifyClientID_X509SanDNS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning := VerifyClientID(tt.clientID, tt.reqObj, "")
+			warning := VerifyClientID(tt.clientID, tt.reqObj, "", "")
 			if tt.wantEmpty && warning != "" {
 				t.Errorf("expected no warning, got: %s", warning)
 			}
@@ -132,7 +132,7 @@ func TestVerifyClientID_X509Hash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning := VerifyClientID(tt.clientID, reqObjWithX5C(certB64), "")
+			warning := VerifyClientID(tt.clientID, reqObjWithX5C(certB64), "", "")
 			if tt.wantEmpty && warning != "" {
 				t.Errorf("expected no warning, got: %s", warning)
 			}
@@ -173,7 +173,7 @@ func TestVerifyClientID_RedirectURI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning := VerifyClientID(tt.clientID, tt.reqObj, tt.responseURI)
+			warning := VerifyClientID(tt.clientID, tt.reqObj, tt.responseURI, "")
 			if tt.wantEmpty && warning != "" {
 				t.Errorf("expected no warning, got: %s", warning)
 			}
@@ -332,7 +332,7 @@ func TestVerifyClientID_VerifierAttestation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning := VerifyClientID(tt.clientID, tt.reqObj, "")
+			warning := VerifyClientID(tt.clientID, tt.reqObj, "", "")
 			if tt.wantEmpty && warning != "" {
 				t.Errorf("expected no warning, got: %s", warning)
 			}
@@ -391,7 +391,7 @@ func TestVerifyClientID_DecentralizedIdentifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning := VerifyClientID(tt.clientID, tt.reqObj, "")
+			warning := VerifyClientID(tt.clientID, tt.reqObj, "", "")
 			if tt.wantEmpty && warning != "" {
 				t.Errorf("expected no warning, got: %s", warning)
 			}
@@ -492,8 +492,23 @@ func TestVerifyClientID_RedirectURIAllowsUnsignedRequestObject(t *testing.T) {
 		"redirect_uri:https://verifier.example/cb",
 		reqObj,
 		"https://verifier.example/cb",
+		"",
 	)
 	if warning != "" {
 		t.Fatalf("expected redirect_uri client_id to allow unsigned request objects, got %s", warning)
+	}
+}
+
+func TestVerifyClientID_WebOrigin(t *testing.T) {
+	clientID := "web-origin:https://rp.example"
+
+	if warning := VerifyClientID(clientID, nil, "", "https://rp.example"); warning != "" {
+		t.Fatalf("expected matching web-origin to pass, got %s", warning)
+	}
+	if warning := VerifyClientID(clientID, nil, "", "https://other.example"); !strings.Contains(warning, "does not match") {
+		t.Fatalf("expected mismatch warning, got %q", warning)
+	}
+	if warning := VerifyClientID(clientID, nil, "", ""); !strings.Contains(warning, "requires the caller origin") {
+		t.Fatalf("expected missing origin warning, got %q", warning)
 	}
 }

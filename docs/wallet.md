@@ -222,7 +222,9 @@ oid4vc-dev wallet serve --register --port 9000
 | `--status-list`         | `false`  | Embed status list references in generated credentials (auto-enabled with `--pid`) |
 | `--base-url`            | —        | Base URL for the wallet's HTTP endpoints; its host is also used to derive the HTTPS issuer URL. Existing persisted issuer URLs are reused unless this flag is set |
 | `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` when deriving new HTTP and HTTPS wallet endpoint URLs |
-| `--haip`                      | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
+| `--vci-client-id`       | —        | Client ID to use for OID4VCI authorization-code flows |
+| `--vci-redirect-uri`    | —        | Redirect URI to use for OID4VCI authorization-code flows |
+| `--haip`                | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 | `--require-encrypted-request` | `false` | Require verifiers to encrypt request objects (sends encryption key in `wallet_metadata`) |
 
 ## `wallet accept <uri>`
@@ -253,7 +255,7 @@ oid4vc-dev wallet accept 'openid-credential-offer://...' --tx-code 123456
 | `--tx-code`             | —        | Transaction code for OID4VCI pre-authorized code flow |
 | `--haip`                | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 
-Note: only the pre-authorized code grant type is supported. Offers that only contain an `authorization_code` grant will be rejected with a clear error message.
+Note: pre-authorized code offers work directly with `wallet accept`. Authorization-code offers are also supported, but they require a running `wallet serve` instance configured with `--vci-client-id` and `--vci-redirect-uri`, plus issuer metadata that supports PAR and DPoP.
 
 ## `wallet scan`
 
@@ -355,13 +357,13 @@ oid4vc-dev wallet unregister             # Remove URL handlers
 
 ## HAIP 1.0 Enforcement
 
-This wallet currently enforces the implemented **OID4VP subset** of HAIP 1.0. It does not yet implement the full HAIP issuance profile, Wallet Attestation, Key Attestation, or PAR.
+This wallet enforces the HAIP checks that are currently exercised by the wallet and the current OIDF HAIP plans. That includes OID4VP `direct_post.jwt` and Browser API `dc_api.jwt` presentation flows, plus the OID4VCI authorization-code and encrypted credential-response behavior used by the current HAIP wallet plans.
 
 Use `--haip` with `wallet serve` or `wallet accept` to enforce [HAIP 1.0 Final](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html) compliance on incoming OID4VP requests. When enabled, the wallet rejects requests that violate any of:
 
-- `response_mode` must be `direct_post.jwt`
-- `client_id` must use the `x509_hash:` scheme
-- A signed request object (JAR) must be present
+- `response_mode` must be `direct_post.jwt` or `dc_api.jwt`
+- `client_id` must use `x509_hash:`, `x509_san_dns:`, or Browser API `web-origin:`
+- A signed request object (JAR) must be present, except for unsigned Browser API `web-origin:` `dc_api.jwt` requests
 - The query must use DCQL (not presentation definitions)
 - The request object signing algorithm must be `ES256`
 

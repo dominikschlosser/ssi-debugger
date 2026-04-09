@@ -6,17 +6,17 @@ This page covers the OID4VCI flows implemented by `oid4vc-dev` when it acts as a
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor Browser
     participant Wallet as oid4vc-dev
     participant Issuer as Issuer / AS
 
-    User->>Wallet: Open credential offer
+    Browser->>Wallet: Open credential offer
     Wallet->>Issuer: Fetch issuer metadata
     alt Offer uses pre-authorized code
         Wallet->>Issuer: Token request with pre-authorized_code and optional tx_code
     else Offer uses authorization code
         Wallet->>Issuer: PAR request
-        Wallet->>Issuer: Authorization request
+        Wallet->>Issuer: Authorization request via request_uri
         Wallet->>Issuer: Token request with code + PKCE
     end
     Wallet->>Issuer: Credential request with proofs.jwt
@@ -42,11 +42,11 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor Browser
     participant Issuer as Issuer / AS
     participant Wallet as oid4vc-dev
 
-    User->>Wallet: Open credential offer URI
+    Browser->>Wallet: Open credential offer URI
     Wallet->>Issuer: Fetch issuer metadata
     Wallet->>Issuer: POST token request<br/>grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
     Note over Wallet,Issuer: Optional tx_code is included when the wallet was given one.
@@ -75,11 +75,11 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor Browser
     participant Issuer as Issuer / AS
     participant Wallet as oid4vc-dev
 
-    User->>Wallet: Open credential offer URI
+    Browser->>Wallet: Open credential offer URI
     Wallet->>Issuer: Fetch issuer metadata and OAuth metadata
     Wallet->>Issuer: POST PAR request<br/>response_type=code, client_id, redirect_uri,<br/>scope, PKCE, optional issuer_state
     Issuer-->>Wallet: request_uri
@@ -115,28 +115,3 @@ sequenceDiagram
 | `token_endpoint_auth_methods_supported` | `oid4vc-dev` supports `private_key_jwt` and `attest_jwt_client_auth` here. Unsupported methods are rejected. |
 | `transaction_id` + `deferred_credential_endpoint` | If the credential response is deferred, the wallet follows this branch automatically. |
 | `notification_id` + `notification_endpoint` | If both are present, the wallet sends a notification after successful import. |
-
-## Credential Request Details Used By Both Grants
-
-```mermaid
-sequenceDiagram
-    participant Wallet as oid4vc-dev
-    participant Issuer as Issuer
-
-    Wallet->>Issuer: POST credential request
-    Note over Wallet,Issuer: Includes access token, proofs.jwt,<br/>and either credential_identifier or credential_configuration_id.
-    alt Issuer advertised credential response encryption
-        Wallet->>Issuer: Request credential_response_encryption
-        Issuer-->>Wallet: compact JWE
-        Wallet->>Wallet: decrypt compact JWE
-    else Plain response
-        Issuer-->>Wallet: JSON credential response
-    end
-```
-
-### Practical Checklist
-
-- If you want the simple happy path against `oid4vc-dev`, use a pre-authorized code offer.
-- If you want to test the more complete HAIP-style path, use the authorization-code flow with PAR, DPoP, and wallet `--vci-client-id` plus `--vci-redirect-uri`.
-- If your token response includes credential identifiers, expect `oid4vc-dev` to prefer `credential_identifier` over `credential_configuration_id`.
-- If your issuer advertises encrypted credential responses, expect the wallet to request them.

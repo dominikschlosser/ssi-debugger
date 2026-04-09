@@ -15,32 +15,32 @@ These diagrams intentionally treat `oid4vc-dev` as a single actor. They show the
 
 ```mermaid
 sequenceDiagram
-    actor User as User or calling app
+    actor Browser as Browser / calling app
     participant Issuer as Issuer / authorization server
     participant Wallet as oid4vc-dev
-    participant Verifier as Verifier / relying party
+    participant RP as RP page / verifier
 
-    Issuer-->>User: credential_offer or credential_offer_uri
-    User->>Wallet: openid-credential-offer:// or haip-vci://
+    Issuer-->>Browser: credential_offer or credential_offer_uri
+    Browser->>Wallet: openid-credential-offer:// or haip-vci://
     Wallet->>Issuer: token and credential requests
     Issuer-->>Wallet: credential
 
-    Verifier-->>User: authorization request or Browser API request
-    User->>Wallet: openid4vp:// / haip-vp:// / eudi-openid4vp:// or dc_api*
-    Wallet->>Verifier: presentation response
+    RP-->>Browser: authorization request or Browser API request
+    Browser->>Wallet: openid4vp:// / haip-vp:// / eudi-openid4vp:// or dc_api*
+    Wallet-->>RP: presentation response
 ```
 
 ## Supported Flow Map
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor Browser
     participant Wallet as oid4vc-dev
     participant Issuer as Issuer / AS
-    participant Verifier
+    participant RP as RP page / verifier
 
-    Note over User,Issuer: OID4VCI branch
-    User->>Wallet: receive and open credential offer
+    Note over Browser,Issuer: OID4VCI branch
+    Browser->>Wallet: receive and open credential offer
     alt pre-authorized code
         Wallet->>Issuer: token request with pre-authorized_code
     else authorization code
@@ -52,20 +52,20 @@ sequenceDiagram
     end
     Issuer-->>Wallet: credential
 
-    Note over User,Verifier: OID4VP branch
-    User->>Wallet: open URI request or trigger Browser API request
-    opt request or request_uri present
-        Wallet->>Verifier: fetch inline request or request_uri
+    Note over Browser,RP: OID4VP branch
+    Browser->>Wallet: open URI request or trigger Browser API request
+    opt request_uri present
+        Wallet->>RP: fetch request_uri
     end
     Wallet->>Wallet: evaluate dcql_query against stored credentials
     alt direct_post
-        Wallet->>Verifier: direct_post response
+        Wallet->>RP: direct_post response
     else direct_post.jwt
-        Wallet->>Verifier: encrypted direct_post.jwt response
+        Wallet->>RP: encrypted direct_post.jwt response
     else fragment
-        Wallet-->>User: redirect URI with fragment response
+        Wallet-->>Browser: redirect URI with fragment response
     else dc_api / dc_api.jwt
-        Wallet-->>Verifier: Browser API response
+        Wallet-->>Browser: Browser API response
     end
 ```
 
@@ -73,4 +73,4 @@ sequenceDiagram
 
 - Start with [OID4VCI Flows](./oid4vci.md) if you want to understand how credentials get into the wallet.
 - Start with [OID4VP Flows](./oid4vp.md) if you want to understand how the wallet selects and returns stored credentials.
-- Use the parameter tables on each page as the practical checklist for building issuer or verifier requests against `oid4vc-dev`.
+- Use the parameter tables on each page to see which request fields and wallet flags change behavior in `oid4vc-dev`.

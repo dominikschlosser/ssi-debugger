@@ -6,28 +6,28 @@ This page covers the OID4VP presentation flows implemented by `oid4vc-dev` when 
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Verifier
+    actor Browser
+    participant RP as RP page / verifier
     participant Wallet as oid4vc-dev
 
-    Verifier-->>User: Presentation request
-    User->>Wallet: Open URI request or trigger Browser API request
+    RP-->>Browser: Presentation request
+    Browser->>Wallet: Open URI request or trigger Browser API request
     opt request object is by reference
-        Wallet->>Verifier: Fetch request_uri
+        Wallet->>RP: Fetch request_uri
     end
     Wallet->>Wallet: Parse request and validate client_id / request object
     Wallet->>Wallet: Evaluate dcql_query
     Wallet->>Wallet: Build vp_token and optional id_token
     alt response_mode = direct_post
-        Wallet->>Verifier: direct_post
+        Wallet->>RP: direct_post
     else response_mode = direct_post.jwt
-        Wallet->>Verifier: encrypted direct_post.jwt
+        Wallet->>RP: encrypted direct_post.jwt
     else response_mode = fragment
-        Wallet-->>User: redirect_uri with fragment payload
+        Wallet-->>Browser: redirect_uri with fragment payload
     else response_mode = dc_api
-        Wallet-->>Verifier: Browser API plain response
+        Wallet-->>Browser: Browser API plain response
     else response_mode = dc_api.jwt
-        Wallet-->>Verifier: Browser API encrypted response
+        Wallet-->>Browser: Browser API encrypted response
     end
 ```
 
@@ -50,25 +50,27 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Verifier
+    actor Browser
+    participant RP as RP page / verifier
     participant Wallet as oid4vc-dev
 
-    Verifier-->>User: Authorization request URI or link
-    User->>Wallet: Open openid4vp://, haip-vp://, or eudi-openid4vp:// request
-    Wallet->>Verifier: Fetch request_uri if present
+    RP-->>Browser: Authorization request URI or link
+    Browser->>Wallet: Open openid4vp://, haip-vp://, or eudi-openid4vp:// request
+    Wallet->>RP: Fetch request_uri if present
     Wallet->>Wallet: Validate client_id and request object
     Wallet->>Wallet: Evaluate dcql_query against stored credentials
     opt response_type contains id_token
         Wallet->>Wallet: Create self-issued id_token
     end
-    Wallet->>Wallet: Create vp_token from selected credentials
+    opt response_type contains vp_token
+        Wallet->>Wallet: Create vp_token from selected credentials
+    end
     alt response_mode = direct_post
-        Wallet->>Verifier: POST vp_token, optional id_token, state
+        Wallet->>RP: POST optional vp_token, optional id_token, state
     else response_mode = direct_post.jwt
-        Wallet->>Verifier: POST encrypted response JWT
+        Wallet->>RP: POST encrypted response JWT
     else response_mode = fragment
-        Wallet-->>User: redirect_uri#vp_token=...&state=...
+        Wallet-->>Browser: redirect_uri#vp_token=...&state=...
     end
 ```
 
@@ -113,18 +115,18 @@ sequenceDiagram
 | `request_uri_method=post` | Switches the request-object fetch from GET to POST. |
 | `wallet_metadata` | Sent by `oid4vc-dev`; includes supported formats and signing algorithms, plus an encryption JWK when `--require-encrypted-request` is enabled. |
 | `wallet_nonce` | Sent by the wallet for replay protection and checked if returned inside the request object. |
-| `--require-encrypted-request` | Makes the wallet advertise an encryption key and expect a JWE request object for this variant. |
+| `--require-encrypted-request` | Makes the wallet advertise an encryption key and require the POSTed `request_uri` response to be a compact JWE. |
 | Request object `Content-Type` | `oid4vc-dev` expects `application/oauth-authz-req+jwt` on the POST response. |
 
 ## Browser API Flow
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor Browser
     participant RP as Browser / relying party page
     participant Wallet as oid4vc-dev
 
-    User->>RP: Trigger digital credentials request
+    Browser->>RP: Trigger digital credentials request
     RP->>Wallet: Browser API request envelope
     Wallet->>Wallet: Parse signed or unsigned browser request
     Wallet->>Wallet: Validate client_id and request object
@@ -158,10 +160,3 @@ sequenceDiagram
 | `decentralized_identifier:` | DID syntax and `kid` cross-check are validated; full DID resolution is not implemented. |
 | `--haip` | Tightens incoming VP validation to the currently implemented HAIP subset: encrypted response modes, supported client ID schemes, signed request objects, DCQL, and ES256 request object signatures. |
 | Wallet mode `debug` vs `strict` | `debug` logs some request findings and can keep partially matching DCQL credentials; `strict` turns the same issues into hard failures. |
-
-## Practical Checklist
-
-- Send `dcql_query` if you expect `oid4vc-dev` to return credentials.
-- Include `client_metadata.jwks` when you use `direct_post.jwt` or `dc_api.jwt`.
-- Use `response_uri` for `direct_post*` and `redirect_uri` for `fragment`.
-- Enable `--require-encrypted-request` only when you want to test the optional `request_uri_method=post` encrypted request-object branch.

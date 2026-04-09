@@ -91,13 +91,15 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 		w.AddLog("presentation", fmt.Sprintf("request validation warning: %s", warning), false)
 	}
 
+	requiresVP := wallet.ResponseTypeRequiresVP(parsed.ResponseType)
+
 	// Evaluate DCQL
 	var matches []wallet.CredentialMatch
-	if parsed.DCQLQuery != nil {
+	if parsed.DCQLQuery != nil && requiresVP {
 		matches = w.EvaluateDCQL(parsed.DCQLQuery)
 	}
 
-	if len(matches) == 0 {
+	if requiresVP && len(matches) == 0 {
 		return fmt.Errorf("no matching credentials found for the DCQL query")
 	}
 

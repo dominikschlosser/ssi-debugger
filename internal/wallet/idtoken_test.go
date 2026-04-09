@@ -178,6 +178,25 @@ func TestResponseTypeContains(t *testing.T) {
 	}
 }
 
+func TestResponseTypeRequiresVP(t *testing.T) {
+	tests := []struct {
+		responseType string
+		want         bool
+	}{
+		{"", true},
+		{"vp_token", true},
+		{"vp_token id_token", true},
+		{"id_token", false},
+	}
+
+	for _, tt := range tests {
+		got := ResponseTypeRequiresVP(tt.responseType)
+		if got != tt.want {
+			t.Errorf("ResponseTypeRequiresVP(%q) = %v, want %v", tt.responseType, got, tt.want)
+		}
+	}
+}
+
 func verifyES256(t *testing.T, token string, pub *ecdsa.PublicKey) bool {
 	t.Helper()
 	_, _, sig, err := format.ParseJWTParts(token)
@@ -308,5 +327,117 @@ func TestServerIDTokenFlow(t *testing.T) {
 	}
 	if payload["nonce"] != "nonce123" {
 		t.Errorf("expected nonce=nonce123, got %v", payload["nonce"])
+	}
+}
+
+func TestServerIDTokenOnlyFlowWithoutCredentialMatch(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	var receivedVPToken, receivedIDToken string
+	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		form, _ := url.ParseQuery(string(body))
+		receivedVPToken = form.Get("vp_token")
+		receivedIDToken = form.Get("id_token")
+		w.WriteHeader(200)
+		w.Write([]byte(`{}`))
+	}))
+	defer verifier.Close()
+
+	qp := url.Values{
+		"client_id":     {"https://verifier.example"},
+		"response_type": {"id_token"},
+		"response_mode": {"direct_post"},
+		"nonce":         {"nonce123"},
+		"state":         {"state456"},
+		"response_uri":  {verifier.URL},
+	}
+
+	req := httptest.NewRequest("GET", "/authorize?"+qp.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decodeJSON(t, w)
+	if result["status"] != "submitted" {
+		t.Fatalf("expected submitted, got %v", result["status"])
+	}
+	if receivedVPToken != "" {
+		t.Errorf("expected no vp_token in verifier request, got %q", receivedVPToken)
+	}
+	if receivedIDToken == "" {
+		t.Fatal("expected id_token in verifier request")
+	}
+
+	_, payload, _, err := format.ParseJWTParts(receivedIDToken)
+	if err != nil {
+		t.Fatalf("parsing id_token: %v", err)
+	}
+	if payload["aud"] != "https://verifier.example" {
+		t.Errorf("expected aud=https://verifier.example, got %v", payload["aud"])
+	}
+	if payload["nonce"] != "nonce123" {
+		t.Errorf("expected nonce=nonce123, got %v", payload["nonce"])
+	}
+}
+
+func TestBrowserIDTokenOnlyFlowWithoutCredentialMatch(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	body := `{
+		"digital": {
+			"requests": [
+				{
+					"protocol": "openid4vp-v1-unsigned",
+					"data": {
+						"client_id": "web-origin:https://rp.example",
+						"response_type": "id_token",
+						"response_mode": "dc_api",
+						"nonce": "browser-nonce",
+						"state": "browser-state"
+					}
+				}
+			]
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/api/dc-api", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://rp.example")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected browser data object, got %T", result["data"])
+	}
+	if _, ok := data["vp_token"]; ok {
+		t.Fatalf("expected no vp_token in Browser API result, got %v", data["vp_token"])
+	}
+	rawIDToken, ok := data["id_token"].(string)
+	if !ok || rawIDToken == "" {
+		t.Fatalf("expected id_token in Browser API result, got %v", data["id_token"])
+	}
+
+	_, payload, _, err := format.ParseJWTParts(rawIDToken)
+	if err != nil {
+		t.Fatalf("parsing id_token: %v", err)
+	}
+	if payload["aud"] != "web-origin:https://rp.example" {
+		t.Errorf("expected aud=web-origin:https://rp.example, got %v", payload["aud"])
+	}
+	if payload["nonce"] != "browser-nonce" {
+		t.Errorf("expected nonce=browser-nonce, got %v", payload["nonce"])
 	}
 }

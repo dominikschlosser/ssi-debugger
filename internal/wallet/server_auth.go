@@ -107,9 +107,11 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		}
 	}
 
+	requiresVP := ResponseTypeRequiresVP(authReq.ResponseType)
+
 	// Evaluate DCQL query
 	var matches []CredentialMatch
-	if authReq.DCQLQuery != nil {
+	if authReq.DCQLQuery != nil && requiresVP {
 		matches = s.wallet.EvaluateDCQL(authReq.DCQLQuery)
 	}
 
@@ -118,7 +120,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		s.log("    - %s %s (%s), disclosing %d claims", m.Format, credTypeLabel(m), m.CredentialID[:8], len(m.SelectedKeys))
 	}
 
-	if len(matches) == 0 {
+	if requiresVP && len(matches) == 0 {
 		s.log("  Result:        no matching credentials")
 		s.wallet.AddLog("presentation", fmt.Sprintf("No matching credentials for %s", authReq.ClientID), false)
 		s.wallet.NotifyError(WalletError{

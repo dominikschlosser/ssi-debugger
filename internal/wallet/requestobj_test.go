@@ -421,6 +421,37 @@ func TestMakeFetchRequestURI_POST_Encrypted(t *testing.T) {
 	}
 }
 
+func TestMakeFetchRequestURI_POST_RequireEncryptedRequestRejectsPlainJWT(t *testing.T) {
+	walletKey, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wallet := &Wallet{
+		RequireEncryptedRequest: true,
+		RequestEncryptionKey:    walletKey,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
+			"client_id":     "test-verifier",
+			"response_type": "vp_token",
+		})
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+		w.Write([]byte(jwt))
+	}))
+	defer srv.Close()
+
+	fetch := MakeFetchRequestURI(wallet, nil)
+	_, err = fetch(srv.URL, "post")
+	if err == nil {
+		t.Fatal("expected error when encrypted request objects are required but verifier returned plain JWT")
+	}
+	if !contains(err.Error(), "must be a compact JWE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestParseWithOptionsRequestURIMethodPost(t *testing.T) {
 	// Set up a test server that returns a JWT on POST
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

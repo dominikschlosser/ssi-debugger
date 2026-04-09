@@ -155,6 +155,9 @@ func fetchRequestURIPOST(w *Wallet, requestURI string, logFn func(string, ...any
 	if !isJWT(result) && !isJWE(result) {
 		return "", fmt.Errorf("request_uri response must be a compact JWT or JWE")
 	}
+	if w.RequireEncryptedRequest && !isJWE(result) {
+		return "", fmt.Errorf("request_uri response must be a compact JWE when encrypted request objects are required")
+	}
 
 	// If response is JWE (5 parts), try to decrypt to get the JWT
 	if isJWE(result) {

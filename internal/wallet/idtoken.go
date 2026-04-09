@@ -76,3 +76,9 @@ func ResponseTypeContains(responseType, target string) bool {
 	}
 	return false
 }
+
+// ResponseTypeRequiresVP reports whether a request requires a vp_token response.
+// Empty response_type defaults to vp_token per the current wallet behavior.
+func ResponseTypeRequiresVP(responseType string) bool {
+	return responseType == "" || ResponseTypeContains(responseType, "vp_token")
+}

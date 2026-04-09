@@ -100,6 +100,7 @@ When a wallet exposes multiple trust-list profiles, `/api/trustlists` gives you 
 ![Wallet UI](docs/wallet-ui.png)
 
 → [Full documentation](docs/wallet.md) — subcommands, flags, endpoints, trust lists, storage, URL scheme registration
+→ [Flow diagrams](docs/diagrams/README.md) — GitHub-rendered OID4VP / OID4VCI interaction diagrams and parameter checklists
 
 ---
 
@@ -226,6 +227,7 @@ The wallet evaluates `credential_sets` constraints when processing DCQL queries,
 ## Spec Compliance
 
 See [docs/spec-compliance.md](docs/spec-compliance.md) for detailed compliance status against OID4VP 1.0, OID4VCI 1.0, the currently implemented HAIP subset, SD-JWT, mDoc (ISO 18013-5), ETSI trust lists, and RFC 9596.
+For a system-level view of the implemented issuer and verifier interactions, see [docs/diagrams/README.md](docs/diagrams/README.md).
 
 ## Global Flags
 

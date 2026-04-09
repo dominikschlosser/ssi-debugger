@@ -7,6 +7,7 @@ The wallet has two validation modes:
 - `strict` rejects requests that violate the latest final specs
 
 For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.md).
+For GitHub-rendered interaction diagrams of the implemented OID4VP and OID4VCI flows, see [docs/diagrams](./diagrams/README.md).
 
 ## Subcommands
 

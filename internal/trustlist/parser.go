@@ -57,13 +57,18 @@ func Parse(raw string) (*TrustList, error) {
 		Header: header,
 	}
 
+	lote, ok := payload["LoTE"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("parsing payload: missing top-level LoTE object")
+	}
+
 	// Parse ListAndSchemeInformation
-	if lsi, ok := payload["ListAndSchemeInformation"].(map[string]any); ok {
+	if lsi, ok := lote["ListAndSchemeInformation"].(map[string]any); ok {
 		tl.SchemeInfo = parseSchemeInfo(lsi)
 	}
 
 	// Parse TrustedEntitiesList
-	if tel, ok := payload["TrustedEntitiesList"].([]any); ok {
+	if tel, ok := lote["TrustedEntitiesList"].([]any); ok {
 		for _, entry := range tel {
 			entryMap, ok := entry.(map[string]any)
 			if !ok {

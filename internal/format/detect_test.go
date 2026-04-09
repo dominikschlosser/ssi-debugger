@@ -185,14 +185,21 @@ func TestDetect_OID4_JSON(t *testing.T) {
 }
 
 func TestDetect_TrustList_JWT(t *testing.T) {
-	// Build a JWT with TrustedEntitiesList in the payload
+	// Build a JWT with the ETSI LoTE wrapper in the payload.
 	encHeader := EncodeBase64URL([]byte(`{"alg":"ES256"}`))
-	payload := EncodeBase64URL([]byte(`{"TrustedEntitiesList":[{"TrustedEntityInformation":{"TEName":[{"value":"Test"}]}}]}`))
+	payload := EncodeBase64URL([]byte(`{"LoTE":{"TrustedEntitiesList":[{"TrustedEntityInformation":{"TEName":[{"value":"Test"}]}}]}}`))
 	jwt := encHeader + "." + payload + ".sig"
 
 	got := Detect(jwt)
 	if got != FormatTrustList {
 		t.Errorf("Detect(trust list JWT) = %q, want %q", got, FormatTrustList)
+	}
+}
+
+func TestDetect_TrustList_JSON(t *testing.T) {
+	payload := `{"LoTE":{"ListAndSchemeInformation":{"LoTEType":"http://uri.etsi.org/19602/LoTEType/local"}}}`
+	if got := Detect(payload); got != FormatTrustList {
+		t.Errorf("Detect(trust list JSON) = %q, want %q", got, FormatTrustList)
 	}
 }
 

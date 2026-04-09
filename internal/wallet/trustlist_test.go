@@ -106,13 +106,17 @@ func TestGenerateTrustListJWT_PayloadStructure(t *testing.T) {
 		t.Fatalf("parsing payload: %v", err)
 	}
 
-	if _, ok := payload["ListAndSchemeInformation"]; !ok {
-		t.Error("expected ListAndSchemeInformation in payload")
+	lote, ok := payload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", payload["LoTE"])
 	}
-	if _, ok := payload["TrustedEntitiesList"]; !ok {
-		t.Error("expected TrustedEntitiesList in payload")
+	if _, ok := lote["ListAndSchemeInformation"]; !ok {
+		t.Error("expected ListAndSchemeInformation in LoTE payload")
 	}
-	schemeInfo, ok := payload["ListAndSchemeInformation"].(map[string]any)
+	if _, ok := lote["TrustedEntitiesList"]; !ok {
+		t.Error("expected TrustedEntitiesList in LoTE payload")
+	}
+	schemeInfo, ok := lote["ListAndSchemeInformation"].(map[string]any)
 	if !ok {
 		t.Fatal("expected ListAndSchemeInformation object")
 	}
@@ -133,7 +137,7 @@ func TestGenerateTrustListJWT_PayloadStructure(t *testing.T) {
 	}
 
 	// Verify the trusted entities list has entries with certificate data
-	entities, ok := payload["TrustedEntitiesList"].([]any)
+	entities, ok := lote["TrustedEntitiesList"].([]any)
 	if !ok || len(entities) == 0 {
 		t.Fatal("expected non-empty TrustedEntitiesList")
 	}
@@ -159,7 +163,14 @@ func TestGenerateTrustListJWTForWallet_PIDProfileMatchesETSIShape(t *testing.T) 
 		t.Fatalf("parsing payload: %v", err)
 	}
 
-	schemeInfo := payload["ListAndSchemeInformation"].(map[string]any)
+	lote, ok := payload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", payload["LoTE"])
+	}
+	schemeInfo, ok := lote["ListAndSchemeInformation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ListAndSchemeInformation object, got %T", lote["ListAndSchemeInformation"])
+	}
 	if schemeInfo["LoTEType"] != pidTrustListType {
 		t.Fatalf("expected PID LoTEType %s, got %v", pidTrustListType, schemeInfo["LoTEType"])
 	}

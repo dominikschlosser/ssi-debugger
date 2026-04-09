@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-04-09
+
+### Added
+
+- Browser API presentation support at `/api/dc-api` for OpenID4VP `dc_api` and `dc_api.jwt` response modes, including `web-origin:` client binding and wallet-side Browser API result handling
+- HAIP wallet conformance coverage for the current OID4VP 1.0 Final and OID4VCI 1.0 Final HAIP plans, including `dc_api.jwt` VP scenarios
+
+### Changed
+
+- the OIDF wallet conformance runner now targets the current OID4VP 1.0 Final, OID4VCI 1.0 Final, and HAIP wallet plans by default
+- the wallet now requests `credential_response_encryption` when issuers advertise it and accepts encrypted JWE credential responses in the authorization code flow
+
+### Fixed
+
+- wallet-generated ETSI trust lists now use the required top-level `LoTE` JSON binding wrapper instead of the previously emitted unwrapped payload
+- trust-list parsing and format detection now reject the old non-conformant unwrapped trust-list shape
+- proxy JWE tests now match the current `EncryptJWE` API so the full suite builds cleanly again
+
 ## [1.7.1] - 2026-03-22
 
 ### Fixed

@@ -130,7 +130,7 @@ func detectJWTPayloadOID4(payloadB64 string) CredentialFormat {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return FormatUnknown
 	}
-	if _, ok := m["TrustedEntitiesList"]; ok {
+	if isTrustListPayload(m) {
 		return FormatTrustList
 	}
 	if _, ok := m["credential_issuer"]; ok {
@@ -151,6 +151,9 @@ func detectJSONOID4(raw string) CredentialFormat {
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return FormatUnknown
 	}
+	if isTrustListPayload(m) {
+		return FormatTrustList
+	}
 	if _, ok := m["credential_issuer"]; ok {
 		return FormatOID4VCI
 	}
@@ -158,6 +161,16 @@ func detectJSONOID4(raw string) CredentialFormat {
 		return FormatOID4VP
 	}
 	return FormatUnknown
+}
+
+func isTrustListPayload(m map[string]any) bool {
+	lote, ok := m["LoTE"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, hasEntities := lote["TrustedEntitiesList"]
+	_, hasSchemeInfo := lote["ListAndSchemeInformation"]
+	return hasEntities || hasSchemeInfo
 }
 
 func isHex(s string) bool {

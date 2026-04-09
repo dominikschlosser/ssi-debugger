@@ -324,28 +324,30 @@ func generateTrustListJWTWithOptions(signingKey *ecdsa.PrivateKey, caCert *x509.
 		}
 	}
 
-	// Build ETSI trust list payload
+	// Build ETSI trust list payload using the JSON binding wrapper object.
 	payload := map[string]any{
-		"ListAndSchemeInformation": schemeInfo,
-		"TrustedEntitiesList": []map[string]any{
-			{
-				"TrustedEntityInformation": entityInfo,
-				"TrustedEntityServices": []map[string]any{
-					{
-						"ServiceInformation": map[string]any{
-							"ServiceTypeIdentifier": opts.Profile.IssuanceServiceType,
-							"ServiceName":           []map[string]string{{"lang": "en-US", "value": opts.Profile.IssuanceServiceName}},
-							"ServiceDigitalIdentity": map[string]any{
-								"X509Certificates": []map[string]string{{"val": certB64}},
+		"LoTE": map[string]any{
+			"ListAndSchemeInformation": schemeInfo,
+			"TrustedEntitiesList": []map[string]any{
+				{
+					"TrustedEntityInformation": entityInfo,
+					"TrustedEntityServices": []map[string]any{
+						{
+							"ServiceInformation": map[string]any{
+								"ServiceTypeIdentifier": opts.Profile.IssuanceServiceType,
+								"ServiceName":           []map[string]string{{"lang": "en-US", "value": opts.Profile.IssuanceServiceName}},
+								"ServiceDigitalIdentity": map[string]any{
+									"X509Certificates": []map[string]string{{"val": certB64}},
+								},
 							},
 						},
-					},
-					{
-						"ServiceInformation": map[string]any{
-							"ServiceTypeIdentifier": opts.Profile.RevocationServiceType,
-							"ServiceName":           []map[string]string{{"lang": "en-US", "value": opts.Profile.RevocationServiceName}},
-							"ServiceDigitalIdentity": map[string]any{
-								"X509Certificates": []map[string]string{{"val": certB64}},
+						{
+							"ServiceInformation": map[string]any{
+								"ServiceTypeIdentifier": opts.Profile.RevocationServiceType,
+								"ServiceName":           []map[string]string{{"lang": "en-US", "value": opts.Profile.RevocationServiceName}},
+								"ServiceDigitalIdentity": map[string]any{
+									"X509Certificates": []map[string]string{{"val": certB64}},
+								},
 							},
 						},
 					},

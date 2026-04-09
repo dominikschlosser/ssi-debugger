@@ -29,8 +29,12 @@ func buildTrustListJWT(t *testing.T, payload map[string]any) string {
 		base64.RawURLEncoding.EncodeToString(payloadJSON) + "."
 }
 
+func wrapLoTE(payload map[string]any) map[string]any {
+	return map[string]any{"LoTE": payload}
+}
+
 func TestParse_BasicTrustList(t *testing.T) {
-	payload := map[string]any{
+	payload := wrapLoTE(map[string]any{
 		"ListAndSchemeInformation": map[string]any{
 			"LoTEType": "http://uri.etsi.org/19602/LoTEType/local",
 			"SchemeOperatorName": []any{
@@ -58,7 +62,7 @@ func TestParse_BasicTrustList(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 
 	raw := buildTrustListJWT(t, payload)
 	tl, err := Parse(raw)
@@ -97,11 +101,11 @@ func TestParse_BasicTrustList(t *testing.T) {
 }
 
 func TestParse_LegacyListIssueDatetimeStillSupported(t *testing.T) {
-	payload := map[string]any{
+	payload := wrapLoTE(map[string]any{
 		"ListAndSchemeInformation": map[string]any{
 			"ListIssueDatetime": "2025-01-01T00:00:00Z",
 		},
-	}
+	})
 
 	raw := buildTrustListJWT(t, payload)
 	tl, err := Parse(raw)
@@ -114,13 +118,13 @@ func TestParse_LegacyListIssueDatetimeStillSupported(t *testing.T) {
 }
 
 func TestParse_NextUpdate(t *testing.T) {
-	payload := map[string]any{
+	payload := wrapLoTE(map[string]any{
 		"ListAndSchemeInformation": map[string]any{
 			"ListIssueDateTime": "2025-01-01T00:00:00Z",
 			"NextUpdate":        "2025-01-03T00:00:00Z",
 		},
 		"TrustedEntitiesList": []any{},
-	}
+	})
 
 	raw := buildTrustListJWT(t, payload)
 	tl, err := Parse(raw)
@@ -140,9 +144,9 @@ func TestParse_InvalidJWT(t *testing.T) {
 }
 
 func TestParse_EmptyEntities(t *testing.T) {
-	payload := map[string]any{
+	payload := wrapLoTE(map[string]any{
 		"TrustedEntitiesList": []any{},
-	}
+	})
 	raw := buildTrustListJWT(t, payload)
 	tl, err := Parse(raw)
 	if err != nil {
@@ -150,6 +154,21 @@ func TestParse_EmptyEntities(t *testing.T) {
 	}
 	if len(tl.Entities) != 0 {
 		t.Errorf("expected 0 entities, got %d", len(tl.Entities))
+	}
+}
+
+func TestParse_RejectsUnwrappedPayload(t *testing.T) {
+	payload := map[string]any{
+		"ListAndSchemeInformation": map[string]any{
+			"LoTEType": "http://uri.etsi.org/19602/LoTEType/local",
+		},
+		"TrustedEntitiesList": []any{},
+	}
+
+	raw := buildTrustListJWT(t, payload)
+	_, err := Parse(raw)
+	if err == nil {
+		t.Fatal("expected unwrapped payload to be rejected")
 	}
 }
 

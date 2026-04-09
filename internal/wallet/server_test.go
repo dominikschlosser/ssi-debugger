@@ -1321,11 +1321,15 @@ func TestTrustListAPI(t *testing.T) {
 		t.Fatalf("parsing payload: %v", err)
 	}
 
-	if _, ok := payload["TrustedEntitiesList"]; !ok {
-		t.Error("expected TrustedEntitiesList in payload")
+	lote, ok := payload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", payload["LoTE"])
 	}
-	if _, ok := payload["ListAndSchemeInformation"]; !ok {
-		t.Error("expected ListAndSchemeInformation in payload")
+	if _, ok := lote["TrustedEntitiesList"]; !ok {
+		t.Error("expected TrustedEntitiesList in LoTE payload")
+	}
+	if _, ok := lote["ListAndSchemeInformation"]; !ok {
+		t.Error("expected ListAndSchemeInformation in LoTE payload")
 	}
 }
 
@@ -1405,9 +1409,13 @@ func TestTrustListAPI_RemainsCertificateCentric(t *testing.T) {
 	var payload map[string]any
 	decodeCompactJWTPayload(t, resp.Body.String(), &payload)
 
-	entities, ok := payload["TrustedEntitiesList"].([]any)
+	lote, ok := payload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", payload["LoTE"])
+	}
+	entities, ok := lote["TrustedEntitiesList"].([]any)
 	if !ok || len(entities) == 0 {
-		t.Fatalf("expected TrustedEntitiesList entries, got %T", payload["TrustedEntitiesList"])
+		t.Fatalf("expected TrustedEntitiesList entries, got %T", lote["TrustedEntitiesList"])
 	}
 	entity, ok := entities[0].(map[string]any)
 	if !ok {
@@ -1764,9 +1772,13 @@ func TestNonPIDMetadataAndTrustList_DoNotPretendToBePID(t *testing.T) {
 	}
 	var trustListPayload map[string]any
 	decodeCompactJWTPayload(t, trustListResp.Body.String(), &trustListPayload)
-	schemeInfo, ok := trustListPayload["ListAndSchemeInformation"].(map[string]any)
+	lote, ok := trustListPayload["LoTE"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected ListAndSchemeInformation object, got %T", trustListPayload["ListAndSchemeInformation"])
+		t.Fatalf("expected top-level LoTE object, got %T", trustListPayload["LoTE"])
+	}
+	schemeInfo, ok := lote["ListAndSchemeInformation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected ListAndSchemeInformation object, got %T", lote["ListAndSchemeInformation"])
 	}
 	if schemeInfo["LoTEType"] != localTrustListType {
 		t.Fatalf("expected local trust-list profile for non-PID wallet, got %v", schemeInfo["LoTEType"])
@@ -1774,9 +1786,9 @@ func TestNonPIDMetadataAndTrustList_DoNotPretendToBePID(t *testing.T) {
 	if _, ok := schemeInfo["StatusDeterminationApproach"]; ok {
 		t.Fatalf("non-PID local trust list must not advertise PID status determination, got %v", schemeInfo["StatusDeterminationApproach"])
 	}
-	entities, ok := trustListPayload["TrustedEntitiesList"].([]any)
+	entities, ok := lote["TrustedEntitiesList"].([]any)
 	if !ok || len(entities) != 1 {
-		t.Fatalf("expected one trusted entity, got %v", trustListPayload["TrustedEntitiesList"])
+		t.Fatalf("expected one trusted entity, got %v", lote["TrustedEntitiesList"])
 	}
 	entity, ok := entities[0].(map[string]any)
 	if !ok {
@@ -1874,7 +1886,11 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 	}
 	var legacyPayload map[string]any
 	decodeCompactJWTPayload(t, legacyResp.Body.String(), &legacyPayload)
-	legacyScheme := legacyPayload["ListAndSchemeInformation"].(map[string]any)
+	legacyLoTE, ok := legacyPayload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", legacyPayload["LoTE"])
+	}
+	legacyScheme := legacyLoTE["ListAndSchemeInformation"].(map[string]any)
 	if legacyScheme["LoTEType"] != pidTrustListType {
 		t.Fatalf("expected legacy /api/trustlist to return pid profile, got %v", legacyScheme["LoTEType"])
 	}
@@ -1885,7 +1901,11 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 	}
 	var selectedPayload map[string]any
 	decodeCompactJWTPayload(t, selectedResp.Body.String(), &selectedPayload)
-	selectedScheme := selectedPayload["ListAndSchemeInformation"].(map[string]any)
+	selectedLoTE, ok := selectedPayload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", selectedPayload["LoTE"])
+	}
+	selectedScheme := selectedLoTE["ListAndSchemeInformation"].(map[string]any)
 	if selectedScheme["LoTEType"] != localTrustListType {
 		t.Fatalf("expected doctype-selected trust list to return local profile, got %v", selectedScheme["LoTEType"])
 	}
@@ -1896,7 +1916,11 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 	}
 	var byIDPayload map[string]any
 	decodeCompactJWTPayload(t, byIDResp.Body.String(), &byIDPayload)
-	byIDScheme := byIDPayload["ListAndSchemeInformation"].(map[string]any)
+	byIDLoTE, ok := byIDPayload["LoTE"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level LoTE object, got %T", byIDPayload["LoTE"])
+	}
+	byIDScheme := byIDLoTE["ListAndSchemeInformation"].(map[string]any)
 	if byIDScheme["LoTEType"] != localTrustListType {
 		t.Fatalf("expected /api/trustlists/local to return local profile, got %v", byIDScheme["LoTEType"])
 	}

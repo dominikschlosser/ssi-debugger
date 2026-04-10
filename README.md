@@ -47,6 +47,7 @@ The default CMD starts the wallet server with pre-loaded PID credentials in head
 
 → [Full Docker & verifier testing guide](docs/docker.md)
 → [OIDF conformance notes](docs/conformance.md)
+→ [Examples](docs/examples.md)
 
 ## Usage
 

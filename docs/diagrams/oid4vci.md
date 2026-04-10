@@ -8,16 +8,17 @@ This page covers the OID4VCI flows implemented by `oid4vc-dev` when it acts as a
 sequenceDiagram
     actor Browser
     participant Wallet as oid4vc-dev
-    participant Issuer as Issuer / AS
+    participant Issuer
+    participant AS as Authorization Server
 
     Browser->>Wallet: Open credential offer
     Wallet->>Issuer: Fetch issuer metadata
     alt Offer uses pre-authorized code
-        Wallet->>Issuer: Token request with pre-authorized_code and optional tx_code
+        Wallet->>AS: Token request with pre-authorized_code and optional tx_code
     else Offer uses authorization code
-        Wallet->>Issuer: PAR request
-        Wallet->>Issuer: Authorization request via request_uri
-        Wallet->>Issuer: Token request with code + PKCE
+        Wallet->>AS: PAR request
+        Wallet->>AS: Authorization request via request_uri
+        Wallet->>AS: Token request with code + PKCE
     end
     Wallet->>Issuer: Credential request with proofs.jwt
     opt transaction_id returned
@@ -43,14 +44,15 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor Browser
-    participant Issuer as Issuer / AS
     participant Wallet as oid4vc-dev
+    participant AS as Authorization Server
+    participant Issuer
 
     Browser->>Wallet: Open credential offer URI
     Wallet->>Issuer: Fetch issuer metadata
-    Wallet->>Issuer: POST token request<br/>grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
-    Note over Wallet,Issuer: Optional tx_code is included when the wallet was given one.
-    Issuer-->>Wallet: access_token, optional c_nonce,<br/>optional authorization_details
+    Wallet->>AS: POST token request<br/>grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
+    Note over Wallet,AS: Optional tx_code is included when the wallet was given one.
+    AS-->>Wallet: access_token, optional c_nonce,<br/>optional authorization_details
     Wallet->>Issuer: POST credential request with proofs.jwt
     alt Encrypted credential response
         Issuer-->>Wallet: compact JWE credential response
@@ -76,17 +78,19 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor Browser
-    participant Issuer as Issuer / AS
     participant Wallet as oid4vc-dev
+    participant Issuer
+    participant AS as Authorization Server
 
     Browser->>Wallet: Open credential offer URI
-    Wallet->>Issuer: Fetch issuer metadata and OAuth metadata
-    Wallet->>Issuer: POST PAR request<br/>response_type=code, client_id, redirect_uri,<br/>scope, PKCE, optional issuer_state
-    Issuer-->>Wallet: request_uri
-    Wallet->>Issuer: Open authorization request<br/>client_id + request_uri + state
-    Issuer-->>Wallet: redirect_uri?code=...&state=...
-    Wallet->>Issuer: POST token request<br/>grant_type=authorization_code + code + PKCE
-    Issuer-->>Wallet: access_token, optional c_nonce,<br/>optional authorization_details
+    Wallet->>Issuer: Fetch issuer metadata
+    Wallet->>AS: Fetch OAuth metadata
+    Wallet->>AS: POST PAR request<br/>response_type=code, client_id, redirect_uri,<br/>scope, PKCE, optional issuer_state
+    AS-->>Wallet: request_uri
+    Wallet->>AS: Open authorization request<br/>client_id + request_uri + state
+    AS-->>Wallet: redirect_uri?code=...&state=...
+    Wallet->>AS: POST token request<br/>grant_type=authorization_code + code + PKCE
+    AS-->>Wallet: access_token, optional c_nonce,<br/>optional authorization_details
     Wallet->>Issuer: POST credential request with proofs.jwt
     alt Deferred issuance
         Issuer-->>Wallet: transaction_id

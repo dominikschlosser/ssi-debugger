@@ -16,13 +16,15 @@ These diagrams intentionally treat `oid4vc-dev` as a single actor. They show the
 ```mermaid
 sequenceDiagram
     actor Browser as Browser / calling app
-    participant Issuer as Issuer / authorization server
+    participant Issuer
+    participant AS as Authorization Server
     participant Wallet as oid4vc-dev
     participant RP as RP page / verifier
 
     Issuer-->>Browser: credential_offer or credential_offer_uri
     Browser->>Wallet: openid-credential-offer:// or haip-vci://
-    Wallet->>Issuer: token and credential requests
+    Wallet->>AS: token request
+    Wallet->>Issuer: credential request
     Issuer-->>Wallet: credential
 
     RP-->>Browser: authorization request or Browser API request
@@ -36,15 +38,16 @@ sequenceDiagram
 sequenceDiagram
     actor Browser
     participant Wallet as oid4vc-dev
-    participant Issuer as Issuer / AS
+    participant Issuer
+    participant AS as Authorization Server
     participant RP as RP page / verifier
 
-    Note over Browser,Issuer: OID4VCI branch
+    Note over Browser,AS: OID4VCI branch
     Browser->>Wallet: receive and open credential offer
     alt pre-authorized code
-        Wallet->>Issuer: token request with pre-authorized_code
+        Wallet->>AS: token request with pre-authorized_code
     else authorization code
-        Wallet->>Issuer: PAR, authorization, token request
+        Wallet->>AS: PAR, authorization, token request
     end
     Wallet->>Issuer: credential request with proofs.jwt
     opt transaction_id returned

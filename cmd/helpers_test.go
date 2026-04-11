@@ -173,6 +173,25 @@ func TestApplyValidationMode(t *testing.T) {
 	}
 }
 
+func TestSetLocalPresentationIssuerURL(t *testing.T) {
+	w := &wallet.Wallet{IssuerURL: "https://localhost:8086"}
+
+	setLocalPresentationIssuerURL(w, 31127)
+
+	if got, want := w.IssuerURL, "https://localhost:31128"; got != want {
+		t.Fatalf("setLocalPresentationIssuerURL() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectivePresentationPort(t *testing.T) {
+	if got, want := effectivePresentationPort(0), config.DefaultWalletPort; got != want {
+		t.Fatalf("effectivePresentationPort(0) = %d, want %d", got, want)
+	}
+	if got, want := effectivePresentationPort(31127), 31127; got != want {
+		t.Fatalf("effectivePresentationPort(31127) = %d, want %d", got, want)
+	}
+}
+
 func TestIsHTTPURL(t *testing.T) {
 	tests := []struct {
 		input string

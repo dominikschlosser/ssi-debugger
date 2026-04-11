@@ -263,7 +263,7 @@ require_file "${SCENARIO_DIR}/providers/oid4vp-user-id-link-provider.jar"
   VERIFIER_CERT_CHAIN_PATH="${VERIFIER_CERT_CHAIN_PATH}" \
   VERIFIER_CA_CERT_PATH="${VERIFIER_CA_CERT_PATH}" \
   VERIFIER_SIGNING_KEY_JWK_PATH="${VERIFIER_SIGNING_KEY_JWK_PATH}" \
-  go run ./examples/keycloak-issuer-verifier-haip-app/scripts/generate-verifier-material
+  go run ./examples/keycloak-issuer-verifier-haip-app/scripts/generate-verifier-material.go
 )
 require_file "${KEYCLOAK_SIGNING_KEY_PATH}"
 require_file "${KEYCLOAK_SIGNING_CERT_PATH}"
@@ -308,7 +308,7 @@ echo "Generating trust list for the Keycloak signing certificate..."
   KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL}" \
   KEYCLOAK_REALM="${KEYCLOAK_REALM}" \
   KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH}" \
-  go run ./examples/keycloak-issuer-verifier-haip-app/scripts/generate-keycloak-trustlist
+  go run ./examples/keycloak-issuer-verifier-haip-app/scripts/generate-keycloak-trustlist.go
 )
 
 echo "Updating OID4VP identity provider for HAIP verifier mode..."

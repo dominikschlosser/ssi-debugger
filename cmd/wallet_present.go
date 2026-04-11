@@ -15,9 +15,14 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -61,7 +66,18 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 		if err := applySessionTranscriptMode(w, opts.sessionTranscript); err != nil {
 			return err
 		}
-		return runPresent(w, store, uri, opts.port)
+		handled, err := tryPresentViaRunningServer(uri, opts)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+		port, err := resolvePresentationPort(opts.port, opts.autoAccept)
+		if err != nil {
+			return err
+		}
+		return runPresent(w, store, uri, port)
 
 	case format.FormatOID4VCI:
 		return processCredentialOffer(uri, opts.txCode)
@@ -111,9 +127,7 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	dim := color.New(color.Faint)
 
 	// Start server so the trust list is available during verification
-	if w.IssuerURL == "" {
-		w.IssuerURL = wallet.LocalIssuerURL(port+1, false)
-	}
+	setLocalPresentationIssuerURL(w, port)
 	srv := wallet.NewServer(w, port, nil)
 	if err := configureIssuerTLSCertificate(srv, store, w.IssuerURL); err != nil {
 		return err
@@ -149,6 +163,141 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	}
 
 	return nil
+}
+
+func setLocalPresentationIssuerURL(w *wallet.Wallet, port int) {
+	port = effectivePresentationPort(port)
+	w.IssuerURL = wallet.LocalIssuerURL(port+1, false)
+}
+
+func resolvePresentationPort(port int, autoAccept bool) (int, error) {
+	port = effectivePresentationPort(port)
+
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err == nil {
+		_ = ln.Close()
+		return port, nil
+	}
+
+	if !autoAccept {
+		return port, nil
+	}
+
+	fallback, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return 0, fmt.Errorf("resolving temporary auto-accept port after %d was busy: %w", port, err)
+	}
+	defer fallback.Close()
+
+	fallbackPort := fallback.Addr().(*net.TCPAddr).Port
+	yellow := color.New(color.FgYellow)
+	yellow.Printf("  Note: port %d is already in use; auto-accept will use temporary port %d\n", port, fallbackPort)
+	return fallbackPort, nil
+}
+
+func tryPresentViaRunningServer(uri string, opts dispatchOID4Opts) (bool, error) {
+	if !opts.autoAccept {
+		return false, nil
+	}
+
+	port := effectivePresentationPort(opts.port)
+	baseURL := fmt.Sprintf("http://localhost:%d", port)
+	if !isRunningWalletServer(baseURL) {
+		return false, nil
+	}
+
+	payload := map[string]any{
+		"uri":         uri,
+		"auto_accept": true,
+	}
+	if opts.sessionTranscript != "" {
+		payload["session_transcript"] = opts.sessionTranscript
+	}
+	if opts.haip {
+		payload["haip"] = true
+	}
+	if opts.mode != "" {
+		payload["mode"] = opts.mode
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshaling running-wallet request: %w", err)
+	}
+
+	resp, err := http.Post(baseURL+"/api/presentations", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return true, fmt.Errorf("submitting presentation to running wallet server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Status           string                  `json:"status"`
+		Error            string                  `json:"error"`
+		ErrorDescription string                  `json:"error_description"`
+		Response         wallet.DirectPostResult `json:"response"`
+		VPTokenKeys      []string                `json:"vp_token_keys"`
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return true, fmt.Errorf("reading running-wallet response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return true, fmt.Errorf("running wallet server returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return true, fmt.Errorf("decoding running-wallet response: %w", err)
+	}
+
+	switch result.Status {
+	case "submitted":
+		if jsonOutput {
+			fmt.Println(string(raw))
+			return true, nil
+		}
+		green := color.New(color.FgGreen)
+		green.Printf("  Submitted: %s\n", wallet.FormatDirectPostResult(&result.Response))
+		if len(result.VPTokenKeys) > 0 {
+			fmt.Printf("  VP tokens: %v\n", result.VPTokenKeys)
+		}
+		return true, nil
+	case "denied":
+		return true, fmt.Errorf("presentation denied")
+	case "no_match":
+		if result.Error != "" {
+			return true, fmt.Errorf("%s", result.Error)
+		}
+		return true, fmt.Errorf("no matching credentials found")
+	case "error":
+		if result.ErrorDescription != "" {
+			return true, fmt.Errorf("%s: %s", result.Error, result.ErrorDescription)
+		}
+		if result.Error != "" {
+			return true, fmt.Errorf("%s", result.Error)
+		}
+		return true, fmt.Errorf("running wallet server returned an authorization error")
+	default:
+		if result.Error != "" {
+			return true, fmt.Errorf("%s", result.Error)
+		}
+		return true, fmt.Errorf("unexpected running-wallet response status %q", result.Status)
+	}
+}
+
+func isRunningWalletServer(baseURL string) bool {
+	resp, err := http.Get(baseURL + "/api/log")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func effectivePresentationPort(port int) int {
+	if port > 0 {
+		return port
+	}
+	return config.DefaultWalletPort
 }
 
 // waitForConsent shows a consent UI and waits for the user's decision.

@@ -172,66 +172,6 @@ Setup only:
 ./start.sh --https --setup-only
 ```
 
-## Parameters
-
-### Keycloak
-
-| Parameter | HTTP mode | HTTPS mode |
-|---|---|
-| Image | `quay.io/keycloak/keycloak:26.6.0` | `quay.io/keycloak/keycloak:26.6.0` |
-| Base URL | `http://localhost:8080` | `https://localhost:8443` |
-| Startup flags | `start-dev`, `--features=oid4vc-vci:v1,oid4vc-vci-preauth-code:v1`, `--http-port=8080`, `--proxy-headers=xforwarded` | `start-dev`, `--features=oid4vc-vci:v1,oid4vc-vci-preauth-code:v1`, `--https-port=8443`, `--proxy-headers=xforwarded`, `--truststore-paths=/opt/keycloak/conf/keycloak-ca-cert.pem`, `--tls-hostname-verifier=ANY`, `--https-certificate-file=/opt/keycloak/conf/keycloak-cert.pem`, `--https-certificate-key-file=/opt/keycloak/conf/keycloak-key.pem` |
-| Realm | `wallet-app-demo` | `wallet-app-demo` |
-| Admin user | `admin` / `admin` | `admin` / `admin` |
-| Demo user | `alice` / `alice` | `alice` / `alice` |
-| User-profile attribute | `keycloak_user_id` | `keycloak_user_id` |
-| App client | `wallet-app` | `wallet-app` |
-| App redirect URI | `http://127.0.0.1:8090/callback` | `http://127.0.0.1:8090/callback` |
-| App client attributes | `pkce.code.challenge.method=S256`, `oid4vci.enabled=true` | `pkce.code.challenge.method=S256`, `oid4vci.enabled=true` |
-| App client redirect URIs | `*` | `*` |
-| Credential configuration ID | `membership-credential` | `membership-credential` |
-| Credential format | `dc+sd-jwt` | `dc+sd-jwt` |
-| `vct` | `https://credentials.example.com/membership` | `https://credentials.example.com/membership` |
-| Signing algorithm | `RS256` | `RS256` |
-| Binding requirement | `vc.binding_required=true` | `vc.binding_required=true` |
-| Proof types | `vc.binding_required_proof_types=jwt` | `vc.binding_required_proof_types=jwt` |
-| Binding methods | `vc.cryptographic_binding_methods_supported=jwk` | `vc.cryptographic_binding_methods_supported=jwk` |
-| Credential identifier | `membership-credential-id` | `membership-credential-id` |
-| Credential claims | `keycloak_user_id`, `given_name`, `family_name`, `email`, `preferred_username`, `jti`, `iat` | `keycloak_user_id`, `given_name`, `family_name`, `email`, `preferred_username`, `jti`, `iat` |
-| Custom first-broker flow | `oid4vp-user-id-auto-link` | `oid4vp-user-id-auto-link` |
-| Custom flow executions | `oid4vp-detect-user-by-id`, `idp-auto-link` | `oid4vp-detect-user-by-id`, `idp-auto-link` |
-
-### `keycloak-extension-oid4vp`
-
-| Parameter | HTTP mode | HTTPS mode |
-|---|---|
-| Version | `0.6.1` | `0.6.1` |
-| Provider alias | `oid4vp` | `oid4vp` |
-| `firstBrokerLoginFlowAlias` | `oid4vp-user-id-auto-link` | `oid4vp-user-id-auto-link` |
-| `sameDeviceEnabled` | `true` | `true` |
-| `crossDeviceEnabled` | `false` | `false` |
-| `walletScheme` | `openid4vp://` | `openid4vp://` |
-| `responseMode` | `direct_post` | `direct_post` |
-| `clientIdScheme` | `plain` | `plain` |
-| `enforceHaip` | `false` | `false` |
-| `trustedAuthoritiesMode` | `none` | `none` |
-| `allowedIssuers` | `http://localhost:8080/realms/wallet-app-demo` | `https://localhost:8443/realms/wallet-app-demo` |
-| `trustListUrl` | `http://host.docker.internal:8090/keycloak-trustlist.jwt` | not set |
-| Issuer metadata trust | not used | used |
-| `userMappingClaim` | `keycloak_user_id` | `keycloak_user_id` |
-| `userMappingClaimMdoc` | `keycloak_user_id` | `keycloak_user_id` |
-| DCQL credential id | `membership_sd_jwt` | `membership_sd_jwt` |
-| DCQL format | `dc+sd-jwt` | `dc+sd-jwt` |
-| DCQL `vct` | `https://credentials.example.com/membership` | `https://credentials.example.com/membership` |
-| DCQL requested claims | `keycloak_user_id`, `given_name`, `family_name`, `email` | `keycloak_user_id`, `given_name`, `family_name`, `email` |
-
-### oid4vc-dev
-
-| Parameter | Value |
-|---|---|
-| Wallet store | `~/.oid4vc-dev/wallet` |
-| Local wallet port in smoke flow | `8085` |
-
 ## Useful Overrides
 
 ```bash

@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -442,6 +443,60 @@ func TestPresentationAPI_InvalidURI(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestPresentationAPI_AutoAcceptOverrideSkipsConsent(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	uiRequested := false
+	consentRequested := false
+	srv.SetOnUIRequest(func() {
+		uiRequested = true
+	})
+	srv.SetOnConsentRequest(func(req *ConsentRequest) {
+		consentRequested = true
+	})
+
+	var receivedVPToken string
+	verifier := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		parsed, _ := url.ParseQuery(string(body))
+		receivedVPToken = parsed.Get("vp_token")
+		rw.Header().Set("Content-Type", "application/json")
+		rw.Write([]byte(`{}`))
+	}))
+	defer verifier.Close()
+
+	dcqlQuery := pidDCQLQuery()
+	dcqlJSON, _ := json.Marshal(dcqlQuery)
+	uri := "openid4vp://authorize?" + url.Values{
+		"client_id":     {"https://verifier.example"},
+		"response_type": {"vp_token"},
+		"nonce":         {"nonce"},
+		"state":         {"state"},
+		"response_uri":  {verifier.URL},
+		"dcql_query":    {string(dcqlJSON)},
+	}.Encode()
+
+	body := fmt.Sprintf(`{"uri":%q,"auto_accept":true}`, uri)
+	rec := serverRequest(t, srv, "POST", "/api/presentations", body)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	result := decodeJSON(t, rec)
+	if result["status"] != "submitted" {
+		t.Fatalf("expected status submitted, got %v", result["status"])
+	}
+	if receivedVPToken == "" {
+		t.Fatal("verifier did not receive VP token")
+	}
+	if uiRequested {
+		t.Fatal("onUIRequest callback should not be called for request-scoped auto-accept")
+	}
+	if consentRequested {
+		t.Fatal("onConsentRequest callback should not be called for request-scoped auto-accept")
 	}
 }
 

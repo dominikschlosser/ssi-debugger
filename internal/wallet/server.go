@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -47,6 +48,13 @@ type Server struct {
 	issuerPort       int
 	issuerKeyExpiry  time.Time
 	parseOpts        oid4vc.ParseOptions
+}
+
+type presentationRequestOptions struct {
+	AutoAccept        bool
+	SessionTranscript string
+	RequireHAIP       bool
+	ValidationMode    string
 }
 
 // NewServer creates a new wallet HTTP server.
@@ -298,7 +306,11 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 // handlePresentationAPI processes a presentation request URI via API.
 func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URI string `json:"uri"`
+		URI               string `json:"uri"`
+		AutoAccept        bool   `json:"auto_accept,omitempty"`
+		SessionTranscript string `json:"session_transcript,omitempty"`
+		HAIP              bool   `json:"haip,omitempty"`
+		Mode              string `json:"mode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -310,30 +322,68 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	uriDisplay := format.Truncate(body.URI, 120)
 	s.log("  URI: %s", uriDisplay)
 
-	parsed, err := ParseAuthorizationRequestWithOptions(body.URI, s.parseOpts)
+	reqServer := s
+	if body.AutoAccept || body.SessionTranscript != "" || body.HAIP || body.Mode != "" {
+		reqWallet, err := cloneWalletForPresentation(s.wallet, presentationRequestOptions{
+			AutoAccept:        body.AutoAccept,
+			SessionTranscript: body.SessionTranscript,
+			RequireHAIP:       body.HAIP,
+			ValidationMode:    body.Mode,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		reqServer = &Server{
+			wallet:           reqWallet,
+			port:             s.port,
+			mux:              s.mux,
+			onSave:           s.onSave,
+			onConsentRequest: s.onConsentRequest,
+			onUIRequest: func() {
+				if !body.AutoAccept {
+					s.triggerUIRequest()
+				}
+			},
+			logFunc:         s.logFunc,
+			httpSrv:         s.httpSrv,
+			issuerSrv:       s.issuerSrv,
+			issuerTLSCert:   s.issuerTLSCert,
+			issuerPort:      s.issuerPort,
+			issuerKeyExpiry: s.issuerKeyExpiry,
+		}
+		reqServer.parseOpts = oid4vc.ParseOptions{
+			FetchRequestURI: MakeFetchRequestURI(reqWallet, func(format string, args ...any) {
+				reqServer.log(format, args...)
+			}),
+		}
+	}
+
+	parsed, err := ParseAuthorizationRequestWithOptions(body.URI, reqServer.parseOpts)
 	if err != nil {
-		s.log("  ERROR: %v", err)
-		s.wallet.AddLog("presentation", fmt.Sprintf("Failed to parse request: %v", err), false)
-		s.wallet.NotifyError(WalletError{
+		reqServer.log("  ERROR: %v", err)
+		reqServer.wallet.AddLog("presentation", fmt.Sprintf("Failed to parse request: %v", err), false)
+		reqServer.wallet.NotifyError(WalletError{
 			Message: "Failed to parse authorization request",
 			Detail:  err.Error(),
 		})
-		s.triggerUIRequest()
+		reqServer.triggerUIRequest()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	s.log("  Client ID:     %s", parsed.ClientID)
-	s.log("  Response Mode: %s", parsed.ResponseMode)
-	s.log("  Response URI:  %s", parsed.ResponseURI)
+	reqServer.log("  Client ID:     %s", parsed.ClientID)
+	reqServer.log("  Response Mode: %s", parsed.ResponseMode)
+	reqServer.log("  Response URI:  %s", parsed.ResponseURI)
 	if parsed.Nonce != "" {
-		s.log("  Nonce:         %s", parsed.Nonce)
+		reqServer.log("  Nonce:         %s", parsed.Nonce)
 	}
 	if parsed.RequestURIMethod != "" {
-		s.log("  Request URI Method: %s", parsed.RequestURIMethod)
+		reqServer.log("  Request URI Method: %s", parsed.RequestURIMethod)
 	}
 
-	findings, err := ValidateAuthorizationRequest(s.wallet.ValidationMode, &AuthorizationRequestParams{
+	findings, err := ValidateAuthorizationRequest(reqServer.wallet.ValidationMode, &AuthorizationRequestParams{
 		ClientID:         parsed.ClientID,
 		ResponseType:     parsed.ResponseType,
 		ResponseMode:     parsed.ResponseMode,
@@ -347,9 +397,9 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		RequestObject:    parsed.RequestObject,
 	})
 	if err != nil {
-		s.log("  ERROR: %v", err)
-		s.wallet.AddLog("presentation", err.Error(), false)
-		s.wallet.NotifyError(WalletError{
+		reqServer.log("  ERROR: %v", err)
+		reqServer.wallet.AddLog("presentation", err.Error(), false)
+		reqServer.wallet.NotifyError(WalletError{
 			Message: "Authorization request validation failed",
 			Detail:  err.Error(),
 		})
@@ -357,8 +407,8 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, finding := range findings {
-		s.log("  WARNING: %s", finding)
-		s.wallet.AddLog("presentation", fmt.Sprintf("request validation warning: %s", finding), false)
+		reqServer.log("  WARNING: %s", finding)
+		reqServer.wallet.AddLog("presentation", fmt.Sprintf("request validation warning: %s", finding), false)
 	}
 
 	authReq := &AuthorizationRequestParams{
@@ -375,7 +425,75 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		RequestObject:    parsed.RequestObject,
 	}
 
-	s.handleAuthFlow(w, authReq)
+	reqServer.handleAuthFlow(w, authReq)
+}
+
+func cloneWalletForPresentation(src *Wallet, opts presentationRequestOptions) (*Wallet, error) {
+	if src == nil {
+		return nil, fmt.Errorf("wallet is not initialized")
+	}
+
+	clone := &Wallet{
+		HolderKey:               src.HolderKey,
+		IssuerKey:               src.IssuerKey,
+		CAKey:                   src.CAKey,
+		CertChain:               append([]*x509.Certificate(nil), src.CertChain...),
+		IssuedAttestations:      append([]IssuedAttestationSpec(nil), src.IssuedAttestations...),
+		AutoAccept:              src.AutoAccept,
+		SessionTranscript:       src.SessionTranscript,
+		PreferredFormat:         src.PreferredFormat,
+		RequireEncryptedRequest: src.RequireEncryptedRequest,
+		RequestEncryptionKey:    src.RequestEncryptionKey,
+		RequireHAIP:             src.RequireHAIP,
+		ValidationMode:          src.ValidationMode,
+		Credentials:             append([]StoredCredential(nil), src.Credentials...),
+		StatusEntries:           cloneStatusEntries(src.StatusEntries),
+		StatusListCounter:       src.StatusListCounter,
+		BaseURL:                 src.BaseURL,
+		IssuerURL:               src.IssuerURL,
+		VCIClientID:             src.VCIClientID,
+		VCIRedirectURI:          src.VCIRedirectURI,
+		Requests:                make(map[string]*ConsentRequest),
+		Log:                     append([]LogEntry(nil), src.Log...),
+		subscribers:             make(map[int64]chan *ConsentRequest),
+		errSubscribers:          make(map[int64]chan WalletError),
+		authCodeCallbacks:       make(map[string]chan url.Values),
+	}
+
+	if opts.AutoAccept {
+		clone.AutoAccept = true
+	}
+	if opts.SessionTranscript != "" {
+		switch SessionTranscriptMode(opts.SessionTranscript) {
+		case SessionTranscriptOID4VP, SessionTranscriptISO:
+			clone.SessionTranscript = SessionTranscriptMode(opts.SessionTranscript)
+		default:
+			return nil, fmt.Errorf("invalid session transcript %q", opts.SessionTranscript)
+		}
+	}
+	if opts.RequireHAIP {
+		clone.RequireHAIP = true
+	}
+	if opts.ValidationMode != "" {
+		mode, err := ParseValidationMode(opts.ValidationMode)
+		if err != nil {
+			return nil, err
+		}
+		clone.ValidationMode = mode
+	}
+
+	return clone, nil
+}
+
+func cloneStatusEntries(src map[string]StatusEntry) map[string]StatusEntry {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]StatusEntry, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 // handleOfferAPI processes a credential offer URI.

@@ -4,8 +4,8 @@ This example runs a local OpenID4VCI issuance flow from Keycloak into `oid4vc-de
 
 ## How It Works
 
-1. `docker compose up` starts Keycloak `26.6.0` with the OID4VCI features enabled.
-2. `./scripts/bootstrap.sh` recreates realm `oid4vc-demo`, user `alice`, client `oid4vc-demo-client`, and client scope `membership-credential`.
+1. `docker compose up --force-recreate` starts Keycloak `26.6.0`, enables OID4VCI, and imports `realm/oid4vc-demo-realm.json`.
+2. `./scripts/bootstrap.sh` only waits for the imported realm to become ready and prints the issuer endpoints.
 3. `./scripts/create-offer.sh` logs in as `alice`, calls Keycloak's `create-credential-offer` endpoint, and converts the returned `issuer` and `nonce` into an `openid-credential-offer://` URI.
 4. `oid4vc-dev wallet accept` resolves the offer URI, fetches issuer metadata and authorization details from Keycloak, creates proof-of-possession material, and stores the returned SD-JWT VC in the local wallet directory.
 
@@ -17,7 +17,7 @@ sequenceDiagram
     participant KC as Keycloak 26.6.0
     participant W as oid4vc-dev wallet
 
-    U->>KC: bootstrap realm, user, client, credential scope
+    U->>KC: import static realm, user, client, credential scope
     U->>KC: password grant as alice
     KC-->>U: access token
     U->>KC: GET /protocol/oid4vc/create-credential-offer
@@ -32,8 +32,9 @@ sequenceDiagram
 ## Files
 
 - `start.sh`: starts Keycloak, bootstraps the issuer, and by default redeems a credential into `oid4vc-dev`
-- `docker-compose.yml`: starts Keycloak with OID4VCI enabled
-- `scripts/bootstrap.sh`: creates the demo realm and issuer configuration
+- `docker-compose.yml`: starts Keycloak with OID4VCI enabled and imports the realm from `realm/`
+- `realm/oid4vc-demo-realm.json`: source-of-truth Keycloak realm config for the example
+- `scripts/bootstrap.sh`: waits for the imported realm and prints the issuer endpoints
 - `scripts/create-offer.sh`: creates a fresh pre-authorized offer URI
 - `scripts/redeem-offer.sh`: creates an offer and passes it into `oid4vc-dev`
 
@@ -74,7 +75,7 @@ oid4vc-dev wallet accept "$OFFER_URI"
 | OIDC client | `oid4vc-demo-client` |
 | Client type | public client |
 | Client attributes | `oid4vci.enabled=true`, `pkce.code.challenge.method=S256` |
-| Redirect URIs | `http://127.0.0.1/*` |
+| Redirect URIs | `*` |
 | Credential configuration ID | `membership-credential` |
 | Credential format | `dc+sd-jwt` |
 | `vct` | `https://credentials.example.com/membership` |

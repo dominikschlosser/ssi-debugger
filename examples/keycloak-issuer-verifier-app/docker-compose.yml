@@ -3,6 +3,7 @@ services:
     image: quay.io/keycloak/keycloak:26.6.0
     command:
       - start-dev
+      - --import-realm
       - --features=oid4vc-vci:v1,oid4vc-vci-preauth-code:v1
       - --http-port=8080
       - --proxy-headers=xforwarded
@@ -17,3 +18,4 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./providers:/opt/keycloak/providers:ro
+      - ./realm:/opt/keycloak/data/import:ro

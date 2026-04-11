@@ -59,7 +59,7 @@ cd "${SCRIPT_DIR}"
 ensure_oid4vc_dev
 ./scripts/download-extension.sh
 ./scripts/generate-wallet.sh
-docker compose up -d
+docker compose up -d --force-recreate
 ./scripts/bootstrap.sh
 
 case "${mode}" in

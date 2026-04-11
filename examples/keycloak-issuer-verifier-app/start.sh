@@ -107,8 +107,12 @@ esac
 export OID4VP_TRUST_MODE="${OID4VP_TRUST_MODE:-${trust_mode}}"
 export KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH:-${SCRIPT_DIR}/keycloak-trustlist.jwt}"
 
-docker compose "${compose_args[@]}" up -d
+docker compose "${compose_args[@]}" up -d --force-recreate
 ./scripts/bootstrap.sh
+
+if [[ "${mode}" != "smoke" ]]; then
+  oid4vc-dev wallet register
+fi
 
 case "${mode}" in
   app)

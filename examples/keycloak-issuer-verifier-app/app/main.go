@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html"
+	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -19,6 +21,9 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed templates/*.html static/*
+var uiFS embed.FS
 
 type config struct {
 	AppHost                string
@@ -50,12 +55,42 @@ type appSession struct {
 	AccessTokenClaims map[string]any
 }
 
+type homePageData struct {
+	Title             string
+	SignedIn          bool
+	WalletUIURL       string
+	LoginMethod       string
+	IDTokenClaims     string
+	AccessTokenClaims string
+}
+
+type issuePageData struct {
+	Title         string
+	WalletUIURL   string
+	OfferURI      string
+	AcceptCommand string
+	HasOffer      bool
+}
+
+type messagePageData struct {
+	Title   string
+	Heading string
+	Message string
+}
+
+type loginFailedPageData struct {
+	Title       string
+	Error       string
+	Description string
+}
+
 type server struct {
 	cfg          config
 	authMu       sync.Mutex
 	authSessions map[string]authSession
 	appMu        sync.Mutex
 	appSessions  map[string]appSession
+	static       http.Handler
 }
 
 func loadConfig() config {
@@ -85,10 +120,15 @@ func getenvDefault(key, fallback string) string {
 }
 
 func newServer(cfg config) *server {
+	staticFS, err := fs.Sub(uiFS, "static")
+	if err != nil {
+		panic(err)
+	}
 	return &server{
 		cfg:          cfg,
 		authSessions: map[string]authSession{},
 		appSessions:  map[string]appSession{},
+		static:       http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))),
 	}
 }
 
@@ -224,6 +264,14 @@ func decodeJWTPayload(token string) map[string]any {
 	return out
 }
 
+func prettyJSON(value any) string {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
 func (s *server) createOfferURI(accessToken string) (string, error) {
 	offerURL := fmt.Sprintf(
 		"%s/protocol/oid4vc/create-credential-offer?credential_configuration_id=%s&pre_authorized=true&type=uri",
@@ -330,130 +378,17 @@ func (s *server) currentAppSession(r *http.Request) (appSession, bool) {
 	return session, ok
 }
 
-func page(title, body string) string {
-	markup := `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>__TITLE__</title>
-  <style>
-    :root {
-      --bg: #f4efe6;
-      --paper: #fffaf2;
-      --ink: #1f2a1f;
-      --muted: #5b655b;
-      --line: #d6cdbf;
-      --accent: #0d6b57;
-      --accent-2: #d97f2f;
-      --shadow: 0 24px 60px rgba(55, 44, 24, 0.14);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(217, 127, 47, 0.16), transparent 36%),
-        radial-gradient(circle at bottom right, rgba(13, 107, 87, 0.16), transparent 34%),
-        linear-gradient(180deg, #efe6d5, var(--bg));
-      min-height: 100vh;
-    }
-    main {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 40px 20px 56px;
-    }
-    .hero {
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      padding: 28px;
-    }
-    .eyebrow {
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    h1, h2 {
-      margin: 0 0 12px;
-      font-weight: 600;
-    }
-    p {
-      margin: 0 0 16px;
-      line-height: 1.55;
-      color: var(--muted);
-    }
-    .grid {
-      display: grid;
-      gap: 18px;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      margin-top: 24px;
-    }
-    .panel {
-      background: rgba(255, 250, 242, 0.9);
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 20px;
-    }
-    .cta {
-      display: inline-block;
-      margin-top: 10px;
-      margin-right: 10px;
-      padding: 12px 16px;
-      border-radius: 999px;
-      text-decoration: none;
-      color: white;
-      background: linear-gradient(135deg, var(--accent), #145f99);
-      font-weight: 600;
-    }
-    button.cta {
-      border: 0;
-      cursor: pointer;
-      font: inherit;
-    }
-    .secondary {
-      background: linear-gradient(135deg, var(--accent-2), #b45424);
-    }
-    .muted {
-      background: linear-gradient(135deg, #5e705f, #475549);
-    }
-    form.inline {
-      display: inline;
-    }
-    code, pre {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      font-size: 14px;
-    }
-    pre {
-      margin: 14px 0 0;
-      padding: 14px;
-      background: #f7f0e5;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      color: var(--ink);
-    }
-    .note {
-      margin-top: 18px;
-      font-size: 14px;
-    }
-  </style>
-</head>
-<body>
-<main>
-__BODY__
-</main>
-</body>
-</html>`
-	markup = strings.Replace(markup, "__TITLE__", html.EscapeString(title), 1)
-	markup = strings.Replace(markup, "__BODY__", body, 1)
-	return markup
+func (s *server) renderTemplate(w http.ResponseWriter, status int, page string, data any) {
+	tmpl, err := template.ParseFS(uiFS, "templates/base.html", "templates/"+page)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
+		log.Printf("render %s: %v", page, err)
+	}
 }
 
 func (s *server) writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -463,20 +398,12 @@ func (s *server) writeJSON(w http.ResponseWriter, status int, payload any) {
 	_, _ = w.Write(body)
 }
 
-func (s *server) writeHTML(w http.ResponseWriter, status int, markup string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, markup)
-}
-
 func (s *server) writeError(w http.ResponseWriter, message string, status int) {
-	s.writeHTML(w, status, page("Error", fmt.Sprintf(`
-<section class="hero">
-  <div class="eyebrow">Error</div>
-  <h1>Request failed.</h1>
-  <pre>%s</pre>
-  <p class="note"><a href="/">Back to the demo app</a></p>
-</section>`, html.EscapeString(message))))
+	s.renderTemplate(w, status, "error.html", messagePageData{
+		Title:   "Error",
+		Heading: "Request failed",
+		Message: message,
+	})
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -487,6 +414,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, fmt.Sprintf("%v", recovered), http.StatusInternalServerError)
 		}
 	}()
+
+	if strings.HasPrefix(r.URL.Path, "/static/") {
+		s.static.ServeHTTP(w, r)
+		return
+	}
 
 	switch r.URL.Path {
 	case "/":
@@ -513,51 +445,33 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/callback":
 		s.handleCallback(w, r)
 	default:
-		s.writeHTML(w, http.StatusNotFound, page("Not Found", `<section class="hero"><h1>Not found.</h1></section>`))
+		s.renderTemplate(w, http.StatusNotFound, "not_found.html", messagePageData{
+			Title:   "Not Found",
+			Heading: "Page not found",
+			Message: "Return to the demo app and start again from there.",
+		})
 	}
 }
 
 func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	appSession, ok := s.currentAppSession(r)
 	if !ok {
-		s.writeHTML(w, http.StatusOK, page("Keycloak Issuance and Verification Demo", fmt.Sprintf(`
-<section class="hero">
-  <h1>Keycloak issuer + verifier demo</h1>
-  <p>Sign in, issue a credential, then sign in again with the wallet.</p>
-  <div class="grid">
-    <section class="panel">
-      <h2>Start</h2>
-      <p>Use <code>alice</code> / <code>alice</code>.</p>
-      <a class="cta secondary" href="/login">Sign In</a>
-      <pre>curl -fsS %s/api/login-url?mode=password</pre>
-    </section>
-  </div>
-</section>`, s.cfg.AppBaseURL)))
+		s.renderTemplate(w, http.StatusOK, "home.html", homePageData{
+			Title:       "Keycloak Wallet Demo",
+			SignedIn:    false,
+			WalletUIURL: s.cfg.WalletUIURL,
+		})
 		return
 	}
 
-	idClaims, _ := json.MarshalIndent(appSession.IDTokenClaims, "", "  ")
-	accessClaims, _ := json.MarshalIndent(appSession.AccessTokenClaims, "", "  ")
-	s.writeHTML(w, http.StatusOK, page("Keycloak Issuance and Verification Demo", fmt.Sprintf(`
-<section class="hero">
-  <h1>Signed in with %s</h1>
-  <p>Issue a credential, then log out and sign in again through Keycloak.</p>
-  <form action="/issue" method="post" style="display:inline">
-    <button class="cta secondary" type="submit">Issue Membership Credential</button>
-  </form>
-  <a class="cta muted" href="%s">Open Wallet UI</a>
-  <a class="cta muted" href="/logout">Logout</a>
-  <div class="grid">
-    <section class="panel">
-      <h2>ID Token Claims</h2>
-      <pre id="id-token-claims">%s</pre>
-    </section>
-    <section class="panel">
-      <h2>Access Token Claims</h2>
-      <pre>%s</pre>
-    </section>
-  </div>
-</section>`, html.EscapeString(appSession.LoginMethod), html.EscapeString(s.cfg.WalletUIURL), html.EscapeString(string(idClaims)), html.EscapeString(string(accessClaims)))))
+	s.renderTemplate(w, http.StatusOK, "home.html", homePageData{
+		Title:             "Keycloak Wallet Demo",
+		SignedIn:          true,
+		WalletUIURL:       s.cfg.WalletUIURL,
+		LoginMethod:       appSession.LoginMethod,
+		IDTokenClaims:     prettyJSON(appSession.IDTokenClaims),
+		AccessTokenClaims: prettyJSON(appSession.AccessTokenClaims),
+	})
 }
 
 func (s *server) handleAPILoginURL(w http.ResponseWriter, r *http.Request) {
@@ -589,7 +503,11 @@ func (s *server) handleAPICredentialOffer(w http.ResponseWriter, r *http.Request
 
 func (s *server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(s.cfg.KeycloakTrustListPath) == "" {
-		s.writeHTML(w, http.StatusNotFound, page("Not Found", `<section class="hero"><h1>Not found.</h1></section>`))
+		s.renderTemplate(w, http.StatusNotFound, "not_found.html", messagePageData{
+			Title:   "Not Found",
+			Heading: "Trust list not configured",
+			Message: "Start the HTTP demo mode to serve the generated trust list from the app.",
+		})
 		return
 	}
 	raw, err := os.ReadFile(s.cfg.KeycloakTrustListPath)
@@ -624,16 +542,11 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		s.writeHTML(w, http.StatusOK, page("Issue Credential", fmt.Sprintf(`
-<section class="hero">
-  <h1>Create credential offer</h1>
-  <p>This generates a new offer for the current session.</p>
-  <form action="/issue" method="post" style="display:inline">
-    <button class="cta secondary" type="submit">Create Offer</button>
-  </form>
-  <a class="cta muted" href="%s">Open Wallet UI</a>
-  <p class="note"><a href="/">Back to the demo app</a></p>
-</section>`, html.EscapeString(s.cfg.WalletUIURL))))
+		s.renderTemplate(w, http.StatusOK, "issue.html", issuePageData{
+			Title:       "Create Membership Credential Offer",
+			WalletUIURL: s.cfg.WalletUIURL,
+			HasOffer:    false,
+		})
 		return
 	}
 
@@ -642,18 +555,13 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	safeURI := html.EscapeString(offerURI)
-	acceptCommand := html.EscapeString("oid4vc-dev wallet accept '" + offerURI + "'")
-	s.writeHTML(w, http.StatusOK, page("Issue Credential", fmt.Sprintf(`
-<section class="hero">
-  <h1>Credential offer</h1>
-  <p>Open it in the wallet or redeem it with the CLI.</p>
-  <a class="cta secondary" href="%s">Open Offer In Wallet</a>
-  <a class="cta muted" href="%s">Open Wallet UI</a>
-  <pre>%s</pre>
-  <pre>%s</pre>
-  <p class="note"><a href="/">Back to the demo app</a></p>
-</section>`, safeURI, html.EscapeString(s.cfg.WalletUIURL), acceptCommand, safeURI)))
+	s.renderTemplate(w, http.StatusOK, "issue.html", issuePageData{
+		Title:         "Membership Credential Offer",
+		WalletUIURL:   s.cfg.WalletUIURL,
+		OfferURI:      offerURI,
+		AcceptCommand: "oid4vc-dev wallet accept '" + offerURI + "'",
+		HasOffer:      true,
+	})
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -688,21 +596,18 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if errValue := r.URL.Query().Get("error"); errValue != "" {
-		description := r.URL.Query().Get("error_description")
-		s.writeHTML(w, http.StatusBadRequest, page("Login Failed", fmt.Sprintf(`
-<section class="hero">
-  <h1>Login failed</h1>
-  <pre>%s
-%s</pre>
-  <p class="note"><a href="/">Back to the demo app</a></p>
-</section>`, html.EscapeString(errValue), html.EscapeString(description))))
+		s.renderTemplate(w, http.StatusBadRequest, "login_failed.html", loginFailedPageData{
+			Title:       "Login Failed",
+			Error:       errValue,
+			Description: r.URL.Query().Get("error_description"),
+		})
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 	if code == "" || state == "" {
-		s.writeHTML(w, http.StatusBadRequest, page("Missing Authorization Response", `<section class="hero"><h1>Missing code or state.</h1></section>`))
+		s.writeError(w, "missing code or state", http.StatusBadRequest)
 		return
 	}
 

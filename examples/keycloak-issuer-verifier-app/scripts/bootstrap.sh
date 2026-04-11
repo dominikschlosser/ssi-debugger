@@ -11,15 +11,12 @@ KEYCLOAK_REALM="${KEYCLOAK_REALM:-wallet-app-demo}"
 KEYCLOAK_SIGNING_KEY_PATH="${KEYCLOAK_SIGNING_KEY_PATH:-${SCENARIO_DIR}/keycloak-signing-key.pem}"
 KEYCLOAK_SIGNING_CERT_PATH="${KEYCLOAK_SIGNING_CERT_PATH:-${SCENARIO_DIR}/keycloak-signing-cert.pem}"
 
-OID4VCI_CLIENT_ID="${OID4VCI_CLIENT_ID:-oid4vc-demo-client}"
-OID4VCI_CREDENTIAL_SCOPE="${OID4VCI_CREDENTIAL_SCOPE:-membership-credential}"
 OID4VCI_USER="${OID4VCI_USER:-alice}"
 OID4VCI_USER_PASSWORD="${OID4VCI_USER_PASSWORD:-alice}"
-OID4VP_FIRST_BROKER_FLOW_ALIAS="${OID4VP_FIRST_BROKER_FLOW_ALIAS:-oid4vp-user-id-auto-link}"
-OID4VP_LINK_PROVIDER_ID="${OID4VP_LINK_PROVIDER_ID:-oid4vp-detect-user-by-id}"
-
+OID4VCI_CREDENTIAL_SCOPE="${OID4VCI_CREDENTIAL_SCOPE:-membership-credential}"
 APP_CLIENT_ID="${APP_CLIENT_ID:-wallet-app}"
 APP_REDIRECT_URI="${APP_REDIRECT_URI:-http://127.0.0.1:8090/callback}"
+OID4VP_FIRST_BROKER_FLOW_ALIAS="${OID4VP_FIRST_BROKER_FLOW_ALIAS:-oid4vp-user-id-auto-link}"
 ALLOWED_ISSUER="${ALLOWED_ISSUER:-${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}}"
 OID4VP_TRUST_LIST_URL="${OID4VP_TRUST_LIST_URL:-http://host.docker.internal:8090/keycloak-trustlist.jwt}"
 OID4VP_TRUST_LIST_LOTE_TYPE="${OID4VP_TRUST_LIST_LOTE_TYPE:-http://uri.etsi.org/19602/LoTEType/local}"
@@ -48,15 +45,15 @@ curl_common() {
   curl "$@"
 }
 
-wait_for_keycloak() {
-  local ready_url="${KEYCLOAK_BASE_URL}/realms/master"
+wait_for_endpoint() {
+  local url="$1"
   for _ in $(seq 1 60); do
-    if curl_common -fsS "$ready_url" >/dev/null 2>&1; then
+    if curl_common -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
   done
-  echo "Keycloak did not become ready at ${ready_url}" >&2
+  echo "Keycloak did not become ready at ${url}" >&2
   exit 1
 }
 
@@ -109,6 +106,12 @@ require_file() {
 
 realm_id() {
   api GET "/admin/realms/${KEYCLOAK_REALM}" | jq -er '.id'
+}
+
+lookup_user_id() {
+  local username="$1"
+  api GET "/admin/realms/${KEYCLOAK_REALM}/users?username=${username}&exact=true" \
+    | jq -er '.[0].id'
 }
 
 configure_static_realm_signing_key() {
@@ -171,59 +174,6 @@ assert_static_realm_signing_key_active() {
   fi
 }
 
-lookup_id_by_name() {
-  local path="$1"
-  local name="$2"
-  api GET "$path" | jq -er --arg name "$name" '.[] | select(.name == $name) | .id' | head -n 1
-}
-
-lookup_client_id() {
-  local client_id="$1"
-  api GET "/admin/realms/${KEYCLOAK_REALM}/clients?clientId=${client_id}" \
-    | jq -er '.[0].id'
-}
-
-lookup_user_id() {
-  local username="$1"
-  api GET "/admin/realms/${KEYCLOAK_REALM}/users?username=${username}&exact=true" \
-    | jq -er '.[0].id'
-}
-
-create_basic_flow() {
-  local alias="$1"
-  api_json POST "/admin/realms/${KEYCLOAK_REALM}/authentication/flows" \
-    "$(json_payload \
-      --arg alias "$alias" \
-      '{
-        alias: $alias,
-        description: "Automatically link OID4VP wallet logins to existing Keycloak users via keycloak_user_id",
-        providerId: "basic-flow",
-        topLevel: true,
-        builtIn: false
-      }')"
-}
-
-add_flow_execution() {
-  local flow_alias="$1"
-  local provider_id="$2"
-  api_json POST "/admin/realms/${KEYCLOAK_REALM}/authentication/flows/${flow_alias}/executions/execution" \
-    "$(json_payload --arg provider "$provider_id" '{provider: $provider}')"
-}
-
-set_flow_requirement() {
-  local flow_alias="$1"
-  local provider_id="$2"
-  local requirement="$3"
-  local execution_json
-  execution_json="$(
-    api GET "/admin/realms/${KEYCLOAK_REALM}/authentication/flows/${flow_alias}/executions" \
-      | jq -cer --arg provider_id "$provider_id" --arg requirement "$requirement" \
-        '.[] | select(.providerId == $provider_id) | .requirement = $requirement' \
-      | head -n 1
-  )"
-  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/authentication/flows/${flow_alias}/executions" "$execution_json"
-}
-
 ensure_user_profile_attribute() {
   local attribute_name="$1"
   local profile_json
@@ -247,14 +197,51 @@ ensure_user_profile_attribute() {
       end
     '
   )"
-  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/profile" "$updated_profile_json"
+  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/profile" "$updated_profile_json" >/dev/null
 }
 
-require_file "${SCENARIO_DIR}/providers/keycloak-extension-oid4vp.jar"
-require_file "${SCENARIO_DIR}/providers/oid4vp-user-id-link-provider.jar"
-"${SCENARIO_DIR}/scripts/generate-keycloak-signing-cert.sh"
-require_file "${KEYCLOAK_SIGNING_KEY_PATH}"
-require_file "${KEYCLOAK_SIGNING_CERT_PATH}"
+set_user_keycloak_id() {
+  local user_id="$1"
+  local user_rep
+  user_rep="$(api GET "/admin/realms/${KEYCLOAK_REALM}/users/${user_id}")"
+  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/${user_id}" \
+    "$(printf '%s' "$user_rep" | jq -c --arg user_id "$user_id" '.attributes.keycloak_user_id = [$user_id]')" >/dev/null
+}
+
+set_user_password() {
+  local user_id="$1"
+  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/${user_id}/reset-password" \
+    "$(json_payload --arg password "$OID4VCI_USER_PASSWORD" '{
+      type: "password",
+      temporary: false,
+      value: $password
+    }')" >/dev/null
+}
+
+update_identity_provider() {
+  local instance_json
+  instance_json="$(
+    api GET "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances/oid4vp" \
+      | jq -c \
+        --arg allowed_issuer "$ALLOWED_ISSUER" \
+        --arg trust_list_url "$OID4VP_TRUST_LIST_URL" \
+        --arg trust_list_lote_type "$OID4VP_TRUST_LIST_LOTE_TYPE" \
+        --arg trust_mode "$OID4VP_TRUST_MODE" \
+        --arg dcql_query "$DCQL_QUERY" \
+        --arg first_broker_flow_alias "$OID4VP_FIRST_BROKER_FLOW_ALIAS" '
+          .firstBrokerLoginFlowAlias = $first_broker_flow_alias
+          | .config.allowedIssuers = $allowed_issuer
+          | .config.dcqlQuery = $dcql_query
+          | if $trust_mode == "trustlist" then
+              .config.trustListUrl = $trust_list_url
+              | .config.trustListLoTEType = $trust_list_lote_type
+            else
+              .config |= del(.trustListUrl, .trustListLoTEType)
+            end
+        '
+  )"
+  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances/oid4vp" "${instance_json}" >/dev/null
+}
 
 DCQL_QUERY="$(jq -c -n '{
   credentials: [
@@ -272,29 +259,16 @@ DCQL_QUERY="$(jq -c -n '{
   ]
 }')"
 
+require_file "${SCENARIO_DIR}/providers/keycloak-extension-oid4vp.jar"
+require_file "${SCENARIO_DIR}/providers/oid4vp-user-id-link-provider.jar"
+"${SCENARIO_DIR}/scripts/generate-keycloak-signing-cert.sh"
+require_file "${KEYCLOAK_SIGNING_KEY_PATH}"
+require_file "${KEYCLOAK_SIGNING_CERT_PATH}"
+
 echo "Waiting for Keycloak at ${KEYCLOAK_BASE_URL}..."
-wait_for_keycloak
+wait_for_endpoint "${KEYCLOAK_BASE_URL}/realms/master"
+wait_for_endpoint "${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration"
 ADMIN_TOKEN="$(admin_token)"
-
-if curl_common -fsS -o /dev/null -H "Authorization: Bearer ${ADMIN_TOKEN}" -H "X-Forwarded-Proto: https" \
-  "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}" 2>/dev/null; then
-  echo "Deleting existing realm ${KEYCLOAK_REALM}..."
-  delete_status="$(
-    curl_common -sS -o /dev/null -w '%{http_code}' \
-      -X DELETE \
-      "${KEYCLOAK_BASE_URL}/admin/realms/${KEYCLOAK_REALM}" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-      -H "X-Forwarded-Proto: https"
-  )"
-  if [[ "${delete_status}" != "204" && "${delete_status}" != "404" ]]; then
-    echo "Deleting realm ${KEYCLOAK_REALM} failed with HTTP ${delete_status}" >&2
-    exit 1
-  fi
-fi
-
-echo "Creating realm ${KEYCLOAK_REALM}..."
-api_json POST "/admin/realms" \
-  "$(json_payload --arg realm "$KEYCLOAK_REALM" '{realm: $realm, enabled: true, sslRequired: "NONE", verifiableCredentialsEnabled: true}')"
 
 REALM_ID="$(realm_id)"
 
@@ -305,190 +279,13 @@ assert_static_realm_signing_key_active
 echo "Registering keycloak_user_id in the realm user profile..."
 ensure_user_profile_attribute "keycloak_user_id"
 
-echo "Creating user ${OID4VCI_USER}..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/users" \
-  "$(json_payload \
-    --arg username "$OID4VCI_USER" \
-    --arg email "${OID4VCI_USER}@example.com" \
-    '{
-      username: $username,
-      enabled: true,
-      emailVerified: true,
-      firstName: "Alice",
-      lastName: "Issuer",
-      email: $email
-    }')"
-
-USER_ID="$(lookup_user_id "$OID4VCI_USER")"
+USER_ID="$(lookup_user_id "${OID4VCI_USER}")"
 
 echo "Persisting the Keycloak user ID as keycloak_user_id..."
-USER_REP="$(api GET "/admin/realms/${KEYCLOAK_REALM}/users/${USER_ID}")"
-api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/${USER_ID}" \
-  "$(printf '%s' "$USER_REP" | jq -c --arg user_id "$USER_ID" '.attributes.keycloak_user_id = [$user_id]')"
+set_user_keycloak_id "${USER_ID}"
 
 echo "Setting password for ${OID4VCI_USER}..."
-api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/${USER_ID}/reset-password" \
-  "$(json_payload --arg password "$OID4VCI_USER_PASSWORD" '{
-    type: "password",
-    temporary: false,
-    value: $password
-  }')"
-
-echo "Creating OID4VCI client scope ${OID4VCI_CREDENTIAL_SCOPE}..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/client-scopes" \
-  "$(json_payload \
-    --arg name "$OID4VCI_CREDENTIAL_SCOPE" \
-    --arg vct "https://credentials.example.com/membership" \
-    '{
-      name: $name,
-      protocol: "oid4vc",
-      attributes: {
-        "include.in.token.scope": "true",
-        "vc.credential_configuration_id": $name,
-        "vc.credential_identifier": "membership-credential-id",
-        "vc.format": "dc+sd-jwt",
-        "vc.verifiable_credential_type": $vct,
-        "vc.credential_signing_alg": "RS256",
-        "vc.credential_build_config.token_jws_type": "dc+sd-jwt",
-        "vc.binding_required": "true",
-        "vc.binding_required_proof_types": "jwt",
-        "vc.cryptographic_binding_methods_supported": "jwk"
-      },
-      protocolMappers: [
-        {
-          "name": "keycloak-user-id-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "keycloak_user_id",
-            "userAttribute": "keycloak_user_id"
-          }
-        },
-        {
-          "name": "given-name-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "given_name",
-            "userAttribute": "firstName"
-          }
-        },
-        {
-          "name": "family-name-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "family_name",
-            "userAttribute": "lastName"
-          }
-        },
-        {
-          "name": "email-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "email",
-            "userAttribute": "email"
-          }
-        },
-        {
-          "name": "preferred-username-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "preferred_username",
-            "userAttribute": "username"
-          }
-        },
-        {
-          "name": "jti-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-generated-id-mapper",
-          "config": {
-            "claim.name": "jti"
-          }
-        },
-        {
-          "name": "iat-mapper",
-          "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-issued-at-time-claim-mapper",
-          "config": {
-            "claim.name": "iat"
-          }
-        }
-      ]
-    }')"
-
-SCOPE_ID="$(lookup_id_by_name "/admin/realms/${KEYCLOAK_REALM}/client-scopes" "$OID4VCI_CREDENTIAL_SCOPE")"
-
-echo "Creating OID4VCI public client ${OID4VCI_CLIENT_ID}..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/clients" \
-  "$(json_payload \
-    --arg client_id "$OID4VCI_CLIENT_ID" \
-    '{
-      clientId: $client_id,
-      enabled: true,
-      publicClient: true,
-      directAccessGrantsEnabled: true,
-      standardFlowEnabled: true,
-      redirectUris: ["http://127.0.0.1/*"],
-      webOrigins: ["*"],
-      attributes: {
-        "oid4vci.enabled": "true",
-        "pkce.code.challenge.method": "S256"
-      }
-    }')"
-
-ISSUER_CLIENT_UUID="$(lookup_client_id "$OID4VCI_CLIENT_ID")"
-
-echo "Assigning optional client scope ${OID4VCI_CREDENTIAL_SCOPE}..."
-api PUT "/admin/realms/${KEYCLOAK_REALM}/clients/${ISSUER_CLIENT_UUID}/optional-client-scopes/${SCOPE_ID}"
-
-echo "Assigning credential-offer-create role to ${OID4VCI_USER}..."
-ROLE_JSON="$(api GET "/admin/realms/${KEYCLOAK_REALM}/roles/credential-offer-create")"
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/users/${USER_ID}/role-mappings/realm" "[${ROLE_JSON}]"
-
-echo "Creating app client ${APP_CLIENT_ID}..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/clients" \
-  "$(json_payload \
-    --arg client_id "$APP_CLIENT_ID" \
-    --arg redirect_uri "$APP_REDIRECT_URI" \
-    '{
-      clientId: $client_id,
-      enabled: true,
-      publicClient: true,
-      directAccessGrantsEnabled: false,
-      standardFlowEnabled: true,
-      redirectUris: [
-        $redirect_uri,
-        "http://127.0.0.1:8090/*",
-        "http://localhost:8090/*"
-      ],
-      webOrigins: ["*"],
-      protocol: "openid-connect",
-      attributes: {
-        "pkce.code.challenge.method": "S256",
-        "oid4vci.enabled": "true"
-      },
-      protocolMappers: [
-        {
-          name: "login-type",
-          protocol: "openid-connect",
-          protocolMapper: "oid4vc-login-type-protocol-mapper",
-          consentRequired: false,
-          config: {
-            "access.token.claim": "true",
-            "id.token.claim": "true",
-            "introspection.token.claim": "true"
-          }
-        }
-      ]
-    }')"
-
-APP_CLIENT_UUID="$(lookup_client_id "$APP_CLIENT_ID")"
-
-echo "Assigning optional client scope ${OID4VCI_CREDENTIAL_SCOPE} to ${APP_CLIENT_ID}..."
-api PUT "/admin/realms/${KEYCLOAK_REALM}/clients/${APP_CLIENT_UUID}/optional-client-scopes/${SCOPE_ID}"
+set_user_password "${USER_ID}"
 
 if [[ "${OID4VP_TRUST_MODE}" == "trustlist" ]]; then
   echo "Generating trust list for the Keycloak signing certificate..."
@@ -503,72 +300,12 @@ else
   rm -f "${KEYCLOAK_TRUST_LIST_PATH}"
 fi
 
-echo "Creating custom first broker login flow ${OID4VP_FIRST_BROKER_FLOW_ALIAS}..."
-create_basic_flow "${OID4VP_FIRST_BROKER_FLOW_ALIAS}"
-add_flow_execution "${OID4VP_FIRST_BROKER_FLOW_ALIAS}" "${OID4VP_LINK_PROVIDER_ID}"
-add_flow_execution "${OID4VP_FIRST_BROKER_FLOW_ALIAS}" "idp-auto-link"
-set_flow_requirement "${OID4VP_FIRST_BROKER_FLOW_ALIAS}" "${OID4VP_LINK_PROVIDER_ID}" "REQUIRED"
-set_flow_requirement "${OID4VP_FIRST_BROKER_FLOW_ALIAS}" "idp-auto-link" "REQUIRED"
-
-echo "Configuring OID4VP identity provider..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances" \
-  "$(json_payload \
-    --arg allowed_issuer "$ALLOWED_ISSUER" \
-    --arg trust_list_url "$OID4VP_TRUST_LIST_URL" \
-    --arg trust_list_lote_type "$OID4VP_TRUST_LIST_LOTE_TYPE" \
-    --arg trust_mode "$OID4VP_TRUST_MODE" \
-    --arg dcql_query "$DCQL_QUERY" \
-    --arg first_broker_flow_alias "$OID4VP_FIRST_BROKER_FLOW_ALIAS" \
-    '{
-      alias: "oid4vp",
-      displayName: "Sign in with Wallet",
-      providerId: "oid4vp",
-      enabled: true,
-      trustEmail: false,
-      storeToken: false,
-      addReadTokenRoleOnCreate: false,
-      authenticateByDefault: false,
-      linkOnly: false,
-      firstBrokerLoginFlowAlias: $first_broker_flow_alias,
-      config: ({
-        clientId: "not-used",
-        clientSecret: "not-used",
-        sameDeviceEnabled: "true",
-        crossDeviceEnabled: "false",
-        walletScheme: "openid4vp://",
-        responseMode: "direct_post",
-        enforceHaip: "false",
-        clientIdScheme: "plain",
-        x509CertificatePem: "",
-        x509SigningKeyJwk: "",
-        trustedAuthoritiesMode: "none",
-        allowedIssuers: $allowed_issuer,
-        trustListMaxCacheTtlSeconds: "0",
-        trustListMaxStaleAgeSeconds: "0",
-        statusListMaxCacheTtlSeconds: "0",
-        userMappingClaim: "keycloak_user_id",
-        userMappingClaimMdoc: "keycloak_user_id",
-        dcqlQuery: $dcql_query
-      } + (if $trust_mode == "trustlist" then {trustListUrl: $trust_list_url, trustListLoTEType: $trust_list_lote_type} else {} end))
-    }')"
-
-echo "Adding wallet login session-note mapper to OID4VP identity provider..."
-api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances/oid4vp/mappers" \
-  "$(json_payload '
-    {
-      name: "login-type-wallet",
-      identityProviderAlias: "oid4vp",
-      identityProviderMapper: "hardcoded-user-session-attribute-idp-mapper",
-      config: {
-        attribute: "login_type",
-        "attribute.value": "wallet"
-      }
-    }')"
+echo "Updating OID4VP identity provider for ${OID4VP_TRUST_MODE} mode..."
+update_identity_provider
 
 echo
 echo "Ready:"
 echo "  realm=${KEYCLOAK_REALM}"
-echo "  issuer_client=${OID4VCI_CLIENT_ID}"
 echo "  app_client=${APP_CLIENT_ID}"
 echo "  allowed_issuer=${ALLOWED_ISSUER}"
 if [[ "${OID4VP_TRUST_MODE}" == "trustlist" ]]; then

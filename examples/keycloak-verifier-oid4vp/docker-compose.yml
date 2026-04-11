@@ -3,6 +3,7 @@ services:
     image: quay.io/keycloak/keycloak:26.6.0
     command:
       - start-dev
+      - --import-realm
       - --http-port=8080
       - --proxy-headers=xforwarded
       - --truststore-paths=/opt/keycloak/conf/oid4vc-wallet-ca.pem
@@ -19,3 +20,4 @@ services:
     volumes:
       - ./providers:/opt/keycloak/providers:ro
       - ./wallet-ca-cert.pem:/opt/keycloak/conf/oid4vc-wallet-ca.pem:ro
+      - ./realm:/opt/keycloak/data/import:ro

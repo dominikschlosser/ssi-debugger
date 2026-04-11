@@ -218,8 +218,10 @@ so the wallet automatically receives incoming protocol requests.`,
 			if register && !noRegister {
 				if err := wallet.RegisterURLSchemes(port, w.AutoAccept); err != nil {
 					yellow.Printf("  Register:    skipped (%s)\n", err)
-				} else {
+				} else if wallet.SupportsURLSchemeRegistration() {
 					fmt.Printf("  Register:    URL scheme handlers registered\n")
+				} else {
+					yellow.Printf("  Register:    not supported on this platform; use 'oid4vc-dev wallet accept <uri>' for copied links\n")
 				}
 			}
 

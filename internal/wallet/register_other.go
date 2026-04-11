@@ -18,12 +18,18 @@ package wallet
 
 import "fmt"
 
+func supportsURLSchemeRegistration() bool {
+	return false
+}
+
 // RegisterURLSchemes is not supported on this platform.
 func RegisterURLSchemes(listenerPort int, autoAccept bool) error {
-	return fmt.Errorf("URL scheme registration is currently only supported on macOS.\n\nOn other platforms, use 'wallet accept <uri>' instead.")
+	fmt.Println("URL scheme registration is not available on this platform. Continue with 'oid4vc-dev wallet accept <uri>' for copied offer or presentation links.")
+	return nil
 }
 
 // UnregisterURLSchemes is not supported on this platform.
 func UnregisterURLSchemes() error {
-	return fmt.Errorf("URL scheme unregistration is currently only supported on macOS")
+	fmt.Println("URL scheme registration is not available on this platform. Nothing to unregister.")
+	return nil
 }

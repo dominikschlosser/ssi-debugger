@@ -26,6 +26,10 @@ import (
 
 const appBundleName = "OID4VC-Dev-Wallet.app"
 
+func supportsURLSchemeRegistration() bool {
+	return true
+}
+
 func appBundlePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Applications", appBundleName)

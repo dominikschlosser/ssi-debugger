@@ -6,8 +6,8 @@ This example runs a local same-device OpenID4VP login against Keycloak using `oi
 
 1. `./scripts/download-extension.sh` downloads `keycloak-extension-oid4vp` `0.6.1` into `providers/`.
 2. `./scripts/generate-wallet.sh` prepares the standard `oid4vc-dev` wallet with PID credentials and a trust list endpoint reachable from Docker as `http://host.docker.internal:8085`.
-3. `docker compose up` starts Keycloak `26.6.0` with the OID4VP provider jar mounted and the wallet CA certificate added to Keycloak's truststore.
-4. `./scripts/bootstrap.sh` creates realm `wallet-demo`, public client `wallet-mock`, and the `oid4vp` identity provider with a DCQL query for SD-JWT PID `urn:eudi:pid:de:1`.
+3. `docker compose up --force-recreate` starts Keycloak `26.6.0`, mounts `realm/wallet-demo-realm.json`, imports the realm on startup, and loads the OID4VP provider jar.
+4. `./scripts/bootstrap.sh` only waits for the imported realm to become ready and prints the public endpoints.
 5. `./scripts/login.py` starts the OIDC browser login, extracts the `openid4vp://` request, hands it to `oid4vc-dev wallet accept --auto-accept` for the automated headless path, follows the broker flow, and exchanges the returned code for tokens.
 
 ## Flow Diagram
@@ -20,7 +20,7 @@ sequenceDiagram
     participant W as oid4vc-dev wallet
 
     U->>W: generate-pid --docker --base-url http://host.docker.internal:8085
-    U->>KC: bootstrap realm, client, OID4VP IdP
+    U->>KC: import static realm, client, OID4VP IdP
     U->>KC: start OIDC authorize request
     KC->>EXT: invoke oid4vp identity provider
     EXT-->>U: same-device login page with openid4vp:// request
@@ -36,9 +36,10 @@ sequenceDiagram
 ## Files
 
 - `start.sh`: runs the full setup and by default executes the headless same-device verifier flow
-- `docker-compose.yml`: starts Keycloak and mounts provider jars from `providers/`
+- `docker-compose.yml`: starts Keycloak, mounts provider jars from `providers/`, and imports the realm from `realm/`
+- `realm/wallet-demo-realm.json`: source-of-truth Keycloak realm config for the example
 - `scripts/download-extension.sh`: downloads `keycloak-extension-oid4vp` `0.6.1`
-- `scripts/bootstrap.sh`: creates the demo realm and OID4VP IdP
+- `scripts/bootstrap.sh`: waits for the imported realm and prints the useful endpoints
 - `scripts/generate-wallet.sh`: creates the wallet, PID credentials, wallet CA, and trust list endpoint
 - `scripts/login.py`: runs the same-device flow end to end and exchanges the returned code
 - `scripts/test-oidc-flow.sh`: starts a browser-driven flow for a system-registered `oid4vc-dev` wallet
@@ -56,6 +57,12 @@ Browser-driven flow:
 
 ```bash
 ./start.sh --browser
+```
+
+`./start.sh --browser` runs `oid4vc-dev wallet register` automatically. On macOS that installs the custom scheme handlers. On Linux and Windows it is a no-op, so when Keycloak shows the wallet page, copy the `openid4vp://...` link target and run:
+
+```bash
+oid4vc-dev wallet accept '<openid4vp://...>'
 ```
 
 Setup only:
@@ -76,7 +83,7 @@ Setup only:
 | Realm | `wallet-demo` |
 | Admin user | `admin` / `admin` |
 | OIDC client | `wallet-mock` |
-| Redirect URI pattern | `http://127.0.0.1/*`, `http://localhost/*` |
+| Redirect URIs | `*` |
 | Client attributes | `pkce.code.challenge.method=S256` |
 
 ### `keycloak-extension-oid4vp`
@@ -95,7 +102,6 @@ Setup only:
 | `trustedAuthoritiesMode` | `none` |
 | `trustListUrl` | `http://host.docker.internal:8085/api/trustlist` |
 | `trustListLoTEType` | `http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList` |
-| `statusListMaxCacheTtlSeconds` | `0` |
 | `userMappingClaim` | `family_name` |
 | `userMappingClaimMdoc` | `family_name` |
 | DCQL credential id | `pid_sd_jwt` |

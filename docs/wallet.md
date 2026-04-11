@@ -24,8 +24,8 @@ For GitHub-rendered interaction diagrams of the implemented OID4VP and OID4VCI f
 | `trust-list`   | Print the trust list JWT (or just the URL with `--url`)         |
 | `ca-cert`      | Print or export the shared wallet CA certificate                |
 | `tls-cert`     | Print or export the HTTPS wallet certificate used by HTTPS wallet endpoints |
-| `register`     | Register OS URL scheme handlers (macOS only)                    |
-| `unregister`   | Remove OS URL scheme handlers                                   |
+| `register`     | Register OS URL scheme handlers on macOS; no-op elsewhere       |
+| `unregister`   | Remove OS URL scheme handlers on macOS; no-op elsewhere         |
 
 ## Quick start
 
@@ -65,12 +65,14 @@ oid4vc-dev wallet scan --screen
 # Import a credential from a file
 oid4vc-dev wallet import credential.txt
 
-# Register URL scheme handlers so openid4vp:// links open the wallet
+# Register URL scheme handlers so openid4vp:// links open the wallet on macOS
 oid4vc-dev wallet register
 
-# Keep URL handling silent/background-only
+# Keep URL handling silent/background-only on macOS
 oid4vc-dev wallet register --auto-accept
 ```
+
+On Linux and Windows, `wallet register` and `wallet unregister` are accepted as no-ops so shared scripts stay portable. Use `oid4vc-dev wallet accept '<uri>'` with copied `openid4vp://` or `openid-credential-offer://` links instead.
 
 ## Storage
 
@@ -200,7 +202,7 @@ When the wallet needs a local default profile, it uses:
 - `SvcType/Issuance`
 - `SvcType/Revocation`
 
-Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
+Use `--register` to also register OS URL scheme handlers so that `openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet on macOS. On Linux and Windows, `--register` is accepted but does not install OS handlers.
 
 ```bash
 oid4vc-dev wallet serve
@@ -349,7 +351,7 @@ By default, the handler script makes sure a local `wallet serve` instance is ava
 Use `--auto-accept` to keep URL handling silent: the handler first tries to POST to a running `wallet serve` instance and otherwise falls back to invoking the CLI directly (`wallet accept`).
 
 - **macOS**: Creates an AppleScript `.app` bundle in `~/Applications/` and registers via Launch Services
-- **Other platforms**: Not supported — use `wallet accept <uri>` instead
+- **Other platforms**: `register` / `unregister` are accepted as no-ops so scripts stay portable; use `wallet accept <uri>` instead
 
 ```bash
 oid4vc-dev wallet register               # Register URL handlers and open the wallet UI by default

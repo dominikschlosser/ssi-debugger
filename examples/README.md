@@ -10,10 +10,14 @@ Each example should be self-contained in its own subfolder and include:
 - any compose files, scripts, or fixtures needed to run it
 - the exact versions or assumptions the scenario was tested against
 
+The examples in this directory prefer fixed ports, fixed demo identities, and static Keycloak realm files where that keeps the flow easier to understand. Dynamic bootstrap scripts are kept for cases that genuinely need runtime-generated keys, trust lists, or provider wiring.
+
+The example scripts are written for Bash. On Windows, run them from Git Bash or WSL; the wallet flows themselves avoid macOS-only assumptions and fall back to `oid4vc-dev wallet accept '<uri>'` when custom URL handlers are unavailable.
+
 ## Scenarios
 
 | Folder | Purpose |
 |--------|---------|
-| `keycloak-issuer-wallet` | Use Keycloak 26.6.0 as an OpenID4VCI credential issuer and `oid4vc-dev` as the wallet |
-| `keycloak-verifier-oid4vp` | Use Keycloak 26.6.0 plus `keycloak-extension-oid4vp` as an OpenID4VP verifier and `oid4vc-dev` as the wallet |
-| `keycloak-issuer-verifier-app` | Use one Keycloak 26.6.0 instance for both issuance and verification, with a sample app that issues a credential and then logs in with it through `oid4vc-dev`, auto-linking by `keycloak_user_id`, defaulting to HTTP plus a custom trust list and optionally supporting HTTPS plus issuer metadata |
+| `keycloak-issuer-wallet` | Smallest issuer example: one imported realm, one demo user, one credential configuration, and `oid4vc-dev` as the wallet |
+| `keycloak-verifier-oid4vp` | Smallest verifier example: one imported realm plus `keycloak-extension-oid4vp`, using `oid4vc-dev` as the wallet |
+| `keycloak-issuer-verifier-app` | Combined issuance and verification demo with a small Go app; keeps dynamic bootstrap only for the pieces that depend on runtime trust and signing material |

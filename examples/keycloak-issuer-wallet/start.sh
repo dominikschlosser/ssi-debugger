@@ -55,7 +55,7 @@ fi
 cd "${SCRIPT_DIR}"
 
 ensure_oid4vc_dev
-docker compose up -d
+docker compose up -d --force-recreate
 ./scripts/bootstrap.sh
 
 if [[ "${mode}" == "full" ]]; then

@@ -1,0 +1,31 @@
+{{define "content"}}
+<section class="card">
+  {{if .HasOffer}}
+    <h1>Membership credential offer</h1>
+    <p>Open the offer in the wallet or accept it with the CLI.</p>
+    <div class="actions">
+      <a class="button button-primary" href="{{.OfferURI}}">Open offer in wallet</a>
+      <a class="button" href="{{.WalletUIURL}}">Open wallet UI</a>
+      <a class="button" href="/">Back</a>
+    </div>
+    <section class="stack">
+      <h2>Offer URI</h2>
+      <pre>{{.OfferURI}}</pre>
+    </section>
+    <section class="stack">
+      <h2>CLI</h2>
+      <pre>{{.AcceptCommand}}</pre>
+    </section>
+  {{else}}
+    <h1>Create membership credential offer</h1>
+    <p>This creates a fresh offer for the current app session.</p>
+    <div class="actions">
+      <form action="/issue" method="post">
+        <button class="button button-primary" type="submit">Create offer</button>
+      </form>
+      <a class="button" href="{{.WalletUIURL}}">Open wallet UI</a>
+      <a class="button" href="/">Back</a>
+    </div>
+  {{end}}
+</section>
+{{end}}

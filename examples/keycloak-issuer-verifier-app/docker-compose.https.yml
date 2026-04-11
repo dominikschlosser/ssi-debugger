@@ -2,6 +2,7 @@ services:
   keycloak:
     command:
       - start-dev
+      - --import-realm
       - --features=oid4vc-vci:v1,oid4vc-vci-preauth-code:v1
       - --https-port=8443
       - --proxy-headers=xforwarded

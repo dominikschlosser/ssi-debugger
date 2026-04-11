@@ -12,24 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build linux
-
 package wallet
 
-import "fmt"
-
-func supportsURLSchemeRegistration() bool {
-	return false
-}
-
-// RegisterURLSchemes is not yet supported on Linux.
-func RegisterURLSchemes(listenerPort int, autoAccept bool) error {
-	fmt.Println("URL scheme registration is not available on this platform. Continue with 'oid4vc-dev wallet accept <uri>' for copied offer or presentation links.")
-	return nil
-}
-
-// UnregisterURLSchemes is not yet supported on Linux.
-func UnregisterURLSchemes() error {
-	fmt.Println("URL scheme registration is not available on this platform. Nothing to unregister.")
-	return nil
+// SupportsURLSchemeRegistration reports whether this build can register OS-level
+// handlers for openid4vp:// and related custom schemes.
+func SupportsURLSchemeRegistration() bool {
+	return supportsURLSchemeRegistration()
 }

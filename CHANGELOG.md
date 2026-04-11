@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.9] - 2026-04-12
+
+### Fixed
+
+- lint and security issues in the wallet presentation port probing logic by binding temporary listeners to `127.0.0.1` and handling listener close errors explicitly
+- Keycloak example offer-link rendering by validating allowed wallet URI schemes before passing them through to the HTML templates
+
 ## [1.8.8] - 2026-04-12
 
 ### Fixed

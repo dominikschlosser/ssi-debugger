@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cleanup_enabled="false"
 
 ensure_oid4vc_dev() {
   if command -v oid4vc-dev >/dev/null 2>&1; then
@@ -34,6 +35,12 @@ Usage: ./start.sh [--setup-only|--browser]
 EOF
 }
 
+cleanup() {
+  if [[ "${cleanup_enabled}" == "true" ]]; then
+    docker compose down --remove-orphans >/dev/null 2>&1 || true
+  fi
+}
+
 mode="headless"
 if [[ $# -gt 1 ]]; then
   usage >&2
@@ -64,9 +71,13 @@ docker compose up -d --force-recreate
 
 case "${mode}" in
   headless)
+    cleanup_enabled="true"
+    trap cleanup EXIT INT TERM
     ./scripts/login.py
     ;;
   browser)
+    cleanup_enabled="true"
+    trap cleanup EXIT INT TERM
     oid4vc-dev wallet register
     ./scripts/test-oidc-flow.sh
     ;;

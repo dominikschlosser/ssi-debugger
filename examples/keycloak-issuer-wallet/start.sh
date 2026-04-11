@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cleanup_enabled="false"
 
 ensure_oid4vc_dev() {
   if command -v oid4vc-dev >/dev/null 2>&1; then
@@ -33,6 +34,12 @@ Usage: ./start.sh [--setup-only]
 EOF
 }
 
+cleanup() {
+  if [[ "${cleanup_enabled}" == "true" ]]; then
+    docker compose down --remove-orphans >/dev/null 2>&1 || true
+  fi
+}
+
 mode="full"
 if [[ $# -gt 1 ]]; then
   usage >&2
@@ -59,6 +66,9 @@ docker compose up -d --force-recreate
 ./scripts/bootstrap.sh
 
 if [[ "${mode}" == "full" ]]; then
+  cleanup_enabled="true"
+  trap cleanup EXIT INT TERM
+  oid4vc-dev wallet remove --all >/dev/null
   ./scripts/redeem-offer.sh
 else
   echo

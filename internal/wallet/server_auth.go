@@ -241,6 +241,7 @@ func (s *Server) preparePresentation(authReq *AuthorizationRequestParams, matche
 	params := PresentationParams{
 		Nonce:          authReq.Nonce,
 		ClientID:       authReq.ClientID,
+		RequestOrigin:  authReq.RequestOrigin,
 		ResponseURI:    responseURI,
 		RedirectURI:    authReq.RedirectURI,
 		ResponseMode:   authReq.ResponseMode,
@@ -292,6 +293,7 @@ func (s *Server) buildBrowserAuthorizationErrorResult(authReq *AuthorizationRequ
 	params := PresentationParams{
 		Nonce:          authReq.Nonce,
 		ClientID:       authReq.ClientID,
+		RequestOrigin:  authReq.RequestOrigin,
 		ResponseURI:    authReq.ResponseURI,
 		RedirectURI:    authReq.RedirectURI,
 		ResponseMode:   authReq.ResponseMode,
@@ -317,6 +319,7 @@ func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *Author
 	params := PresentationParams{
 		Nonce:          authReq.Nonce,
 		ClientID:       authReq.ClientID,
+		RequestOrigin:  authReq.RequestOrigin,
 		ResponseURI:    responseURI,
 		RedirectURI:    authReq.RedirectURI,
 		ResponseMode:   authReq.ResponseMode,

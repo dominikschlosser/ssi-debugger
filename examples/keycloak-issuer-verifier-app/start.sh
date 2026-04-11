@@ -6,6 +6,7 @@ APP_PID=""
 compose_args=(-f docker-compose.yml)
 transport="http"
 trust_mode="trustlist"
+cleanup_enabled="false"
 
 ensure_oid4vc_dev() {
   if command -v oid4vc-dev >/dev/null 2>&1; then
@@ -44,6 +45,9 @@ cleanup() {
   if [[ -n "${APP_PID}" ]]; then
     kill "${APP_PID}" >/dev/null 2>&1 || true
     wait "${APP_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ "${cleanup_enabled}" == "true" ]]; then
+    docker compose "${compose_args[@]}" down --remove-orphans >/dev/null 2>&1 || true
   fi
 }
 
@@ -116,10 +120,16 @@ fi
 
 case "${mode}" in
   app)
-    exec ./scripts/start-app.sh
+    cleanup_enabled="true"
+    trap cleanup EXIT INT TERM
+    ./scripts/start-app.sh &
+    APP_PID=$!
+    wait "${APP_PID}"
     ;;
   smoke)
+    cleanup_enabled="true"
     trap cleanup EXIT
+    oid4vc-dev wallet remove --all >/dev/null
     ./scripts/start-app.sh &
     APP_PID=$!
     wait_for_app

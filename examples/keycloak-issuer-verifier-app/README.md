@@ -2,37 +2,56 @@
 
 This example combines OpenID4VCI issuance and OpenID4VP verification around one Keycloak realm and one small sample application.
 
-Compared with the smaller examples in this directory, this scenario still needs a small dynamic bootstrap for runtime-generated trust material and the persistent signing key. The static realm import now already contains the fixed app client, credential scope, custom first-broker flow, OID4VP identity provider, and the wallet-login session-note mapper. The UI itself is kept separate from the Go handlers in `app/templates/` and `app/static/`.
+Compared with the smaller examples in this directory, this scenario still needs a small dynamic bootstrap for runtime-generated trust material and the persistent signing key. The static realm import already contains the fixed app client, credential scope, custom first-broker flow, OID4VP identity provider, and the wallet-login session-note mapper. The UI itself is kept separate from the Go handlers in `app/templates/` and `app/static/`.
 
-It supports two verifier-trust setups:
+The example supports two verifier-trust setups:
 
-- `--http`: Keycloak runs on `http://localhost:8080` and the OID4VP extension validates the credential through a generated trust list served by the demo app. This is the default.
+- `--http`: Keycloak runs on `http://localhost:8080` and the OID4VP extension validates the credential through a generated trust list served by the demo app.
 - `--https`: Keycloak runs on `https://localhost:8443` and the OID4VP extension resolves the issuer signing key from the VC metadata / issuer metadata endpoints.
 
-VC metadata based trust is the standards-aligned setup and must be served via HTTPS.
+The issuance flow is the same in both modes. The only difference is how wallet-login trust is resolved.
 
 ## How It Works
 
-### HTTP + Custom Trust List
+The static realm import provides the stable parts of the example. `bootstrap.sh` fills in the runtime parts: the persistent RS256 signing key, the generated trust list in HTTP mode, and the real `keycloak_user_id` value for `alice`.
 
-1. `./start.sh` or `./start.sh --http` downloads `keycloak-extension-oid4vp` `0.6.1`, builds the custom first-broker authenticator, and starts Keycloak on `http://localhost:8080`.
-2. `./scripts/bootstrap.sh` waits for the imported base realm, imports a persistent RS256 realm signing key from `keycloak-signing-key.pem` / `keycloak-signing-cert.pem`, then runs `./scripts/generate-keycloak-trustlist.go` to write `keycloak-trustlist.jwt` for that same signing certificate and updates the imported OID4VP identity provider for HTTP trust-list mode.
-3. `./scripts/start-app.sh` runs the local Go app on `http://127.0.0.1:8090` and serves `http://127.0.0.1:8090/keycloak-trustlist.jwt`.
-4. The OID4VP identity provider is configured with `trustListUrl=http://host.docker.internal:8090/keycloak-trustlist.jwt` and `trustListLoTEType=http://uri.etsi.org/19602/LoTEType/local`.
-5. The login, issuance, and wallet-login steps are the same as in the HTTPS setup.
-6. During wallet login, `keycloak-extension-oid4vp` validates the SD-JWT `x5c` chain against the custom trust list instead of using issuer metadata.
+### Trust Modes
 
-### HTTPS + VC Metadata
+- HTTP mode uses `http://host.docker.internal:8090/keycloak-trustlist.jwt` and `trustListLoTEType=http://uri.etsi.org/19602/LoTEType/local`.
+- HTTPS mode uses `allowedIssuers=https://localhost:8443/realms/wallet-app-demo` and fetches issuer metadata / JWKS over HTTPS.
 
-1. `./start.sh --https` downloads `keycloak-extension-oid4vp` `0.6.1`, builds the custom first-broker authenticator, generates a local HTTPS certificate for Keycloak, and starts Keycloak on `https://localhost:8443`.
-2. `./scripts/bootstrap.sh` waits for the imported base realm `wallet-app-demo`, registers `keycloak_user_id` in the realm user profile, persists the runtime user id into that attribute for `alice`, and updates the imported `oid4vp` identity provider with `allowedIssuers=https://localhost:8443/realms/wallet-app-demo` for metadata-based trust.
-3. `./scripts/start-app.sh` runs the local Go app on `http://127.0.0.1:8090`.
-4. A browser login with username/password creates a normal Keycloak app session.
-5. The app client itself is OID4VCI-enabled and uses its signed-in access token to call Keycloak's `create-credential-offer` endpoint, then hands the offer to `oid4vc-dev`.
-6. The wallet stores the issued credential, including `keycloak_user_id`.
-7. After logout, a second login goes through the normal Keycloak login page and can select the wallet option there. `keycloak-extension-oid4vp` verifies the credential by resolving the issuer signing key from the issuer metadata / VC metadata endpoints over HTTPS, and the custom first-broker flow links it back to the existing Keycloak user.
+## High-Level Flow
 
-## Request Flow
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant APP as Demo App
+    participant KC as Keycloak
+    participant EXT as keycloak-extension-oid4vp
+    participant BROKER as Custom Broker Authenticator
+    participant W as oid4vc-dev wallet
+
+    U->>APP: Sign in with password
+    APP->>KC: standard login
+    KC-->>APP: app session for alice
+    U->>APP: Issue membership credential
+    APP->>KC: create-credential-offer
+    KC-->>APP: issuer + nonce
+    APP->>W: openid-credential-offer://...?credential_offer_uri=...
+    W->>KC: redeem credential
+    KC-->>W: sd-jwt credential with keycloak_user_id
+
+    U->>APP: Log out, then sign in again
+    APP->>KC: standard login
+    KC->>EXT: brokered wallet login
+    EXT-->>W: openid4vp://authorize?request_uri=...
+    W->>EXT: present wallet credential
+    EXT->>KC: verified user with keycloak_user_id
+    KC->>BROKER: auto-link existing user
+    KC-->>APP: app session for the same user
+```
+
+## Detailed Flows
 
 ### Issuance
 
@@ -43,18 +62,9 @@ sequenceDiagram
     participant KC as Keycloak
     participant W as oid4vc-dev
 
-    U->>APP: GET /
-    U->>APP: GET /login
-    APP->>KC: 302 GET /realms/wallet-app-demo/protocol/openid-connect/auth
-    Note over APP,KC: client_id=wallet-app<br/>redirect_uri=http://127.0.0.1:8090/callback<br/>response_type=code<br/>scope=openid<br/>code_challenge=S256
-    KC-->>APP: 302 /callback?code=...&state=...
-    APP->>KC: POST /realms/wallet-app-demo/protocol/openid-connect/token
-    Note over APP,KC: grant_type=authorization_code<br/>client_id=wallet-app<br/>code_verifier=...
-    KC-->>APP: access_token, id_token, refresh_token
-
     U->>APP: POST /issue
-    APP->>KC: GET /realms/wallet-app-demo/protocol/oid4vc/create-credential-offer
-    Note over APP,KC: Authorization: Bearer <wallet-app access_token><br/>credential_configuration_id=membership-credential<br/>pre_authorized=true&type=uri
+    APP->>KC: GET /realms/wallet-app-demo/protocol/oid4vc/create-credential-offer?credential_configuration_id=membership-credential&pre_authorized=true&type=uri
+    Note over APP,KC: Authorization: Bearer <wallet-app access_token>
     KC-->>APP: {issuer, nonce}
     APP-->>U: HTML page with openid-credential-offer://?credential_offer_uri=...
 
@@ -62,7 +72,7 @@ sequenceDiagram
     W->>KC: GET /realms/wallet-app-demo/protocol/oid4vc/credential-offer/{nonce}
     W->>KC: GET /realms/wallet-app-demo/.well-known/openid-credential-issuer
     W->>KC: POST /realms/wallet-app-demo/protocol/oid4vc/credential
-    Note over W,KC: proof.jwt=...<br/>pre-authorized flow
+    Note over W,KC: pre-authorized flow<br/>proof.jwt=...
     KC-->>W: dc+sd-jwt credential
 ```
 
@@ -76,97 +86,21 @@ sequenceDiagram
     participant EXT as keycloak-extension-oid4vp
     participant W as oid4vc-dev
 
-    U->>APP: GET /logout
-    APP->>KC: 302 GET /realms/wallet-app-demo/protocol/openid-connect/logout
-    Note over APP,KC: post_logout_redirect_uri=http://127.0.0.1:8090<br/>client_id=wallet-app<br/>id_token_hint=...
+    U->>APP: Open Keycloak sign-in again
+    APP->>KC: GET /realms/wallet-app-demo/protocol/openid-connect/auth?client_id=wallet-app&redirect_uri=http://127.0.0.1:8090/callback&response_type=code&scope=openid&kc_idp_hint=oid4vp
+    KC->>EXT: start brokered login for alias oid4vp
+    EXT-->>W: openid4vp://authorize?request_uri=...
+    Note over EXT,W: request object fields that matter:<br/>response_mode=direct_post<br/>walletScheme=openid4vp://<br/>dcqlQuery.credentials[0].id=membership_sd_jwt<br/>dcqlQuery.credentials[0].format=dc+sd-jwt<br/>dcqlQuery.credentials[0].meta.vct_values[0]=https://credentials.example.com/membership<br/>dcqlQuery.credentials[0].claims=[keycloak_user_id, given_name, family_name, email]
 
-    U->>APP: GET /login
-    APP->>KC: 302 GET /realms/wallet-app-demo/protocol/openid-connect/auth
-    Note over APP,KC: client_id=wallet-app<br/>redirect_uri=http://127.0.0.1:8090/callback<br/>response_type=code<br/>scope=openid
-    U->>KC: select "Sign in with Wallet"
-    KC->>EXT: start brokered login via IdP alias oid4vp
-    EXT-->>U: same-device page with openid4vp://authorize?request_uri=...
-
-    U->>W: wallet accept 'openid4vp://authorize?...'
-    W->>EXT: GET request object / request_uri
+    W->>EXT: GET request_uri
     W->>EXT: POST response_uri
-    Note over W,EXT: response_mode=direct_post<br/>vp_token=...<br/>presentation_submission=...
+    Note over W,EXT: vp_token=...<br/>presentation_submission=...
 
-    EXT->>KC: verified brokered user with keycloak_user_id
-    KC->>KC: firstBrokerLoginFlow = oid4vp-user-id-auto-link
-    Note over KC: oid4vp-detect-user-by-id<br/>idp-auto-link
+    EXT->>KC: verified brokered identity with keycloak_user_id
+    KC->>BROKER: firstBrokerLoginFlow = oid4vp-user-id-auto-link
     KC-->>APP: 302 /callback?code=...&state=...
     APP->>KC: POST /realms/wallet-app-demo/protocol/openid-connect/token
     KC-->>APP: access_token, id_token, refresh_token
-```
-
-## High-Level Flow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant APP as Demo App
-    participant KC as Keycloak 26.6.0
-    participant EXT as keycloak-extension-oid4vp 0.6.1
-    participant LINK as Custom Broker Authenticator
-    participant W as oid4vc-dev wallet
-
-    U->>APP: Login With Password
-    APP->>KC: OIDC authorization code flow
-    KC-->>APP: app session for alice
-    U->>APP: Issue Membership Credential
-    APP->>KC: create-credential-offer with app access token
-    KC-->>APP: issuer + nonce
-    APP->>W: openid-credential-offer://...
-    W->>KC: OID4VCI credential request
-    KC-->>W: dc+sd-jwt credential with keycloak_user_id
-    U->>APP: Logout, then Sign In again
-    APP->>KC: OIDC auth via standard login page
-    KC->>EXT: start OID4VP broker login
-    EXT-->>W: openid4vp:// request
-    W->>EXT: direct_post VP token
-    EXT->>KC: verified brokered identity with keycloak_user_id
-    KC->>LINK: detect existing user by keycloak_user_id
-    LINK-->>KC: existing user id
-    KC-->>APP: authorization code and tokens for same user
-```
-
-## Trust Setup
-
-### HTTP + Custom Trust List
-
-```mermaid
-sequenceDiagram
-    participant APP as Demo App
-    participant KC as Keycloak
-    participant EXT as OID4VP Extension
-    participant W as oid4vc-dev wallet
-
-    APP->>KC: create-credential-offer
-    W->>KC: OID4VCI credential request
-    KC-->>W: SD-JWT VC with x5c chain
-    APP->>KC: second login via standard login page
-    W->>EXT: direct_post VP token
-    EXT->>APP: fetch /keycloak-trustlist.jwt
-    EXT->>EXT: verify SD-JWT x5c chain against trust list
-```
-
-### HTTPS + VC Metadata
-
-```mermaid
-sequenceDiagram
-    participant APP as Demo App
-    participant KC as Keycloak
-    participant EXT as OID4VP Extension
-    participant W as oid4vc-dev wallet
-
-    APP->>KC: create-credential-offer
-    W->>KC: OID4VCI credential request
-    KC-->>W: SD-JWT VC with iss=https://localhost:8443/realms/wallet-app-demo
-    APP->>KC: second login via standard login page
-    W->>EXT: direct_post VP token
-    EXT->>KC: fetch issuer metadata / JWKS over HTTPS
-    EXT->>EXT: verify SD-JWT signature with issuer metadata key
 ```
 
 ## Files
@@ -196,7 +130,7 @@ cd examples/keycloak-issuer-verifier-app
 
 If `oid4vc-dev` is not already installed, `start.sh` installs the latest release with `go install github.com/dominikschlosser/oid4vc-dev@latest`.
 
-HTTPS setup:
+HTTP / HTTPS setup:
 
 ```bash
 ./start.sh --http
@@ -253,7 +187,7 @@ Setup only:
 | User-profile attribute | `keycloak_user_id` | `keycloak_user_id` |
 | App client | `wallet-app` | `wallet-app` |
 | App redirect URI | `http://127.0.0.1:8090/callback` | `http://127.0.0.1:8090/callback` |
-| App client attributes | `pkce.code.challenge.method=S256`, `oid4vci.enabled=true` |
+| App client attributes | `pkce.code.challenge.method=S256`, `oid4vci.enabled=true` | `pkce.code.challenge.method=S256`, `oid4vci.enabled=true` |
 | App client redirect URIs | `*` | `*` |
 | Credential configuration ID | `membership-credential` | `membership-credential` |
 | Credential format | `dc+sd-jwt` | `dc+sd-jwt` |

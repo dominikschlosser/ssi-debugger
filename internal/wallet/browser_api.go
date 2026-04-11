@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/dominikschlosser/oid4vc-dev/internal/jsonutil"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 const (
 	BrowserAPIProtocolOpenID4VPUnsigned = "openid4vp-v1-unsigned"
 	BrowserAPIProtocolOpenID4VPSigned   = "openid4vp-v1-signed"
+	BrowserAPIProtocolOpenID4VPMulti    = "openid4vp-v1-multisigned"
 )
 
 type BrowserAPIRequestEnvelope struct {
@@ -56,7 +58,7 @@ type AuthorizationResponseEnvelope struct {
 func ParseBrowserAPIRequest(body BrowserAPIRequestEnvelope, opts oid4vc.ParseOptions, requestOrigin string) (string, *AuthorizationRequestParams, error) {
 	for _, req := range body.Digital.Requests {
 		switch req.Protocol {
-		case BrowserAPIProtocolOpenID4VPUnsigned, BrowserAPIProtocolOpenID4VPSigned:
+		case BrowserAPIProtocolOpenID4VPUnsigned, BrowserAPIProtocolOpenID4VPSigned, BrowserAPIProtocolOpenID4VPMulti:
 			params, err := parseBrowserAuthorizationRequest(req.Protocol, req.Data, opts, requestOrigin)
 			if err != nil {
 				return "", nil, err
@@ -94,8 +96,32 @@ func parseBrowserAuthorizationRequest(protocol string, data any, opts oid4vc.Par
 		default:
 			return nil, fmt.Errorf("signed browser request data must be a JWT string or object")
 		}
+	case BrowserAPIProtocolOpenID4VPMulti:
+		requestMap, ok := data.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("multisigned browser request data must be an object")
+		}
+		requestObject, ok := requestMap["request"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("multisigned browser request must contain a request object")
+		}
+		return parseMultiSignedBrowserAuthorizationRequest(requestObject, opts, requestOrigin)
 	case BrowserAPIProtocolOpenID4VPUnsigned:
-		bytes, err := json.Marshal(data)
+		payload := data
+		if requestMap, ok := data.(map[string]any); ok {
+			if _, ok := requestMap["client_id"].(string); !ok || requestMap["client_id"] == "" {
+				if requestOrigin != "" {
+					cloned := make(map[string]any, len(requestMap)+1)
+					for key, value := range requestMap {
+						cloned[key] = value
+					}
+					cloned["client_id"] = "web-origin:" + requestOrigin
+					payload = cloned
+				}
+			}
+		}
+
+		bytes, err := json.Marshal(payload)
 		if err != nil {
 			return nil, fmt.Errorf("marshaling unsigned browser request: %w", err)
 		}
@@ -123,6 +149,65 @@ func parseBrowserAuthorizationRequest(protocol string, data any, opts oid4vc.Par
 		DCQLQuery:        parsed.DCQLQuery,
 		RequestObject:    parsed.RequestObject,
 	}, nil
+}
+
+func parseMultiSignedBrowserAuthorizationRequest(requestObject map[string]any, opts oid4vc.ParseOptions, requestOrigin string) (*AuthorizationRequestParams, error) {
+	payload, _ := requestObject["payload"].(string)
+	signatures, ok := requestObject["signatures"].([]any)
+	if payload == "" || !ok || len(signatures) == 0 {
+		return nil, fmt.Errorf("multisigned browser request must contain payload and signatures")
+	}
+
+	var firstCandidate *AuthorizationRequestParams
+	for _, item := range signatures {
+		signatureMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		protected, _ := signatureMap["protected"].(string)
+		signature, _ := signatureMap["signature"].(string)
+		if protected == "" || signature == "" {
+			continue
+		}
+
+		raw := protected + "." + payload + "." + signature
+		parsed, err := ParseAuthorizationRequestWithOptions(raw, opts)
+		if err != nil {
+			continue
+		}
+
+		clientID := parsed.ClientID
+		if clientID == "" && parsed.RequestObject != nil {
+			clientID = jsonutil.GetString(parsed.RequestObject.Header, "client_id")
+		}
+
+		candidate := &AuthorizationRequestParams{
+			ClientID:         clientID,
+			ResponseType:     parsed.ResponseType,
+			ResponseMode:     parsed.ResponseMode,
+			Nonce:            parsed.Nonce,
+			State:            parsed.State,
+			RequestOrigin:    requestOrigin,
+			RedirectURI:      parsed.RedirectURI,
+			ResponseURI:      parsed.ResponseURI,
+			RequestURIMethod: parsed.RequestURIMethod,
+			ClientMetadata:   parsed.ClientMetadata,
+			DCQLQuery:        parsed.DCQLQuery,
+			RequestObject:    parsed.RequestObject,
+		}
+		if firstCandidate == nil {
+			firstCandidate = candidate
+		}
+
+		if parsed.RequestObject != nil && clientID != "" && VerifyRequestObjectSignature(parsed.RequestObject) == "" {
+			return candidate, nil
+		}
+	}
+
+	if firstCandidate != nil {
+		return firstCandidate, nil
+	}
+	return nil, fmt.Errorf("multisigned browser request did not contain a parseable signature")
 }
 
 func BuildBrowserAPIResult(protocol string, response *AuthorizationResponseEnvelope) (*BrowserAPIResult, error) {

@@ -3,6 +3,20 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+build_local_oid4vc_dev() {
+  if ! command -v go >/dev/null 2>&1; then
+    echo "error: Go is required to build the checked-out oid4vc-dev binary" >&2
+    exit 1
+  fi
+
+  LOCAL_OID4VC_DEV="$RUN_DIR/oid4vc-dev"
+  echo "Building oid4vc-dev from the current checkout..."
+  (
+    cd "$ROOT_DIR"
+    go build -o "$LOCAL_OID4VC_DEV" .
+  )
+}
+
 pick_port_pair() {
   python3 - <<'PY'
 import socket
@@ -67,6 +81,7 @@ RUNNER_LOG="$RUN_DIR/runner.log"
 WALLET_LOG="$RUN_DIR/wallet.log"
 
 mkdir -p "$RESULTS_DIR" "$WALLET_DIR"
+build_local_oid4vc_dev
 
 cleanup() {
   if [ -n "${WALLET_PID:-}" ] && kill -0 "$WALLET_PID" 2>/dev/null; then
@@ -87,7 +102,7 @@ python3 -m venv "$VENV_DIR"
 echo "Starting wallet on $WALLET_URL"
 (
   cd "$ROOT_DIR"
-  exec go run . wallet serve \
+  exec "$LOCAL_OID4VC_DEV" wallet serve \
     --mode strict \
     --auto-accept \
     --pid \

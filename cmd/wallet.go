@@ -25,6 +25,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
@@ -314,22 +315,44 @@ func walletRemoveCmd() *cobra.Command {
 // --- wallet register ---
 
 func walletRegisterCmd() *cobra.Command {
-	var (
-		port       int
-		autoAccept bool
-	)
-
 	cmd := &cobra.Command{
-		Use:   "register",
-		Short: "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)",
+		Use:                "register [wallet-serve-flags...]",
+		Short:              "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)",
+		Long:               "Stores the provided arguments and replays them as 'wallet serve ...' when the OS URL handler needs to auto-start the wallet listener.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return wallet.RegisterURLSchemes(port, autoAccept)
+			for _, arg := range args {
+				if arg == "-h" || arg == "--help" {
+					return cmd.Help()
+				}
+			}
+			opts, err := walletRegisterOptions(args)
+			if err != nil {
+				return err
+			}
+			return wallet.RegisterURLSchemes(opts)
 		},
 	}
-
-	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Listener port for handler script to try before falling back to CLI")
-	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Handle incoming URLs silently without opening the wallet UI")
 	return cmd
+}
+
+func walletRegisterOptions(args []string) (wallet.RegisterOptions, error) {
+	port := config.DefaultWalletPort
+	autoAccept := false
+
+	flags := pflag.NewFlagSet("wallet-register", pflag.ContinueOnError)
+	flags.ParseErrorsWhitelist.UnknownFlags = true
+	flags.IntVar(&port, "port", config.DefaultWalletPort, "")
+	flags.BoolVar(&autoAccept, "auto-accept", false, "")
+	if err := flags.Parse(args); err != nil {
+		return wallet.RegisterOptions{}, fmt.Errorf("parsing wallet serve arguments for registration: %w", err)
+	}
+
+	return wallet.RegisterOptions{
+		ListenerPort: port,
+		AutoAccept:   autoAccept,
+		ServeArgs:    append([]string(nil), args...),
+	}, nil
 }
 
 // --- wallet unregister ---

@@ -551,6 +551,230 @@ func TestProcessCredentialOffer_AuthCodeRequiresClientConfiguration(t *testing.T
 	}
 }
 
+func TestProcessCredentialOffer_AuthCodeBrowserFallback(t *testing.T) {
+	w := generateTestWallet(t)
+	w.VCIClientID = "wallet-client"
+
+	walletSrv := NewServer(w, 0, nil)
+	addr, err := walletSrv.ListenAndServeBackground()
+	if err != nil {
+		t.Fatalf("ListenAndServeBackground: %v", err)
+	}
+	defer walletSrv.Shutdown()
+	w.BaseURL = addr
+	w.VCIRedirectURI = addr + "/callback"
+
+	credRaw := generateTestCredential(t, w)
+	var (
+		serverURL string
+		parState  string
+	)
+
+	issuer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"credential_issuer":     serverURL,
+				"authorization_servers": []string{serverURL},
+				"credential_endpoint":   serverURL + "/credential",
+				"credential_configurations_supported": map[string]any{
+					"test-config": map[string]any{
+						"format": "dc+sd-jwt",
+						"scope":  "test-scope",
+					},
+				},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"issuer":                                serverURL,
+				"authorization_endpoint":                serverURL + "/authorize",
+				"pushed_authorization_request_endpoint": serverURL + "/par",
+				"token_endpoint":                        serverURL + "/token",
+				"token_endpoint_auth_methods_supported": []string{"private_key_jwt"},
+				"dpop_signing_alg_values_supported":     []string{"ES256"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/par":
+			body, _ := io.ReadAll(r.Body)
+			form, _ := url.ParseQuery(string(body))
+			parState = form.Get("state")
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"request_uri": serverURL + "/request-uri/example",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/authorize":
+			http.Redirect(rw, r, serverURL+"/login?state="+url.QueryEscape(parState), http.StatusFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/login":
+			redirect := w.VCIRedirectURI + "?code=issued-code&state=" + url.QueryEscape(r.URL.Query().Get("state"))
+			http.Redirect(rw, r, redirect, http.StatusFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/token":
+			body, _ := io.ReadAll(r.Body)
+			form, _ := url.ParseQuery(string(body))
+			if got := form.Get("code"); got != "issued-code" {
+				t.Fatalf("token request code = %q, want issued-code", got)
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"access_token": "test-access-token",
+				"token_type":   "Bearer",
+				"c_nonce":      "test-c-nonce",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/credential":
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{"credential": credRaw})
+		default:
+			rw.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer issuer.Close()
+	serverURL = issuer.URL
+
+	oldClient := httpClient
+	httpClient = issuer.Client()
+	defer func() { httpClient = oldClient }()
+
+	oldBrowser := openAuthorizationBrowser
+	openAuthorizationBrowser = func(authURL string) error {
+		go func() {
+			resp, err := issuer.Client().Get(authURL)
+			if err == nil && resp != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+		}()
+		return nil
+	}
+	defer func() { openAuthorizationBrowser = oldBrowser }()
+
+	offer := map[string]any{
+		"credential_issuer":            serverURL,
+		"credential_configuration_ids": []string{"test-config"},
+		"grants": map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state": "issuer-state-1",
+			},
+		},
+	}
+	offerJSON, _ := json.Marshal(offer)
+	offerURI := "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
+
+	result, err := w.ProcessCredentialOffer(offerURI)
+	if err != nil {
+		t.Fatalf("ProcessCredentialOffer() error = %v", err)
+	}
+	if parState == "" {
+		t.Fatal("expected PAR request to include state")
+	}
+	if result.CredentialID == "" {
+		t.Fatal("expected imported credential ID")
+	}
+}
+
+func TestProcessCredentialOffer_AuthCodeDirectRedirect(t *testing.T) {
+	w := generateTestWallet(t)
+	w.VCIClientID = "wallet-client"
+	w.VCIRedirectURI = "https://wallet.example/callback"
+
+	credRaw := generateTestCredential(t, w)
+	var (
+		serverURL string
+		parState  string
+	)
+
+	issuer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"credential_issuer":     serverURL,
+				"authorization_servers": []string{serverURL},
+				"credential_endpoint":   serverURL + "/credential",
+				"credential_configurations_supported": map[string]any{
+					"test-config": map[string]any{
+						"format": "dc+sd-jwt",
+						"scope":  "test-scope",
+					},
+				},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"issuer":                                serverURL,
+				"authorization_endpoint":                serverURL + "/authorize",
+				"pushed_authorization_request_endpoint": serverURL + "/par",
+				"token_endpoint":                        serverURL + "/token",
+				"token_endpoint_auth_methods_supported": []string{"private_key_jwt"},
+				"dpop_signing_alg_values_supported":     []string{"ES256"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/par":
+			body, _ := io.ReadAll(r.Body)
+			form, _ := url.ParseQuery(string(body))
+			parState = form.Get("state")
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"request_uri": serverURL + "/request-uri/example",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/authorize":
+			redirect := w.VCIRedirectURI + "?code=issued-code&state=" + url.QueryEscape(parState)
+			http.Redirect(rw, r, redirect, http.StatusFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/token":
+			body, _ := io.ReadAll(r.Body)
+			form, _ := url.ParseQuery(string(body))
+			if got := form.Get("code"); got != "issued-code" {
+				t.Fatalf("token request code = %q, want issued-code", got)
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{
+				"access_token": "test-access-token",
+				"token_type":   "Bearer",
+				"c_nonce":      "test-c-nonce",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/credential":
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{"credential": credRaw})
+		default:
+			rw.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer issuer.Close()
+	serverURL = issuer.URL
+
+	oldClient := httpClient
+	httpClient = issuer.Client()
+	defer func() { httpClient = oldClient }()
+
+	oldBrowser := openAuthorizationBrowser
+	openAuthorizationBrowser = func(string) error {
+		t.Fatal("did not expect browser fallback for direct authorization redirect")
+		return nil
+	}
+	defer func() { openAuthorizationBrowser = oldBrowser }()
+
+	offer := map[string]any{
+		"credential_issuer":            serverURL,
+		"credential_configuration_ids": []string{"test-config"},
+		"grants": map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state": "issuer-state-1",
+			},
+		},
+	}
+	offerJSON, _ := json.Marshal(offer)
+	offerURI := "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
+
+	result, err := w.ProcessCredentialOffer(offerURI)
+	if err != nil {
+		t.Fatalf("ProcessCredentialOffer() error = %v", err)
+	}
+	if parState == "" {
+		t.Fatal("expected PAR request to include state")
+	}
+	if result.CredentialID == "" {
+		t.Fatal("expected imported credential ID")
+	}
+}
+
 func TestProcessCredentialOffer_TxCodeSentInTokenRequest(t *testing.T) {
 	w := generateTestWallet(t)
 

@@ -511,6 +511,45 @@ func TestBrowserPresentationAPI_DCAPIUnsigned(t *testing.T) {
 	}
 }
 
+func TestBrowserPresentationAPI_DCAPIUnsignedWithoutClientID(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	body := `{
+		"digital": {
+			"requests": [
+				{
+					"protocol": "openid4vp-v1-unsigned",
+					"data": {
+						"response_type": "vp_token",
+						"response_mode": "dc_api",
+						"nonce": "browser-nonce",
+						"dcql_query": {
+							"credentials": [
+								{
+									"id": "pid",
+									"format": "dc+sd-jwt",
+									"meta": {"vct_values": ["` + mock.DefaultPIDVCT + `"]},
+									"claims": [{"path": ["given_name"]}]
+								}
+							]
+						}
+					}
+				}
+			]
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/api/dc-api", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://rp.example")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestBrowserPresentationAPI_DCAPISignedJWT(t *testing.T) {
 	srv := newTestServer(t, true)
 	encKey, err := mock.GenerateKey()
@@ -608,6 +647,97 @@ func TestBrowserPresentationAPI_DCAPISignedJWT(t *testing.T) {
 	pidEntries, ok := vpToken["pid"].([]any)
 	if !ok || len(pidEntries) != 1 {
 		t.Fatalf("expected encrypted vp_token.pid with one entry, got %v", vpToken["pid"])
+	}
+}
+
+func TestBrowserPresentationAPI_DCAPIMultiSignedPrefersValidSignature(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	key, certB64, _ := testCertWithKeyDER([]string{"example.com"})
+	header := map[string]any{
+		"alg": "ES256",
+		"typ": "oauth-authz-req+jwt",
+		"x5c": []any{certB64},
+	}
+	payload := map[string]any{
+		"client_id":     "x509_san_dns:example.com",
+		"response_type": "vp_token",
+		"response_mode": "dc_api",
+		"nonce":         "browser-nonce",
+		"state":         "browser-state",
+		"dcql_query": map[string]any{
+			"credentials": []any{
+				map[string]any{
+					"id":     "pid",
+					"format": "dc+sd-jwt",
+					"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+					"claims": []any{map[string]any{"path": []any{"given_name"}}},
+				},
+			},
+		},
+	}
+
+	requestJWT, err := signJWT(header, payload, key)
+	if err != nil {
+		t.Fatalf("signJWT: %v", err)
+	}
+	parts := strings.Split(requestJWT, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected compact JWT, got %q", requestJWT)
+	}
+
+	payloadBody := map[string]any{
+		"digital": map[string]any{
+			"requests": []any{
+				map[string]any{
+					"protocol": BrowserAPIProtocolOpenID4VPMulti,
+					"data": map[string]any{
+						"request": map[string]any{
+							"payload": parts[1],
+							"signatures": []any{
+								map[string]any{
+									"protected": parts[0],
+									"signature": "AAAA",
+								},
+								map[string]any{
+									"protected": parts[0],
+									"signature": parts[2],
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(payloadBody)
+	if err != nil {
+		t.Fatalf("marshaling payload: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/dc-api", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if result["protocol"] != BrowserAPIProtocolOpenID4VPMulti {
+		t.Fatalf("expected multisigned protocol, got %v", result["protocol"])
+	}
+
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected browser data object, got %T", result["data"])
+	}
+	if data["state"] != "browser-state" {
+		t.Fatalf("expected state in browser result, got %v", data["state"])
 	}
 }
 

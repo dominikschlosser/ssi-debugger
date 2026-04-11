@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +19,8 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
+
+var openAuthorizationBrowser = openAuthorizationBrowserImpl
 
 type dpopNonceState struct {
 	authzServer string
@@ -75,6 +79,7 @@ func (w *Wallet) processAuthorizationCodeOffer(
 	parForm.Set("client_id", clientID)
 	parForm.Set("redirect_uri", redirectURI)
 	parForm.Set("scope", scope)
+	parForm.Set("state", state)
 	parForm.Set("code_challenge", codeChallenge)
 	parForm.Set("code_challenge_method", "S256")
 	if offer.Grants.IssuerState != "" {
@@ -113,17 +118,13 @@ func (w *Wallet) processAuthorizationCodeOffer(
 		return nil, fmt.Errorf("PAR response missing request_uri")
 	}
 
-	authURL, err := callAuthorizationEndpoint(authorizationEndpoint, clientID, requestURI, state)
+	callbackValues, err := runAuthorizationCodeRequest(w, authorizationEndpoint, clientID, requestURI, redirectURI, state)
 	if err != nil {
 		return nil, fmt.Errorf("authorization request: %w", err)
 	}
-	callbackValues, err := parseRedirectQuery(authURL)
-	if err != nil {
-		return nil, fmt.Errorf("authorization callback: %w", err)
-	}
 	code := callbackValues.Get("code")
 	if code == "" {
-		return nil, fmt.Errorf("authorization callback missing code")
+		return nil, fmt.Errorf("authorization callback missing code in values %q", callbackValues.Encode())
 	}
 
 	tokenForm := url.Values{}
@@ -685,17 +686,66 @@ func derefString(v *string) string {
 	return *v
 }
 
-func callAuthorizationEndpoint(endpoint, clientID, requestURI, expectedState string) (string, error) {
+func runAuthorizationCodeRequest(w *Wallet, endpoint, clientID, requestURI, redirectURI, expectedState string) (url.Values, error) {
+	location, body, err := callAuthorizationEndpoint(endpoint, clientID, requestURI)
+	if err != nil {
+		return nil, err
+	}
+	if location != "" {
+		valuesOut, err := parseRedirectQuery(location)
+		if err == nil {
+			if state := valuesOut.Get("state"); state != "" && expectedState != "" && state != expectedState {
+				return nil, fmt.Errorf("authorization response state %q did not match %q", state, expectedState)
+			}
+			if valuesOut.Get("code") != "" || valuesOut.Get("error") != "" {
+				return valuesOut, nil
+			}
+		}
+	}
+
+	if !canUseInteractiveAuthorizationCallback(w, redirectURI) {
+		if location != "" {
+			return nil, fmt.Errorf("authorization requires interactive browser login at %q, but redirect_uri %q is not handled by the running wallet server", location, redirectURI)
+		}
+		return nil, fmt.Errorf("authorization requires interactive browser login, but redirect_uri %q is not handled by the running wallet server (body: %s)", redirectURI, truncateBody(body))
+	}
+
+	callbackCh, unregister := w.RegisterAuthorizationCodeCallback(expectedState)
+	defer unregister()
+
+	authURL := endpoint + "?" + url.Values{
+		"client_id":   {clientID},
+		"request_uri": {requestURI},
+	}.Encode()
+	if err := openAuthorizationBrowser(authURL); err != nil {
+		return nil, fmt.Errorf("opening browser for authorization request: %w", err)
+	}
+
+	select {
+	case values := <-callbackCh:
+		if state := values.Get("state"); state != "" && expectedState != "" && state != expectedState {
+			return nil, fmt.Errorf("authorization callback state %q did not match %q", state, expectedState)
+		}
+		return values, nil
+	case <-time.After(5 * time.Minute):
+		return nil, fmt.Errorf("timed out waiting for authorization callback at %s", redirectURI)
+	}
+}
+
+func callAuthorizationEndpoint(endpoint, clientID, requestURI string) (string, string, error) {
 	values := url.Values{}
 	values.Set("client_id", clientID)
 	values.Set("request_uri", requestURI)
 	req, err := http.NewRequest("GET", endpoint+"?"+values.Encode(), nil)
 	if err != nil {
-		return "", fmt.Errorf("creating authorization request: %w", err)
+		return "", "", fmt.Errorf("creating authorization request: %w", err)
 	}
-	baseClient, ok := httpClient.(*http.Client)
-	if !ok || baseClient == nil {
-		baseClient = http.DefaultClient
+
+	baseClient := format.HTTPClientForURL(req.URL.String())
+	if httpClient != defaultHTTPClient {
+		if overridden, ok := httpClient.(*http.Client); ok && overridden != nil {
+			baseClient = overridden
+		}
 	}
 	client := *baseClient
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -703,25 +753,21 @@ func callAuthorizationEndpoint(endpoint, clientID, requestURI, expectedState str
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("authorization request: %w", err)
+		return "", "", fmt.Errorf("authorization request: %w", err)
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		return "", string(body), nil
+	}
 	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("authorization endpoint returned HTTP %d: %s", resp.StatusCode, string(body))
+		return "", "", fmt.Errorf("authorization endpoint returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	location := resp.Header.Get("Location")
 	if location == "" {
-		return "", fmt.Errorf("authorization response missing Location header")
+		return "", "", fmt.Errorf("authorization response missing Location header")
 	}
-	valuesOut, err := parseRedirectQuery(location)
-	if err != nil {
-		return "", err
-	}
-	if state := valuesOut.Get("state"); state != "" && expectedState != "" && state != expectedState {
-		return "", fmt.Errorf("authorization response state %q did not match %q", state, expectedState)
-	}
-	return location, nil
+	return location, string(body), nil
 }
 
 func parseRedirectQuery(location string) (url.Values, error) {
@@ -730,4 +776,65 @@ func parseRedirectQuery(location string) (url.Values, error) {
 		return nil, fmt.Errorf("parsing redirect URL: %w", err)
 	}
 	return parsed.Query(), nil
+}
+
+func canUseInteractiveAuthorizationCallback(w *Wallet, redirectURI string) bool {
+	if w == nil || strings.TrimSpace(w.BaseURL) == "" {
+		return false
+	}
+	redirectURL, err := url.Parse(redirectURI)
+	if err != nil {
+		return false
+	}
+	baseURL, err := url.Parse(w.BaseURL)
+	if err != nil {
+		return false
+	}
+	if !sameLoopbackHost(redirectURL.Hostname(), baseURL.Hostname()) {
+		return false
+	}
+	if redirectURL.Port() != baseURL.Port() {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimRight(redirectURL.Path, "/"), "/callback")
+}
+
+func sameLoopbackHost(a, b string) bool {
+	a = strings.TrimSpace(strings.ToLower(a))
+	b = strings.TrimSpace(strings.ToLower(b))
+	if a == b {
+		return true
+	}
+	loopback := map[string]bool{
+		"localhost": true,
+		"127.0.0.1": true,
+		"::1":       true,
+	}
+	return loopback[a] && loopback[b]
+}
+
+func truncateBody(body string) string {
+	body = strings.TrimSpace(body)
+	if len(body) <= 200 {
+		return body
+	}
+	return body[:200] + "..."
+}
+
+func openAuthorizationBrowserImpl(rawURL string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", rawURL)
+	case "linux":
+		cmd = exec.Command("xdg-open", rawURL)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+	default:
+		return fmt.Errorf("opening browser is not supported on %s", runtime.GOOS)
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +90,7 @@ type Wallet struct {
 	errSubscribers          map[int64]chan WalletError
 	errSubID                int64
 	lastError               *WalletError
+	authCodeCallbacks       map[string]chan url.Values
 }
 
 // StatusListURL returns the preferred status list URL for generated credentials.
@@ -189,12 +191,13 @@ type LogEntry struct {
 // It generates a CA key and certificate chain (CA → leaf) for realistic x5c chains.
 func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
 	w := &Wallet{
-		HolderKey:      holderKey,
-		IssuerKey:      issuerKey,
-		AutoAccept:     autoAccept,
-		ValidationMode: ValidationModeDebug,
-		Requests:       make(map[string]*ConsentRequest),
-		subscribers:    make(map[int64]chan *ConsentRequest),
+		HolderKey:         holderKey,
+		IssuerKey:         issuerKey,
+		AutoAccept:        autoAccept,
+		ValidationMode:    ValidationModeDebug,
+		Requests:          make(map[string]*ConsentRequest),
+		subscribers:       make(map[int64]chan *ConsentRequest),
+		authCodeCallbacks: make(map[string]chan url.Values),
 	}
 
 	// Generate CA key and certificate chain

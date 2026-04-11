@@ -29,6 +29,7 @@ import (
 func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []string, params PresentationParams) (VPTokenResult, error) {
 	nonce := params.Nonce
 	clientID := params.ClientID
+	requestOrigin := params.RequestOrigin
 	responseURI := params.ResponseURI
 	// Build set of selected namespace:element pairs
 	selected := make(map[string]bool, len(selectedKeys))
@@ -92,7 +93,7 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 	}
 
 	jwkThumbprint := extractJWKThumbprint(params.RequestObject, params.ClientMetadata)
-	sessionTranscriptBytes, err := w.buildSessionTranscript(clientID, responseURI, nonce, mdocNonce, jwkThumbprint)
+	sessionTranscriptBytes, err := w.buildSessionTranscript(clientID, requestOrigin, responseURI, params.ResponseMode, nonce, mdocNonce, jwkThumbprint)
 	if err != nil {
 		return VPTokenResult{}, fmt.Errorf("building SessionTranscript: %w", err)
 	}
@@ -142,7 +143,7 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 
 // buildSessionTranscript constructs the SessionTranscript CBOR bytes using the
 // configured mode (ISO 18013-7 or OID4VP).
-func (w *Wallet) buildSessionTranscript(clientID, responseURI, nonce, mdocNonce string, jwkThumbprint []byte) ([]byte, error) {
+func (w *Wallet) buildSessionTranscript(clientID, requestOrigin, responseURI, responseMode, nonce, mdocNonce string, jwkThumbprint []byte) ([]byte, error) {
 	mode := w.SessionTranscript
 	if mode == "" {
 		mode = SessionTranscriptOID4VP // default
@@ -152,6 +153,9 @@ func (w *Wallet) buildSessionTranscript(clientID, responseURI, nonce, mdocNonce 
 	case SessionTranscriptISO:
 		return buildSessionTranscriptISO(clientID, responseURI, nonce, mdocNonce)
 	case SessionTranscriptOID4VP:
+		if responseMode == "dc_api" || responseMode == "dc_api.jwt" {
+			return buildSessionTranscriptOID4VPDCAPI(requestOrigin, nonce, jwkThumbprint)
+		}
 		return buildSessionTranscriptOID4VP(clientID, nonce, jwkThumbprint, responseURI)
 	default:
 		return nil, fmt.Errorf("unknown session transcript mode: %s", mode)
@@ -207,6 +211,26 @@ func buildSessionTranscriptOID4VP(clientID, nonce string, jwkThumbprint []byte, 
 	oid4vpHandover := []any{"OpenID4VPHandover", hash[:]}
 
 	// SessionTranscript = [null, null, OID4VPHandover]
+	sessionTranscript := []any{nil, nil, oid4vpHandover}
+	return cbor.Marshal(sessionTranscript)
+}
+
+// buildSessionTranscriptOID4VPDCAPI builds the OID4VP DC API session transcript.
+// HandoverInfo = CBOR([origin, nonce, jwkThumbprint|null])
+// OID4VPDCAPIHandover = ["OpenID4VPDCAPIHandover", SHA256(HandoverInfo)]
+// SessionTranscript = [null, null, OID4VPDCAPIHandover]
+func buildSessionTranscriptOID4VPDCAPI(origin, nonce string, jwkThumbprint []byte) ([]byte, error) {
+	var thumbprintValue any
+	if len(jwkThumbprint) > 0 {
+		thumbprintValue = jwkThumbprint
+	}
+	handoverInfo, err := cbor.Marshal([]any{origin, nonce, thumbprintValue})
+	if err != nil {
+		return nil, fmt.Errorf("encoding DC API HandoverInfo: %w", err)
+	}
+	hash := sha256.Sum256(handoverInfo)
+
+	oid4vpHandover := []any{"OpenID4VPDCAPIHandover", hash[:]}
 	sessionTranscript := []any{nil, nil, oid4vpHandover}
 	return cbor.Marshal(sessionTranscript)
 }

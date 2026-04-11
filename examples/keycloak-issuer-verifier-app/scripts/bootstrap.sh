@@ -40,9 +40,9 @@ fi
 curl_common() {
   if [[ "${KEYCLOAK_BASE_URL}" == https://* ]] && [[ -n "${KEYCLOAK_CA_CERT:-}" ]] && [[ -f "${KEYCLOAK_CA_CERT}" ]]; then
     curl --cacert "${KEYCLOAK_CA_CERT}" "$@"
-    return 0
+  else
+    curl "$@"
   fi
-  curl "$@"
 }
 
 wait_for_endpoint() {

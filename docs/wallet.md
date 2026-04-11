@@ -261,7 +261,7 @@ oid4vc-dev wallet accept 'openid-credential-offer://...' --tx-code 123456
 | `--tx-code`             | —        | Transaction code for OID4VCI pre-authorized code flow |
 | `--haip`                | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 
-Note: pre-authorized code offers work directly with `wallet accept`. Authorization-code offers are also supported, but they require a running `wallet serve` instance configured with `--vci-client-id` and `--vci-redirect-uri`, plus issuer metadata that supports PAR and DPoP.
+Note: pre-authorized code offers work directly with `wallet accept`. Authorization-code offers are also supported, but they require a running `wallet serve` instance configured with `--vci-client-id` and `--vci-redirect-uri`, plus issuer metadata that supports PAR and DPoP. In that flow, the wallet opens the issuer's authorization URL in the browser, the user authenticates at the issuer, and the issuer redirects back to the wallet's configured callback URI before the wallet exchanges the code.
 
 ## `wallet scan`
 

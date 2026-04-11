@@ -22,6 +22,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
@@ -216,7 +217,15 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			// Register URL scheme handlers if requested
 			if register && !noRegister {
-				if err := wallet.RegisterURLSchemes(port, w.AutoAccept); err != nil {
+				serveArgs, err := serializeWalletServeArgs(cmd)
+				if err != nil {
+					return fmt.Errorf("serializing wallet serve flags for registration: %w", err)
+				}
+				if err := wallet.RegisterURLSchemes(wallet.RegisterOptions{
+					ListenerPort: port,
+					AutoAccept:   w.AutoAccept,
+					ServeArgs:    serveArgs,
+				}); err != nil {
 					yellow.Printf("  Register:    skipped (%s)\n", err)
 				} else if wallet.SupportsURLSchemeRegistration() {
 					fmt.Printf("  Register:    URL scheme handlers registered\n")
@@ -287,4 +296,36 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().StringVar(&vciClientID, "vci-client-id", "", "Client ID the wallet should use for OID4VCI authorization-code flows")
 	cmd.Flags().StringVar(&vciRedirectURI, "vci-redirect-uri", "", "Redirect URI the wallet should use for OID4VCI authorization-code flows")
 	return cmd
+}
+
+func serializeWalletServeArgs(cmd *cobra.Command) ([]string, error) {
+	args := []string{}
+	var err error
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		if err != nil {
+			return
+		}
+		if flag.Name == "register" || flag.Name == "no-register" {
+			return
+		}
+		switch flag.Value.Type() {
+		case "bool":
+			args = append(args, "--"+flag.Name)
+		case "stringSlice", "stringArray":
+			values, getErr := cmd.Flags().GetStringSlice(flag.Name)
+			if getErr != nil {
+				err = getErr
+				return
+			}
+			for _, value := range values {
+				args = append(args, "--"+flag.Name, value)
+			}
+		default:
+			args = append(args, "--"+flag.Name, flag.Value.String())
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return args, nil
 }

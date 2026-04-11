@@ -16,8 +16,12 @@ package cmd
 
 import (
 	"crypto"
+	"slices"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
@@ -278,4 +282,105 @@ func TestVerifyWithBestKey(t *testing.T) {
 			t.Errorf("expected last result, got %s", r.keyID)
 		}
 	})
+}
+
+func TestWalletRegisterOptions(t *testing.T) {
+	args := []string{
+		"--port", "9123",
+		"--auto-accept",
+		"--haip",
+		"--vci-client-id", "wallet-client",
+		"--credential", "cred1.json",
+	}
+
+	opts, err := walletRegisterOptions(args)
+	if err != nil {
+		t.Fatalf("walletRegisterOptions() error = %v", err)
+	}
+	if opts.ListenerPort != 9123 {
+		t.Fatalf("ListenerPort = %d, want 9123", opts.ListenerPort)
+	}
+	if !opts.AutoAccept {
+		t.Fatal("AutoAccept = false, want true")
+	}
+	if !slices.Equal(opts.ServeArgs, args) {
+		t.Fatalf("ServeArgs = %#v, want %#v", opts.ServeArgs, args)
+	}
+}
+
+func TestWalletRegisterOptions_Defaults(t *testing.T) {
+	opts, err := walletRegisterOptions(nil)
+	if err != nil {
+		t.Fatalf("walletRegisterOptions() error = %v", err)
+	}
+	if opts.ListenerPort != config.DefaultWalletPort {
+		t.Fatalf("ListenerPort = %d, want %d", opts.ListenerPort, config.DefaultWalletPort)
+	}
+	if opts.AutoAccept {
+		t.Fatal("AutoAccept = true, want false")
+	}
+	if len(opts.ServeArgs) != 0 {
+		t.Fatalf("ServeArgs = %#v, want empty", opts.ServeArgs)
+	}
+}
+
+func TestSerializeWalletServeArgs(t *testing.T) {
+	cmd := &cobra.Command{Use: "serve"}
+	flags := cmd.Flags()
+	flags.Int("port", config.DefaultWalletPort, "")
+	flags.Bool("auto-accept", false, "")
+	flags.String("base-url", "", "")
+	flags.StringSlice("credential", nil, "")
+	flags.Bool("register", false, "")
+	flags.Bool("no-register", false, "")
+	if err := flags.Set("port", "9123"); err != nil {
+		t.Fatalf("set port: %v", err)
+	}
+	if err := flags.Set("auto-accept", "true"); err != nil {
+		t.Fatalf("set auto-accept: %v", err)
+	}
+	if err := flags.Set("base-url", "http://localhost:9123"); err != nil {
+		t.Fatalf("set base-url: %v", err)
+	}
+	if err := flags.Set("credential", "first.json"); err != nil {
+		t.Fatalf("set credential 1: %v", err)
+	}
+	if err := flags.Set("credential", "second.json"); err != nil {
+		t.Fatalf("set credential 2: %v", err)
+	}
+	if err := flags.Set("register", "true"); err != nil {
+		t.Fatalf("set register: %v", err)
+	}
+
+	got, err := serializeWalletServeArgs(cmd)
+	if err != nil {
+		t.Fatalf("serializeWalletServeArgs() error = %v", err)
+	}
+
+	want := []string{
+		"--auto-accept",
+		"--base-url", "http://localhost:9123",
+		"--credential", "first.json",
+		"--credential", "second.json",
+		"--port", "9123",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("serializeWalletServeArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSerializeWalletServeArgs_BoolFalseOmitted(t *testing.T) {
+	cmd := &cobra.Command{Use: "serve"}
+	flags := cmd.Flags()
+	flags.Bool("auto-accept", false, "")
+	flags.Bool("register", false, "")
+	flags.Bool("no-register", false, "")
+
+	got, err := serializeWalletServeArgs(cmd)
+	if err != nil {
+		t.Fatalf("serializeWalletServeArgs() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("serializeWalletServeArgs() = %#v, want empty", got)
+	}
 }

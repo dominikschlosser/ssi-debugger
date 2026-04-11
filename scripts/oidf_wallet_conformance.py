@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import copy
 import json
 import os
 import queue
@@ -332,10 +333,12 @@ def browser_request_origin(browser_request: dict) -> str | None:
         return None
     data = first.get("data")
     client_id = None
+    expected_origins = None
     if isinstance(data, dict):
         if isinstance(data.get("client_id"), str):
             client_id = data["client_id"]
-        elif isinstance(data.get("request"), str):
+        expected_origins = data.get("expected_origins")
+        if isinstance(data.get("request"), str):
             payload = decode_jwt_payload(data["request"])
             if isinstance(payload, dict) and isinstance(payload.get("client_id"), str):
                 client_id = payload["client_id"]
@@ -345,7 +348,18 @@ def browser_request_origin(browser_request: dict) -> str | None:
             client_id = payload["client_id"]
     if isinstance(client_id, str) and client_id.startswith("web-origin:"):
         return client_id[len("web-origin:") :]
+    if isinstance(expected_origins, list) and expected_origins:
+        first_origin = expected_origins[0]
+        if isinstance(first_origin, str) and first_origin:
+            return first_origin
     return None
+
+
+def origin_from_submit_url(submit_url: str) -> str | None:
+    parsed = urllib.parse.urlsplit(submit_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 def build_vp_dcql_query(credential_kind: str) -> dict:
@@ -380,6 +394,14 @@ def build_vp_dcql_query(credential_kind: str) -> dict:
             }
         ]
     }
+
+
+def conformance_server_host() -> str:
+    base_url = os.environ.get("CONFORMANCE_SERVER_LOCAL") or os.environ.get("CONFORMANCE_SERVER") or "https://demo.certification.openid.net/"
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.hostname:
+        return parsed.hostname
+    return "demo.certification.openid.net"
 
 
 def load_config_template(source: Path) -> dict:
@@ -441,10 +463,23 @@ def create_vp_config(suite_dir: Path, scenario: PlanScenario, materials: WalletM
     config["description"] = f"oid4vc-dev wallet ({scenario.slug})"
     config.setdefault("client", {})
     config["client"]["dcql"] = build_vp_dcql_query(scenario.credential_kind)
+    if scenario.requires_haip:
+        # The HAIP VP plan includes x509_san_dns Browser API variants where no response_uri
+        # exists, so the suite expects a static client_id in the config.
+        config["client"]["client_id"] = conformance_server_host()
     response_mode = scenario.variant.get("response_mode", "")
     if response_mode.endswith(".jwt"):
         config["client"]["authorization_encrypted_response_alg"] = "ECDH-ES"
         config["client"]["authorization_encrypted_response_enc"] = "A128GCM"
+    if scenario.variant.get("request_method") == "request_uri_multisigned" or scenario.requires_haip:
+        secondary_jwks = copy.deepcopy(config["client"].get("jwks", {"keys": []}))
+        keys = secondary_jwks.get("keys", [])
+        if keys and isinstance(keys[0], dict) and isinstance(keys[0].get("kid"), str):
+            keys[0]["kid"] = keys[0]["kid"] + "-second"
+        config["client2"] = {
+            "client_id": config["client"]["client_id"],
+            "jwks": secondary_jwks,
+        }
     if scenario.requires_haip:
         config.setdefault("credential", {})
         config["credential"]["trust_anchor_pem"] = materials.ca_pem
@@ -621,6 +656,8 @@ def submit_wallet_request(wallet_url: str, request_url: str) -> WalletSubmission
 def submit_browser_api_request(wallet_url: str, browser_request: dict, submit_url: str) -> WalletSubmissionResult:
     extra_headers = {}
     origin = browser_request_origin(browser_request)
+    if not origin:
+        origin = origin_from_submit_url(submit_url)
     if origin:
         extra_headers["Origin"] = origin
 
@@ -646,6 +683,22 @@ def submit_browser_api_request(wallet_url: str, browser_request: dict, submit_ur
                 )
                 return WalletSubmissionResult(completed=False, retryable=True)
             print(f"[monitor] wallet rejected browser request for {submit_url}: HTTP {exc.code} {body}", flush=True)
+            error_message = body.strip() or f"wallet request failed with HTTP {exc.code}"
+            exception_payload = {
+                "exception": {
+                    "name": "NotAllowedError",
+                    "message": error_message,
+                }
+            }
+            req = urllib.request.Request(
+                submit_url,
+                data=json.dumps(exception_payload).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+                resp.read()
+            print(f"[monitor] submitted Browser API exception to suite: {submit_url}", flush=True)
             return WalletSubmissionResult(completed=True, retryable=False)
 
     req = urllib.request.Request(
@@ -664,9 +717,31 @@ def handle_module(base_url: str, token: str, wallet_url: str, module_id: str, st
     info = api_request(base_url, token, "GET", f"api/info/{module_id}")
     logs = api_request(base_url, token, "GET", f"api/log/{module_id}")
 
-    browser = info.get("browser", {})
-    browser_requests = browser.get("browserApiRequests", [])
-    for entry in browser_requests:
+    browser_entries = []
+    browser = info.get("browser")
+    if isinstance(browser, dict):
+        browser_entries.extend(browser.get("browserApiRequests", []))
+
+    pending_submit_url = None
+    for entry in logs:
+        browser_api_submit = entry.get("browser_api_submit")
+        if isinstance(browser_api_submit, dict):
+            submit_url = browser_api_submit.get("fullUrl")
+            if isinstance(submit_url, str) and submit_url:
+                pending_submit_url = submit_url
+
+        if entry.get("msg") == "Calling browser API":
+            browser_request = entry.get("request")
+            if pending_submit_url and isinstance(browser_request, dict):
+                browser_entries.append(
+                    {
+                        "submitUrl": pending_submit_url,
+                        "request": copy.deepcopy(browser_request),
+                    }
+                )
+                pending_submit_url = None
+
+    for entry in browser_entries:
         submit_url = entry.get("submitUrl")
         browser_request = entry.get("request")
         if submit_url and browser_request and submit_url not in state["submitted_browser_api_requests"]:

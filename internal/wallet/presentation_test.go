@@ -680,6 +680,51 @@ func TestBuildSessionTranscriptOID4VP(t *testing.T) {
 	}
 }
 
+func TestBuildSessionTranscriptOID4VPDCAPI(t *testing.T) {
+	origin := "https://demo.certification.openid.net"
+	nonce := "test-nonce"
+
+	transcript, err := buildSessionTranscriptOID4VPDCAPI(origin, nonce, nil)
+	if err != nil {
+		t.Fatalf("buildSessionTranscriptOID4VPDCAPI error: %v", err)
+	}
+
+	var decoded []cbor.RawMessage
+	if err := cbor.Unmarshal(transcript, &decoded); err != nil {
+		t.Fatalf("decoding SessionTranscript: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(decoded))
+	}
+
+	var handover []cbor.RawMessage
+	if err := cbor.Unmarshal(decoded[2], &handover); err != nil {
+		t.Fatalf("decoding OpenID4VPDCAPIHandover: %v", err)
+	}
+	if len(handover) != 2 {
+		t.Fatalf("OpenID4VPDCAPIHandover: expected 2 elements, got %d", len(handover))
+	}
+
+	var marker string
+	if err := cbor.Unmarshal(handover[0], &marker); err != nil {
+		t.Fatalf("decoding handover marker: %v", err)
+	}
+	if marker != "OpenID4VPDCAPIHandover" {
+		t.Errorf("expected 'OpenID4VPDCAPIHandover', got %q", marker)
+	}
+
+	var hashBytes []byte
+	if err := cbor.Unmarshal(handover[1], &hashBytes); err != nil {
+		t.Fatalf("decoding handover hash: %v", err)
+	}
+
+	handoverInfo, _ := cbor.Marshal([]any{origin, nonce, nil})
+	expectedHash := sha256.Sum256(handoverInfo)
+	if string(hashBytes) != string(expectedHash[:]) {
+		t.Error("handover hash does not match expected SHA256(CBOR(DCAPIHandoverInfo))")
+	}
+}
+
 func TestSignJWT(t *testing.T) {
 	key, _ := mock.GenerateKey()
 

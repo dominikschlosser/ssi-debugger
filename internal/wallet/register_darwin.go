@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -43,7 +44,7 @@ func handlerScriptPath() string {
 // RegisterURLSchemes creates a macOS .app bundle via osacompile and registers URL scheme handlers.
 // macOS delivers URLs via Apple Events, so we use an AppleScript with "on open location"
 // that calls a bash handler script.
-func RegisterURLSchemes(listenerPort int, autoAccept bool) error {
+func RegisterURLSchemes(opts RegisterOptions) error {
 	binaryPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("finding executable path: %w", err)
@@ -65,6 +66,7 @@ URI="$1"
 LISTENER="http://localhost:{{PORT}}"
 PORT="{{PORT}}"
 AUTO_ACCEPT="{{AUTO_ACCEPT}}"
+SERVE_ARGS=({{SERVE_ARGS}})
 LOG_FILE="/tmp/oid4vc-dev-wallet.log"
 SERVER_LOG="/tmp/oid4vc-dev-wallet-server.log"
 
@@ -76,7 +78,11 @@ ensure_listener() {
   if listener_ready; then
     return 0
   fi
-  "$BINARY" wallet serve --port "$PORT" >>"$SERVER_LOG" 2>&1 &
+  ARGS=(wallet serve)
+  if [[ ${#SERVE_ARGS[@]} -gt 0 ]]; then
+    ARGS+=("${SERVE_ARGS[@]}")
+  fi
+  "$BINARY" "${ARGS[@]}" >>"$SERVER_LOG" 2>&1 &
   for _ in $(seq 1 40); do
     if listener_ready; then
       return 0
@@ -112,10 +118,6 @@ accept_cli() {
 
 case "$URI" in
   openid-credential-offer://*|haip-vci://*)
-    if [[ "$AUTO_ACCEPT" == "true" ]]; then
-      submit_offer 2>>"$LOG_FILE" || accept_cli offer
-      exit 0
-    fi
     if ensure_listener; then
       submit_offer 2>>"$LOG_FILE" && exit 0
     fi
@@ -132,7 +134,8 @@ case "$URI" in
     accept_cli presentation
     ;;
 esac
-`, "{{BINARY_PATH}}", binaryPath), "{{PORT}}", fmt.Sprintf("%d", listenerPort)), "{{AUTO_ACCEPT}}", fmt.Sprintf("%t", autoAccept))
+`, "{{BINARY_PATH}}", binaryPath), "{{PORT}}", fmt.Sprintf("%d", opts.ListenerPort)), "{{AUTO_ACCEPT}}", fmt.Sprintf("%t", opts.AutoAccept))
+	handler = strings.ReplaceAll(handler, "{{SERVE_ARGS}}", joinShellArgs(opts.ServeArgs))
 
 	if err := os.WriteFile(handlerPath, []byte(handler), 0755); err != nil {
 		return fmt.Errorf("writing handler script: %w", err)
@@ -217,13 +220,31 @@ end open location
 	fmt.Printf("  Handler:    %s\n", handlerPath)
 	fmt.Printf("  Binary:     %s\n", binaryPath)
 	fmt.Printf("  Mode:       ")
-	if autoAccept {
+	if opts.AutoAccept {
 		fmt.Printf("auto-accept\n")
 	} else {
 		fmt.Printf("interactive UI\n")
 	}
+	if len(opts.ServeArgs) > 0 {
+		fmt.Printf("  Serve args: %s\n", strings.Join(slices.Clone(opts.ServeArgs), " "))
+	}
 	fmt.Printf("  Schemes:    openid4vp://, eudi-openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://\n")
 	return nil
+}
+
+func joinShellArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 // UnregisterURLSchemes removes the macOS .app bundle and handler script.

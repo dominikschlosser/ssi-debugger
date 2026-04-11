@@ -86,6 +86,7 @@ func (s *Server) setupRoutes() {
 
 	// API: credential offers
 	s.mux.HandleFunc("POST /api/offers", s.handleOfferAPI)
+	s.mux.HandleFunc("GET /callback", s.handleAuthorizationCodeCallback)
 
 	// API: credential management
 	s.mux.HandleFunc("GET /api/credentials", s.handleListCredentials)
@@ -197,6 +198,25 @@ func (s *Server) triggerUIRequest() {
 	if s.onUIRequest != nil {
 		s.onUIRequest()
 	}
+}
+
+func (s *Server) handleAuthorizationCodeCallback(w http.ResponseWriter, r *http.Request) {
+	values := r.URL.Query()
+	if values.Get("state") == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "missing state in authorization callback",
+		})
+		return
+	}
+	if !s.wallet.CompleteAuthorizationCodeCallback(values) {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "no pending authorization-code flow for callback state",
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, "<!doctype html><html><body><p>Wallet authorization completed. You can close this tab.</p></body></html>")
 }
 
 func (s *Server) startIssuerTLSServer() error {

@@ -33,6 +33,7 @@ import (
 type PresentationParams struct {
 	Nonce          string
 	ClientID       string
+	RequestOrigin  string
 	ResponseURI    string
 	RedirectURI    string // used for fragment response mode
 	ResponseMode   string // e.g. "direct_post.jwt", "direct_post", "fragment"

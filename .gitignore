@@ -1,3 +1,4 @@
+.gocache/
 scripts/__pycache__/
 .idea/
 oid4vc-dev

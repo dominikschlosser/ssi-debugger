@@ -275,6 +275,17 @@ func prettyJSON(value any) string {
 	return string(raw)
 }
 
+func wrapCredentialOfferURI(rawOfferURI string, walletScheme string) (string, error) {
+	rawOfferURI = strings.TrimSpace(rawOfferURI)
+	if rawOfferURI == "" {
+		return "", fmt.Errorf("credential offer URI missing in Keycloak response")
+	}
+	if strings.HasPrefix(rawOfferURI, "openid-credential-offer://") || strings.HasPrefix(rawOfferURI, "haip-vci://") {
+		return rawOfferURI, nil
+	}
+	return walletScheme + "?credential_offer_uri=" + url.QueryEscape(rawOfferURI), nil
+}
+
 func (s *server) createOfferURI(accessToken string) (string, error) {
 	offerURL := fmt.Sprintf(
 		"%s/protocol/oid4vc/create-credential-offer?credential_configuration_id=%s&pre_authorized=true&type=uri",
@@ -289,8 +300,10 @@ func (s *server) createOfferURI(accessToken string) (string, error) {
 	}
 	issuer, _ := offerData["issuer"].(string)
 	nonce, _ := offerData["nonce"].(string)
-	rawOfferURI := issuer + "/" + nonce
-	return "haip-vci://?credential_offer_uri=" + url.QueryEscape(rawOfferURI), nil
+	if strings.TrimSpace(issuer) == "" || strings.TrimSpace(nonce) == "" {
+		return "", fmt.Errorf("unexpected Keycloak credential offer response: expected JSON with issuer and nonce")
+	}
+	return wrapCredentialOfferURI(strings.TrimRight(issuer, "/")+"/"+strings.TrimLeft(nonce, "/"), "haip-vci://")
 }
 
 func (s *server) createLoginURL(mode string) (string, error) {

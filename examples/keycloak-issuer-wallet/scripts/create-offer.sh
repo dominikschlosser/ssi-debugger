@@ -37,7 +37,7 @@ OFFER_JSON="$(
 
 ISSUER="$(printf '%s' "$OFFER_JSON" | jq -er '.issuer')"
 NONCE="$(printf '%s' "$OFFER_JSON" | jq -er '.nonce')"
-RAW_OFFER_URI="${ISSUER}/${NONCE}"
+RAW_OFFER_URI="${ISSUER%/}/${NONCE#/}"
 ENCODED_OFFER_URI="$(jq -rn --arg uri "$RAW_OFFER_URI" '$uri|@uri')"
 
 printf 'openid-credential-offer://?credential_offer_uri=%s\n' "$ENCODED_OFFER_URI"

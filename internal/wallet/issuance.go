@@ -41,9 +41,18 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+var defaultHTTPClient HTTPClient = http.DefaultClient
+
 // httpClient is the HTTP client used by the issuance functions. Override in
 // tests to inject mock servers.
-var httpClient HTTPClient = http.DefaultClient
+var httpClient HTTPClient = defaultHTTPClient
+
+func doIssuanceRequest(req *http.Request) (*http.Response, error) {
+	if httpClient == defaultHTTPClient {
+		return format.HTTPClientForURL(req.URL.String()).Do(req)
+	}
+	return httpClient.Do(req)
+}
 
 // IssuanceResult captures the result of an OID4VCI flow.
 type IssuanceResult struct {
@@ -265,7 +274,7 @@ func fetchIssuerMetadata(issuer string) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating metadata request: %w", err)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := doIssuanceRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching metadata: %w", err)
 	}
@@ -302,7 +311,7 @@ func parseIssuerMetadataResponse(body []byte, contentType string) (map[string]an
 	}
 
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	if strings.Contains(mediaType, "openidvci-issuer-metadata+jwt") || strings.Count(raw, ".") == 2 {
+	if strings.Contains(mediaType, "openidvci-issuer-metadata+jwt") || isLikelyCompactJWT(raw) {
 		token, err := sdjwt.Parse(raw)
 		if err != nil {
 			return nil, fmt.Errorf("parsing signed issuer metadata: %w", err)
@@ -318,6 +327,31 @@ func parseIssuerMetadataResponse(body []byte, contentType string) (map[string]an
 		return nil, fmt.Errorf("parsing metadata JSON: %w", err)
 	}
 	return metadata, nil
+}
+
+func isLikelyCompactJWT(raw string) bool {
+	if strings.HasPrefix(raw, "{") || strings.HasPrefix(raw, "[") {
+		return false
+	}
+	if strings.ContainsAny(raw, " \t\r\n") {
+		return false
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func verifySignedIssuerMetadata(token *sdjwt.Token) error {
@@ -408,7 +442,7 @@ func fetchOAuthMetadata(authServer string) (map[string]any, error) {
 		if err != nil {
 			continue
 		}
-		resp, err := httpClient.Do(req)
+		resp, err := doIssuanceRequest(req)
 		if err != nil {
 			if resp != nil {
 				resp.Body.Close()
@@ -468,7 +502,7 @@ func exchangePreAuthorizedToken(tokenEndpoint string, offer *oid4vc.CredentialOf
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := httpClient.Do(req)
+	resp, err := doIssuanceRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
@@ -648,7 +682,7 @@ func fetchNonce(metadata map[string]any, issuer string) string {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := httpClient.Do(req)
+	resp, err := doIssuanceRequest(req)
 	if err != nil {
 		log.Printf("[VCI] Nonce endpoint request failed: %v", err)
 		return ""
@@ -708,7 +742,7 @@ func requestCredential(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := httpClient.Do(req)
+	resp, err := doIssuanceRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("credential request: %w", err)
 	}

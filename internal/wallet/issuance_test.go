@@ -385,3 +385,23 @@ func TestParseIssuerMetadataResponse_RejectsTamperedSignedJWT(t *testing.T) {
 		t.Fatal("expected tampered signed issuer metadata to fail verification")
 	}
 }
+
+func TestParseIssuerMetadataResponse_JSONWithDots(t *testing.T) {
+	raw := []byte(`{
+		"credential_issuer":"http://localhost:8080/realms/wallet-app-demo",
+		"credential_configurations_supported":{
+			"membership-credential":{
+				"format":"dc+sd-jwt",
+				"vct":"https://credentials.example.com/membership"
+			}
+		}
+	}`)
+
+	metadata, err := parseIssuerMetadataResponse(raw, "application/json")
+	if err != nil {
+		t.Fatalf("parsing metadata JSON: %v", err)
+	}
+	if metadata["credential_issuer"] != "http://localhost:8080/realms/wallet-app-demo" {
+		t.Fatalf("unexpected credential_issuer: %v", metadata["credential_issuer"])
+	}
+}

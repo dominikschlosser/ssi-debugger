@@ -352,7 +352,7 @@ func fetchAttestationChallenge(oauthMeta map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating challenge request: %w", err)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := doIssuanceRequest(req)
 	if err != nil {
 		return "", fmt.Errorf("challenge request: %w", err)
 	}
@@ -633,7 +633,7 @@ func doDPoPRequest(method, target, contentType string, body []byte, authScheme, 
 		}
 		req.Header.Set("DPoP", dpopJWT)
 
-		resp, err := httpClient.Do(req)
+		resp, err := doIssuanceRequest(req)
 		if err != nil {
 			return nil, 0, fmt.Errorf("request: %w", err)
 		}

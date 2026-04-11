@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 // SubmitDirectPostObject submits an authorization response object via direct_post.
@@ -43,7 +45,7 @@ func SubmitDirectPostObject(responseURI string, payload map[string]any) (*Direct
 		}
 	}
 
-	resp, err := http.PostForm(responseURI, form)
+	resp, err := format.HTTPClientForURL(responseURI).PostForm(responseURI, form)
 	if err != nil {
 		return nil, fmt.Errorf("posting to response_uri: %w", err)
 	}
@@ -101,7 +103,7 @@ func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*D
 		log.Printf("[VP] JWE content encryption key for proxy debugging: %s", cekB64)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := format.HTTPClientForURL(responseURI).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("posting to response_uri: %w", err)
 	}

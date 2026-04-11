@@ -2,7 +2,7 @@
 
 Runnable integration scenarios live under [`examples/`](../examples/README.md).
 
-These examples are meant to show complete local setups around `oid4vc-dev`, including any Docker compose files, bootstrap scripts, wallet preparation steps, and the exact versions they were tested against.
+These examples are meant to show complete local setups around `oid4vc-dev`, including any Docker compose files, bootstrap scripts, wallet preparation steps, exact versions, flow diagrams, and the concrete parameter values each scenario uses.
 
 ## Scenarios
 
@@ -32,6 +32,21 @@ It includes:
 - verifier bootstrap scripts
 - a headless same-device login test
 - a browser-driven command-line flow that works with a registered `oid4vc-dev` wallet
+
+### Keycloak Issuer + Verifier Demo App
+
+Folder: [`examples/keycloak-issuer-verifier-app`](../examples/keycloak-issuer-verifier-app/README.md)
+
+Use this when you want a more complete local integration: one Keycloak `26.6.0` instance issues a credential, the same Keycloak instance verifies it through `keycloak-extension-oid4vp`, and a sample application drives both steps.
+
+It includes:
+
+- a Keycloak compose setup with both OID4VCI and OID4VP pieces enabled
+- a realm bootstrap script for issuance and verification together
+- a custom first-broker authenticator that links the verified credential back to the existing Keycloak user by `keycloak_user_id`
+- a small local demo application with issue and login actions
+- both verifier trust setups: HTTP plus a generated trust list by default, and HTTPS plus issuer metadata as an option
+- a headless smoke test for the combined flow
 
 ## Notes
 

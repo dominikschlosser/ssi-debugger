@@ -1,0 +1,12 @@
+.wallet/
+.cache/
+__pycache__/
+providers/*.jar
+!providers/.gitkeep
+link-provider/target/
+keycloak-ca-cert.pem
+keycloak-ca-key.pem
+keycloak-cert.pem
+keycloak-key.pem
+wallet-ca-cert.pem
+wallet-ca-key.pem

@@ -1,92 +1,119 @@
 # Keycloak Verifier + `keycloak-extension-oid4vp`
 
-This scenario uses:
+This example runs a local same-device OpenID4VP login against Keycloak using `oid4vc-dev` as the wallet.
 
-- Keycloak `26.6.0` as the OpenID4VP verifier
-- `keycloak-extension-oid4vp` `0.6.1` from Maven Central
-- `oid4vc-dev` as the wallet presenting a locally generated PID
+## How It Works
 
-The example pins a plain-client-ID, non-HAIP same-device flow so it can run locally without extra verifier X.509 material. The verifier requests the SD-JWT PID branch and uses the wallet's HTTPS issuer metadata endpoint as a fallback verification path, so Keycloak is started with the generated wallet CA certificate in its truststore. The login script drives the full browser-style OIDC login, hands the `openid4vp://` request to `oid4vc-dev`, completes Keycloak's first-broker-login step if needed, and exchanges the resulting authorization code for tokens.
+1. `./scripts/download-extension.sh` downloads `keycloak-extension-oid4vp` `0.6.1` into `providers/`.
+2. `./scripts/generate-wallet.sh` creates a local `oid4vc-dev` wallet with PID credentials and a trust list endpoint reachable from Docker as `http://host.docker.internal:8085`.
+3. `docker compose up` starts Keycloak `26.6.0` with the OID4VP provider jar mounted and the wallet CA certificate added to Keycloak's truststore.
+4. `./scripts/bootstrap.sh` creates realm `wallet-demo`, public client `wallet-mock`, and the `oid4vp` identity provider with a DCQL query for SD-JWT PID `urn:eudi:pid:de:1`.
+5. `./scripts/login.py` starts the OIDC browser login, extracts the `openid4vp://` request, hands it to `oid4vc-dev wallet accept --auto-accept`, follows the broker flow, and exchanges the returned code for tokens.
+
+## Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant KC as Keycloak 26.6.0
+    participant EXT as keycloak-extension-oid4vp 0.6.1
+    participant W as oid4vc-dev wallet
+
+    U->>W: generate-pid --docker --base-url http://host.docker.internal:8085
+    U->>KC: bootstrap realm, client, OID4VP IdP
+    U->>KC: start OIDC authorize request
+    KC->>EXT: invoke oid4vp identity provider
+    EXT-->>U: same-device login page with openid4vp:// request
+    U->>W: wallet accept --auto-accept --port 8085 openid4vp://...
+    W->>EXT: direct_post VP token
+    EXT->>W: trust list and issuer metadata verification
+    EXT-->>KC: brokered identity
+    KC-->>U: authorization code
+    U->>KC: token request
+    KC-->>U: ID token / access token
+```
 
 ## Files
 
-- `docker-compose.yml` starts Keycloak `26.6.0` and loads provider jars from `providers/`
-- `scripts/download-extension.sh` downloads `keycloak-extension-oid4vp` `0.6.1` from Maven Central
-- `scripts/bootstrap.sh` recreates a demo realm and configures the OID4VP identity provider
-- `scripts/generate-wallet.sh` creates a local PID wallet store that Keycloak can verify from Docker
-- `scripts/login.py` runs the same-device verifier flow end to end and exchanges the auth code
-- `scripts/test-oidc-flow.sh` opens a browser-driven OIDC flow like `../eudi-wallet-connector` and expects a registered `oid4vc-dev` wallet handler
-
-## Prerequisites
-
-- Docker
-- `curl`
-- `jq`
-- `python3`
-- a local `oid4vc-dev` binary or `go` toolchain
+- `start.sh`: runs the full setup and by default executes the headless same-device verifier flow
+- `docker-compose.yml`: starts Keycloak and mounts provider jars from `providers/`
+- `scripts/download-extension.sh`: downloads `keycloak-extension-oid4vp` `0.6.1`
+- `scripts/bootstrap.sh`: creates the demo realm and OID4VP IdP
+- `scripts/generate-wallet.sh`: creates the wallet, PID credentials, wallet CA, and trust list endpoint
+- `scripts/login.py`: runs the same-device flow end to end and exchanges the returned code
+- `scripts/test-oidc-flow.sh`: starts a browser-driven flow for a system-registered `oid4vc-dev` wallet
 
 ## Quick Start
 
-Download the verifier extension jar:
-
 ```bash
 cd examples/keycloak-verifier-oid4vp
-./scripts/download-extension.sh
+./start.sh
 ```
 
-Generate a wallet with local PID credentials and Docker-reachable status/trust-list URLs:
+If `oid4vc-dev` is not already installed, `start.sh` installs the latest release with `go install github.com/dominikschlosser/oid4vc-dev@latest`.
+
+Browser-driven flow:
 
 ```bash
-./scripts/generate-wallet.sh
+./start.sh --browser
 ```
 
-Start Keycloak:
+Setup only:
 
 ```bash
-docker compose up -d
+./start.sh --setup-only
 ```
 
-Bootstrap the demo verifier realm:
+## Parameters
 
-```bash
-./scripts/bootstrap.sh
-```
+### Keycloak
 
-Run the same-device login flow and exchange the resulting authorization code:
+| Parameter | Value |
+|---|---|
+| Image | `quay.io/keycloak/keycloak:26.6.0` |
+| Startup flags | `start-dev`, `--http-port=8080`, `--proxy-headers=xforwarded`, `--truststore-paths=/opt/keycloak/conf/oid4vc-wallet-ca.pem`, `--tls-hostname-verifier=ANY` |
+| Mounted provider jar | `providers/keycloak-extension-oid4vp.jar` |
+| Realm | `wallet-demo` |
+| Admin user | `admin` / `admin` |
+| OIDC client | `wallet-mock` |
+| Redirect URI pattern | `http://127.0.0.1/*`, `http://localhost/*` |
+| Client attributes | `pkce.code.challenge.method=S256` |
 
-```bash
-./scripts/login.py
-```
+### `keycloak-extension-oid4vp`
 
-Or drive the browser flow from the command line and let the registered `oid4vc-dev` wallet handle the `openid4vp://` redirect:
+| Parameter | Value |
+|---|---|
+| Version | `0.6.1` |
+| Provider alias | `oid4vp` |
+| `firstBrokerLoginFlowAlias` | `first broker login` |
+| `sameDeviceEnabled` | `true` |
+| `crossDeviceEnabled` | `false` |
+| `walletScheme` | `openid4vp://` |
+| `responseMode` | `direct_post` |
+| `clientIdScheme` | `plain` |
+| `enforceHaip` | `false` |
+| `trustedAuthoritiesMode` | `none` |
+| `trustListUrl` | `http://host.docker.internal:8085/api/trustlist` |
+| `trustListLoTEType` | `http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList` |
+| `statusListMaxCacheTtlSeconds` | `0` |
+| `userMappingClaim` | `family_name` |
+| `userMappingClaimMdoc` | `family_name` |
+| DCQL credential id | `pid_sd_jwt` |
+| DCQL format | `dc+sd-jwt` |
+| DCQL `vct` | `urn:eudi:pid:de:1` |
+| DCQL requested claims | `family_name`, `given_name`, `birthdate` |
 
-```bash
-../../oid4vc-dev wallet register
-./scripts/test-oidc-flow.sh
-```
+### oid4vc-dev
 
-## Demo Setup
-
-The bootstrap script recreates a realm named `wallet-demo` with:
-
-- public client `wallet-mock`
-- redirect URI pattern `http://127.0.0.1/*`
-- OID4VP identity provider alias `oid4vp`
-- same-device flow enabled, cross-device flow disabled
-- `direct_post` response mode
-- `plain` `client_id` scheme with `enforceHaip=false`
-- PID trust-list LoTE filter `http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList`
-- a DCQL query requesting SD-JWT PID `urn:eudi:pid:de:1`
-
-The generated wallet still contains both the SD-JWT PID and mDoc PID credentials, but this verifier scenario asks for the SD-JWT PID branch so Keycloak can use the wallet issuer-metadata fallback in local mode.
-
-The scripts prefer `go run` from the current `oid4vc-dev` checkout when Go is available, which avoids accidentally picking up a stale previously built binary. Set `OID4VC_DEV_BIN` if you want to force a specific binary path.
-
-The verifier trusts the wallet's PID trust list at `http://host.docker.internal:8085/api/trustlist`, which is served temporarily by `oid4vc-dev wallet accept` during the presentation flow.
+| Parameter | Value |
+|---|---|
+| Wallet store | `$(pwd)/.wallet` |
+| Wallet base URL during wallet generation | `http://host.docker.internal:8085` |
+| Wallet port during presentation | `8085` |
+| Trust list endpoint on host | `http://localhost:8085/api/trustlist` |
+| Trust list endpoint from Docker | `http://host.docker.internal:8085/api/trustlist` |
 
 ## Useful Overrides
-
-All scripts accept environment overrides:
 
 ```bash
 KEYCLOAK_BASE_URL=http://localhost:8080
@@ -94,10 +121,10 @@ KEYCLOAK_REALM=wallet-demo
 OIDC_CLIENT_ID=wallet-mock
 OIDC_REDIRECT_URI=http://127.0.0.1:18080/callback
 OID4VP_TRUST_LIST_URL=http://host.docker.internal:8085/api/trustlist
-OID4VC_DEV_BIN=../../oid4vc-dev
+OID4VP_TRUST_LIST_LOTE_TYPE=http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList
+OID4VC_DEV_BIN=/path/to/oid4vc-dev
 OID4VC_WALLET_DIR=$(pwd)/.wallet
 OID4VC_WALLET_PORT=8085
-BROKER_USERNAME_PREFIX=wallet-user
 ```
 
 ## Cleanup

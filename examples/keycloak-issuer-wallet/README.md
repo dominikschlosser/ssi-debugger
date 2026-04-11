@@ -1,85 +1,110 @@
 # Keycloak Issuer + oid4vc-dev Wallet
 
-This scenario uses:
+This example runs a local OpenID4VCI issuance flow from Keycloak into `oid4vc-dev`.
 
-- Keycloak `26.6.0` as the OpenID4VCI credential issuer
-- `oid4vc-dev` as the wallet redeeming the credential offer
-- a pre-authorized code offer so the flow is easy to run locally
+## How It Works
 
-The example bootstraps a demo realm, creates an SD-JWT credential configuration, creates a demo user, and creates a pre-authorized credential offer that `oid4vc-dev` can redeem directly.
+1. `docker compose up` starts Keycloak `26.6.0` with the OID4VCI features enabled.
+2. `./scripts/bootstrap.sh` recreates realm `oid4vc-demo`, user `alice`, client `oid4vc-demo-client`, and client scope `membership-credential`.
+3. `./scripts/create-offer.sh` logs in as `alice`, calls Keycloak's `create-credential-offer` endpoint, and converts the returned `issuer` and `nonce` into an `openid-credential-offer://` URI.
+4. `oid4vc-dev wallet accept` resolves the offer URI, fetches issuer metadata and authorization details from Keycloak, creates proof-of-possession material, and stores the returned SD-JWT VC in the local wallet directory.
 
-It uses Keycloak's current `create-credential-offer` endpoint from 26.6.0.
+## Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant KC as Keycloak 26.6.0
+    participant W as oid4vc-dev wallet
+
+    U->>KC: bootstrap realm, user, client, credential scope
+    U->>KC: password grant as alice
+    KC-->>U: access token
+    U->>KC: GET /protocol/oid4vc/create-credential-offer
+    KC-->>U: issuer + nonce
+    U->>W: wallet accept openid-credential-offer://...
+    W->>KC: fetch issuer metadata
+    W->>KC: redeem pre-authorized offer and submit proof
+    KC-->>W: dc+sd-jwt credential
+    W-->>U: credential stored in .wallet
+```
 
 ## Files
 
-- `docker-compose.yml` starts Keycloak with the `oid4vc-vci:v1` feature enabled
-- `scripts/bootstrap.sh` recreates the demo realm and configures the issuer
-- `scripts/create-offer.sh` creates a fresh pre-authorized Keycloak offer and wraps it as an `openid-credential-offer://` URI for `oid4vc-dev`
-- `scripts/redeem-offer.sh` creates an offer and passes it to `oid4vc-dev wallet accept`
-
-## Prerequisites
-
-- Docker
-- `curl`
-- `jq`
-- a local `oid4vc-dev` binary or `go` toolchain
+- `start.sh`: starts Keycloak, bootstraps the issuer, and by default redeems a credential into `oid4vc-dev`
+- `docker-compose.yml`: starts Keycloak with OID4VCI enabled
+- `scripts/bootstrap.sh`: creates the demo realm and issuer configuration
+- `scripts/create-offer.sh`: creates a fresh pre-authorized offer URI
+- `scripts/redeem-offer.sh`: creates an offer and passes it into `oid4vc-dev`
 
 ## Quick Start
 
-Start Keycloak:
-
 ```bash
 cd examples/keycloak-issuer-wallet
-docker compose up -d
+./start.sh
+oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" list
 ```
 
-Bootstrap the demo issuer:
+If `oid4vc-dev` is not already installed, `start.sh` installs the latest release with `go install github.com/dominikschlosser/oid4vc-dev@latest`.
+
+Setup only:
 
 ```bash
-./scripts/bootstrap.sh
+./start.sh --setup-only
 ```
 
-Redeem an offer with a dedicated local wallet store:
-
-```bash
-./scripts/redeem-offer.sh
-```
-
-Inspect the imported credential:
-
-```bash
-../../oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" list
-```
-
-Or show the raw offer and redeem it manually:
+Manual flow:
 
 ```bash
 OFFER_URI=$(./scripts/create-offer.sh)
-../../oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" accept "$OFFER_URI"
+oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" accept "$OFFER_URI"
 ```
 
-## Demo Setup
+## Parameters
 
-The bootstrap script recreates a realm named `oid4vc-demo` with:
+### Keycloak
 
-- user `alice` / password `alice`
-- public client `oid4vc-demo-client`
-- credential configuration ID `membership-credential`
-- SD-JWT claims mapped from `alice`'s profile: `given_name`, `family_name`, and `email`
+| Parameter | Value |
+|---|---|
+| Image | `quay.io/keycloak/keycloak:26.6.0` |
+| Startup flags | `start-dev`, `--features=oid4vc-vci:v1,oid4vc-vci-preauth-code:v1`, `--http-port=8080`, `--proxy-headers=xforwarded` |
+| Realm | `oid4vc-demo` |
+| Admin user | `admin` / `admin` |
+| Demo user | `alice` / `alice` |
+| OIDC client | `oid4vc-demo-client` |
+| Client type | public client |
+| Client attributes | `oid4vci.enabled=true`, `pkce.code.challenge.method=S256` |
+| Redirect URIs | `http://127.0.0.1/*` |
+| Credential configuration ID | `membership-credential` |
+| Credential format | `dc+sd-jwt` |
+| `vct` | `https://credentials.example.com/membership` |
+| Signing algorithm | `ES256` |
+| Binding requirement | `vc.binding_required=true` |
+| Proof types | `vc.binding_required_proof_types=jwt` |
+| Binding methods | `vc.cryptographic_binding_methods_supported=jwk` |
+| Credential identifier | `membership-credential-id` |
+| Claims | `given_name`, `family_name`, `email`, `jti`, `iat` |
+| Offer endpoint | `/realms/oid4vc-demo/protocol/oid4vc/create-credential-offer` |
+| Issuer metadata | `/realms/oid4vc-demo/.well-known/openid-credential-issuer` |
 
-The issued credential uses the `dc+sd-jwt` format and a `vct` of `https://credentials.example.com/membership`.
+### oid4vc-dev
+
+| Parameter | Value |
+|---|---|
+| Wallet directory | `$(pwd)/.wallet` by default |
+| Input | `openid-credential-offer://?credential_offer_uri=...` |
+| Storage result | imported `dc+sd-jwt` VC in local wallet store |
 
 ## Useful Overrides
-
-All scripts accept environment overrides:
 
 ```bash
 KEYCLOAK_BASE_URL=http://localhost:8080
 KEYCLOAK_REALM=oid4vc-demo
 OID4VCI_CLIENT_ID=oid4vc-demo-client
+OID4VCI_CREDENTIAL_SCOPE=membership-credential
 OID4VCI_USER=alice
 OID4VCI_USER_PASSWORD=alice
-OID4VC_DEV_BIN=../../oid4vc-dev
+OID4VC_DEV_BIN=/path/to/oid4vc-dev
 OID4VC_WALLET_DIR=$(pwd)/.wallet
 ```
 

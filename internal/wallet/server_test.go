@@ -2327,12 +2327,16 @@ func TestOnUIRequest_CalledOnInteractiveOfferImport(t *testing.T) {
 	}
 }
 
-func TestOnUIRequest_InteractiveOfferImportReusesParsedOneShotOffer(t *testing.T) {
+func TestOnUIRequest_InteractiveOfferImportFetchesOfferOnlyAfterApproval(t *testing.T) {
 	srv := newTestServer(t, false)
+	offerFetched := make(chan struct{}, 2)
 
 	issuer, offerURI := setupMockIssuer(t, srv.wallet, mockIssuerOpts{
 		offerViaURI:     true,
 		oneShotOfferURI: true,
+		onOfferFetch: func() {
+			offerFetched <- struct{}{}
+		},
 	})
 	defer issuer.Close()
 
@@ -2358,6 +2362,11 @@ func TestOnUIRequest_InteractiveOfferImportReusesParsedOneShotOffer(t *testing.T
 	if reqID == "" {
 		t.Fatal("no pending issuance consent request found")
 	}
+	select {
+	case <-offerFetched:
+		t.Fatal("credential_offer_uri should not be fetched before approval")
+	case <-time.After(100 * time.Millisecond):
+	}
 
 	approveReq := httptest.NewRequest("POST", "/api/requests/"+reqID+"/approve", strings.NewReader(`{}`))
 	approveReq.Header.Set("Content-Type", "application/json")
@@ -2365,6 +2374,11 @@ func TestOnUIRequest_InteractiveOfferImportReusesParsedOneShotOffer(t *testing.T
 	srv.mux.ServeHTTP(approveRec, approveReq)
 	if approveRec.Code != http.StatusOK {
 		t.Fatalf("approve failed: %d %s", approveRec.Code, approveRec.Body.String())
+	}
+	select {
+	case <-offerFetched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected credential_offer_uri to be fetched after approval")
 	}
 
 	resp := <-done

@@ -48,6 +48,8 @@ type mockIssuerOpts struct {
 	offerViaURI bool
 	// oneShotOfferURI, if true, the credential_offer_uri succeeds once and then returns HTTP 400.
 	oneShotOfferURI bool
+	// onOfferFetch is called whenever the credential_offer_uri endpoint is dereferenced.
+	onOfferFetch func()
 }
 
 func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Server, string) {
@@ -133,6 +135,9 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 			json.NewEncoder(rw).Encode(credResp)
 
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/credential-offer"):
+			if opts.onOfferFetch != nil {
+				opts.onOfferFetch()
+			}
 			offerMu.Lock()
 			offerFetches++
 			currentFetch := offerFetches

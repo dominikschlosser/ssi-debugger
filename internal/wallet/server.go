@@ -518,46 +518,7 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.wallet.AutoAccept {
-		reqType, parsed, err := oid4vc.Parse(body.URI)
-		if err != nil {
-			s.log("  ERROR: %v", err)
-			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
-			s.wallet.NotifyError(WalletError{
-				Message: "Credential offer parsing failed",
-				Detail:  err.Error(),
-			})
-			s.triggerUIRequest()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		if reqType != oid4vc.TypeVCI {
-			err := fmt.Errorf("expected VCI credential offer, got VP")
-			s.log("  ERROR: %v", err)
-			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
-			s.wallet.NotifyError(WalletError{
-				Message: "Credential offer parsing failed",
-				Detail:  err.Error(),
-			})
-			s.triggerUIRequest()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-
-		offer, ok := parsed.(*oid4vc.CredentialOffer)
-		if !ok {
-			err := fmt.Errorf("unexpected credential offer type")
-			s.log("  ERROR: %v", err)
-			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
-			s.wallet.NotifyError(WalletError{
-				Message: "Credential offer parsing failed",
-				Detail:  err.Error(),
-			})
-			s.triggerUIRequest()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-
-		replayableOfferURI, err := buildReplayableOfferURI(body.URI, offer)
+		consentReq, issuerDisplay, err := prepareIssuanceConsentRequest(body.URI)
 		if err != nil {
 			s.log("  ERROR: %v", err)
 			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
@@ -571,18 +532,6 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.log("  Mode:          interactive — waiting for consent...")
-		consentReq := &ConsentRequest{
-			ID:           newConsentID(),
-			Type:         "issuance",
-			OfferURI:     replayableOfferURI,
-			Status:       "pending",
-			ResultCh:     make(chan ConsentResult, 1),
-			SubmissionCh: make(chan SubmissionResult, 1),
-			CreatedAt:    time.Now(),
-			ClientID:     offer.CredentialIssuer,
-			OfferConfigs: append([]string(nil), offer.CredentialConfigurationIDs...),
-		}
-
 		s.wallet.CreateConsentRequest(consentReq)
 		s.triggerUIRequest()
 		if s.onConsentRequest != nil {
@@ -593,7 +542,7 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 		case consent := <-consentReq.ResultCh:
 			if !consent.Approved {
 				s.log("  Consent:       denied")
-				s.wallet.AddLog("issuance", fmt.Sprintf("Denied credential offer from %s", offer.CredentialIssuer), false)
+				s.wallet.AddLog("issuance", fmt.Sprintf("Denied credential offer from %s", issuerDisplay), false)
 				consentReq.SubmissionCh <- SubmissionResult{Error: "user denied issuance", StatusCode: http.StatusForbidden}
 				writeJSON(w, http.StatusOK, map[string]any{
 					"status":      "denied",
@@ -659,20 +608,60 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func buildReplayableOfferURI(original string, offer *oid4vc.CredentialOffer) (string, error) {
-	if offer == nil {
-		return "", fmt.Errorf("missing credential offer")
-	}
-	raw, err := json.Marshal(offer.FullJSON)
-	if err != nil {
-		return "", fmt.Errorf("serializing parsed credential offer: %w", err)
+func prepareIssuanceConsentRequest(raw string) (*ConsentRequest, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	req := &ConsentRequest{
+		ID:           newConsentID(),
+		Type:         "issuance",
+		OfferURI:     trimmed,
+		Status:       "pending",
+		ResultCh:     make(chan ConsentResult, 1),
+		SubmissionCh: make(chan SubmissionResult, 1),
+		CreatedAt:    time.Now(),
 	}
 
-	scheme := "openid-credential-offer://"
-	if strings.HasPrefix(strings.TrimSpace(original), "haip-vci://") {
-		scheme = "haip-vci://"
+	offerURI := extractCredentialOfferURI(trimmed)
+	if offerURI != "" {
+		req.ClientID = credentialOfferIssuerDisplay(offerURI)
+		return req, req.ClientID, nil
 	}
-	return scheme + "?credential_offer=" + url.QueryEscape(string(raw)), nil
+
+	reqType, parsed, err := oid4vc.Parse(trimmed)
+	if err != nil {
+		return nil, "", err
+	}
+	if reqType != oid4vc.TypeVCI {
+		return nil, "", fmt.Errorf("expected VCI credential offer, got VP")
+	}
+	offer, ok := parsed.(*oid4vc.CredentialOffer)
+	if !ok {
+		return nil, "", fmt.Errorf("unexpected credential offer type")
+	}
+	req.ClientID = offer.CredentialIssuer
+	req.OfferConfigs = append([]string(nil), offer.CredentialConfigurationIDs...)
+	return req, offer.CredentialIssuer, nil
+}
+
+func extractCredentialOfferURI(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Query().Get("credential_offer_uri"))
+}
+
+func credentialOfferIssuerDisplay(offerURI string) string {
+	u, err := url.Parse(strings.TrimSpace(offerURI))
+	if err != nil {
+		return "credential issuer"
+	}
+	if issuer := strings.TrimSpace(u.Scheme + "://" + u.Host); issuer != "://" && issuer != "" {
+		return issuer
+	}
+	if host := strings.TrimSpace(u.Host); host != "" {
+		return host
+	}
+	return "credential issuer"
 }
 
 // handleListCredentials returns all stored credentials.

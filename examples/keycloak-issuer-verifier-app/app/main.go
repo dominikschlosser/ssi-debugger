@@ -146,7 +146,10 @@ func (s *server) httpClient() (*http.Client, error) {
 		if ok := pool.AppendCertsFromPEM(caBytes); !ok {
 			return nil, fmt.Errorf("failed to load CA certificate %s", s.cfg.KeycloakCACert)
 		}
-		transport.TLSClientConfig = &tls.Config{RootCAs: pool}
+		transport.TLSClientConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    pool,
+		}
 	}
 	return &http.Client{Timeout: 20 * time.Second, Transport: transport}, nil
 }

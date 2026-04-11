@@ -173,7 +173,7 @@ func setLocalPresentationIssuerURL(w *wallet.Wallet, port int) {
 func resolvePresentationPort(port int, autoAccept bool) (int, error) {
 	port = effectivePresentationPort(port)
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err == nil {
 		_ = ln.Close()
 		return port, nil
@@ -183,13 +183,14 @@ func resolvePresentationPort(port int, autoAccept bool) (int, error) {
 		return port, nil
 	}
 
-	fallback, err := net.Listen("tcp", ":0")
+	fallback, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("resolving temporary auto-accept port after %d was busy: %w", port, err)
 	}
-	defer fallback.Close()
-
 	fallbackPort := fallback.Addr().(*net.TCPAddr).Port
+	if err := fallback.Close(); err != nil {
+		return 0, fmt.Errorf("closing temporary auto-accept listener: %w", err)
+	}
 	yellow := color.New(color.FgYellow)
 	yellow.Printf("  Note: port %d is already in use; auto-accept will use temporary port %d\n", port, fallbackPort)
 	return fallbackPort, nil

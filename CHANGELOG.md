@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.5] - 2026-04-11
+
+### Added
+
+- a new `keycloak-issuer-verifier-haip-app` example covering HAIP-style authorization-code issuance and x509-based verifier authentication
+- wallet support for interactive authorization-code issuance callbacks via the local `/callback` endpoint
+
+### Changed
+
+- simplified and cleaned up the Keycloak example set so the demo apps and bootstrap flows are easier to follow as reference implementations
+- expanded the OIDF conformance runner coverage for Browser API and HAIP flows
+
+### Fixed
+
+- Browser API handling for multisigned OpenID4VP request objects
+- mdoc Browser API session transcript generation for `dc_api` / `dc_api.jwt`
+- multiple issuance and verification issues in the combined Keycloak demo flows
+
+## [1.8.4] - 2026-04-11
+
+### Added
+
+- `wallet remove --all` for clearing the stored wallet more easily
+
+### Fixed
+
+- example setup and bootstrap issues in the combined Keycloak issuer/verifier demo
+- interactive wallet issuance behavior so headed mode no longer behaves like silent auto-accept
+- Keycloak demo support files so generated trust-list and signing material are handled correctly
+
+## [1.8.3] - 2026-04-11
+
+### Changed
+
+- macOS wallet URL-handler behavior now distinguishes between interactive mode and explicit `--auto-accept` background import
+
+### Fixed
+
+- headed issuance flows now surface the wallet instead of silently importing like auto-accept mode
+- the combined Keycloak demo app now logs out through Keycloak instead of only clearing the local session
+
+## [1.8.2] - 2026-04-11
+
+### Added
+
+- Keycloak-based example setups for issuer-only, verifier-only, and combined issuance + verification flows
+- a combined Keycloak demo app with smoke tests and bootstrap scripts for end-to-end issuance and wallet login flows
+
+### Fixed
+
+- credential-offer and issuer-metadata parsing for the new Keycloak issuance example flows
+
 ## [1.8.1] - 2026-04-09
 
 ### Fixed
@@ -28,6 +80,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - wallet-generated ETSI trust lists now use the required top-level `LoTE` JSON binding wrapper instead of the previously emitted unwrapped payload
 - trust-list parsing and format detection now reject the old non-conformant unwrapped trust-list shape
 - proxy JWE tests now match the current `EncryptJWE` API so the full suite builds cleanly again
+
+## [1.7.4] - 2026-04-09
+
+### Changed
+
+- updated the conformance runner to target the current OpenID4VP / OID4VCI 1.0 variant names
+
+## [1.7.3] - 2026-04-08
+
+### Fixed
+
+- compatibility with the then-current wallet conformance test suite
+
+## [1.7.2] - 2026-04-08
+
+### Fixed
+
+- authorization errors are now returned to the verifier instead of being dropped locally
+- `direct_post.jwt` responses now preserve `state`
 
 ## [1.7.1] - 2026-03-22
 

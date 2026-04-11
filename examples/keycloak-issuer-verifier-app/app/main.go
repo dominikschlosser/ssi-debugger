@@ -42,6 +42,7 @@ type authSession struct {
 type appSession struct {
 	CreatedAt         time.Time
 	LoginMethod       string
+	IDToken           string
 	AccessToken       string
 	RefreshToken      string
 	IDTokenClaims     map[string]any
@@ -546,11 +547,9 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
   <div class="eyebrow">Authenticated Session</div>
   <h1>Current login method: %s</h1>
   <p>The sample app holds the current OIDC session locally. Use it to create a credential for the logged-in Keycloak user, then force a new wallet-based login back into the same application through the credential's <code>keycloak_user_id</code> binding.</p>
-  <form class="inline" method="post" action="/issue">
-    <button class="cta secondary" type="submit">Issue Membership Credential</button>
-  </form>
+  <a class="cta secondary" href="/issue">Issue Membership Credential</a>
   <a class="cta" href="/login/wallet">Login With Wallet</a>
-  <a class="cta muted" href="/logout">Clear App Session</a>
+  <a class="cta muted" href="/logout">Logout</a>
   <div class="grid">
     <section class="panel">
       <h2>ID Token Claims</h2>
@@ -651,8 +650,11 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	var session appSession
+	var ok bool
 	if cookie, err := r.Cookie("demo_session"); err == nil {
 		s.appMu.Lock()
+		session, ok = s.appSessions[cookie.Value]
 		delete(s.appSessions, cookie.Value)
 		s.appMu.Unlock()
 	}
@@ -663,7 +665,18 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 	})
-	http.Redirect(w, r, "/", http.StatusFound)
+	if !ok {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	values := url.Values{
+		"post_logout_redirect_uri": {s.cfg.AppBaseURL},
+		"client_id":                {s.cfg.AppClientID},
+	}
+	if session.IDToken != "" {
+		values.Set("id_token_hint", session.IDToken)
+	}
+	http.Redirect(w, r, s.keycloakRealmURL()+"/protocol/openid-connect/logout?"+values.Encode(), http.StatusFound)
 }
 
 func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -703,6 +716,7 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	s.appSessions[sessionID] = appSession{
 		CreatedAt:         time.Now(),
 		LoginMethod:       loginMethod,
+		IDToken:           idToken,
 		AccessToken:       accessToken,
 		RefreshToken:      refreshToken,
 		IDTokenClaims:     decodeJWTPayload(idToken),

@@ -20,7 +20,7 @@ import "fmt"
 
 // RegisterURLSchemes is not yet supported on Linux.
 // macOS is the only supported platform for URL scheme registration.
-func RegisterURLSchemes(listenerPort int) error {
+func RegisterURLSchemes(listenerPort int, autoAccept bool) error {
 	return fmt.Errorf("URL scheme registration is currently only supported on macOS.\n\nOn Linux, use 'wallet accept <uri>' instead.")
 }
 

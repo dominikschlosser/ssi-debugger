@@ -74,7 +74,7 @@ case "${mode}" in
     ./scripts/login.py
     ;;
   browser)
-    "${OID4VC_DEV_BIN}" wallet register
+    "${OID4VC_DEV_BIN}" wallet register --auto-accept
     ./scripts/test-oidc-flow.sh
     ;;
   setup-only)

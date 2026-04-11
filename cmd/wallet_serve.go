@@ -216,7 +216,7 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			// Register URL scheme handlers if requested
 			if register && !noRegister {
-				if err := wallet.RegisterURLSchemes(port); err != nil {
+				if err := wallet.RegisterURLSchemes(port, w.AutoAccept); err != nil {
 					yellow.Printf("  Register:    skipped (%s)\n", err)
 				} else {
 					fmt.Printf("  Register:    URL scheme handlers registered\n")

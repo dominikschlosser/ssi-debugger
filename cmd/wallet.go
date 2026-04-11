@@ -292,17 +292,21 @@ func walletRemoveCmd() *cobra.Command {
 // --- wallet register ---
 
 func walletRegisterCmd() *cobra.Command {
-	var port int
+	var (
+		port       int
+		autoAccept bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register OS URL scheme handlers (openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return wallet.RegisterURLSchemes(port)
+			return wallet.RegisterURLSchemes(port, autoAccept)
 		},
 	}
 
 	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Listener port for handler script to try before falling back to CLI")
+	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Handle incoming URLs silently without opening the wallet UI")
 	return cmd
 }
 

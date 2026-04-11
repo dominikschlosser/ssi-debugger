@@ -67,6 +67,9 @@ oid4vc-dev wallet import credential.txt
 
 # Register URL scheme handlers so openid4vp:// links open the wallet
 oid4vc-dev wallet register
+
+# Keep URL handling silent/background-only
+oid4vc-dev wallet register --auto-accept
 ```
 
 ## Storage
@@ -203,7 +206,7 @@ Use `--register` to also register OS URL scheme handlers so that `openid4vp://`,
 oid4vc-dev wallet serve
 oid4vc-dev wallet serve --port 9000 --auto-accept
 oid4vc-dev wallet serve --pid --credential extra.txt
-oid4vc-dev wallet serve --register           # also register URL scheme handlers
+oid4vc-dev wallet serve --register           # also register URL scheme handlers using the current interactive/auto-accept mode
 oid4vc-dev wallet serve --register --port 9000
 ```
 
@@ -341,20 +344,24 @@ Use the same `--port`, `--docker`, and `--base-url` flags as `wallet serve` so t
 
 Registers (or removes) OS-level URL scheme handlers so that `openid4vp://`, `eudi-openid4vp://`, `haip-vp://`, `openid-credential-offer://`, and `haip-vci://` links automatically open the wallet.
 
-The handler script first tries to POST to a running `wallet serve` instance. If the server is not running, it falls back to invoking the CLI directly (`wallet accept`).
+By default, the handler script makes sure a local `wallet serve` instance is available, forwards the incoming URI to it, and opens the wallet UI so interactive presentation requests and imported credentials are visible immediately.
+
+Use `--auto-accept` to keep URL handling silent: the handler first tries to POST to a running `wallet serve` instance and otherwise falls back to invoking the CLI directly (`wallet accept`).
 
 - **macOS**: Creates an AppleScript `.app` bundle in `~/Applications/` and registers via Launch Services
 - **Other platforms**: Not supported — use `wallet accept <uri>` instead
 
 ```bash
-oid4vc-dev wallet register               # Register URL handlers (default listener port 8085)
+oid4vc-dev wallet register               # Register URL handlers and open the wallet UI by default
+oid4vc-dev wallet register --auto-accept # Keep URL handling silent / background-only
 oid4vc-dev wallet register --port 9000   # Use custom listener port
 oid4vc-dev wallet unregister             # Remove URL handlers
 ```
 
-| Flag     | Default | Description                                                    |
-|----------|---------|----------------------------------------------------------------|
-| `--port` | `8085`  | Listener port for handler script to try before falling back to CLI |
+| Flag            | Default | Description                                                    |
+|-----------------|---------|----------------------------------------------------------------|
+| `--port`        | `8085`  | Listener port for handler script to try before falling back to CLI |
+| `--auto-accept` | `false` | Handle incoming URLs silently without opening the wallet UI    |
 
 ## HAIP 1.0 Enforcement
 

@@ -39,7 +39,7 @@ func handlerScriptPath() string {
 // RegisterURLSchemes creates a macOS .app bundle via osacompile and registers URL scheme handlers.
 // macOS delivers URLs via Apple Events, so we use an AppleScript with "on open location"
 // that calls a bash handler script.
-func RegisterURLSchemes(listenerPort int) error {
+func RegisterURLSchemes(listenerPort int, autoAccept bool) error {
 	binaryPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("finding executable path: %w", err)
@@ -55,32 +55,88 @@ func RegisterURLSchemes(listenerPort int) error {
 		return fmt.Errorf("creating handler directory: %w", err)
 	}
 
-	handler := strings.ReplaceAll(strings.ReplaceAll(`#!/bin/bash
+	handler := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(`#!/bin/bash
 BINARY="{{BINARY_PATH}}"
 URI="$1"
 LISTENER="http://localhost:{{PORT}}"
+PORT="{{PORT}}"
+AUTO_ACCEPT="{{AUTO_ACCEPT}}"
+LOG_FILE="/tmp/oid4vc-dev-wallet.log"
+SERVER_LOG="/tmp/oid4vc-dev-wallet-server.log"
+
+listener_ready() {
+  curl -sf "$LISTENER/api/credentials" >/dev/null 2>&1
+}
+
+ensure_listener() {
+  if listener_ready; then
+    return 0
+  fi
+  "$BINARY" wallet serve --port "$PORT" >>"$SERVER_LOG" 2>&1 &
+  for _ in $(seq 1 40); do
+    if listener_ready; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+open_wallet_ui() {
+  open "${LISTENER}/?source=url-handler&ts=$(date +%s)" >/dev/null 2>&1 || true
+}
+
+submit_offer() {
+  curl -sf -X POST "$LISTENER/api/offers" \
+    -H "Content-Type: application/json" \
+    -d "{\"uri\":\"$URI\"}" >/dev/null
+}
+
+submit_presentation() {
+  curl -sf -X POST "$LISTENER/api/presentations" \
+    -H "Content-Type: application/json" \
+    -d "{\"uri\":\"$URI\"}" >/dev/null
+}
+
+accept_cli() {
+  case "$1" in
+    presentation)
+      if [[ "$AUTO_ACCEPT" == "true" ]]; then
+        "$BINARY" wallet accept --auto-accept "$URI" 2>&1 | tee -a "$LOG_FILE"
+        return 0
+      fi
+      ;;
+  esac
+  "$BINARY" wallet accept "$URI" 2>&1 | tee -a "$LOG_FILE"
+}
 
 case "$URI" in
-  openid-credential-offer://*)
-    curl -sf -X POST "$LISTENER/api/offers" \
-      -H "Content-Type: application/json" \
-      -d "{\"uri\":\"$URI\"}" 2>/dev/null \
-      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
-    ;;
-  haip-vci://*)
-    curl -sf -X POST "$LISTENER/api/offers" \
-      -H "Content-Type: application/json" \
-      -d "{\"uri\":\"$URI\"}" 2>/dev/null \
-      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
+  openid-credential-offer://*|haip-vci://*)
+    if [[ "$AUTO_ACCEPT" == "true" ]]; then
+      submit_offer 2>>"$LOG_FILE" || accept_cli offer
+      exit 0
+    fi
+    if ensure_listener; then
+      submit_offer 2>>"$LOG_FILE" || true
+      open_wallet_ui
+      exit 0
+    fi
+    accept_cli offer
     ;;
   *)
-    curl -sf -X POST "$LISTENER/api/presentations" \
-      -H "Content-Type: application/json" \
-      -d "{\"uri\":\"$URI\"}" 2>/dev/null \
-      || "$BINARY" wallet accept "$URI" 2>&1 | tee /tmp/oid4vc-dev-wallet.log
+    if [[ "$AUTO_ACCEPT" == "true" ]]; then
+      submit_presentation 2>>"$LOG_FILE" || accept_cli presentation
+      exit 0
+    fi
+    if ensure_listener; then
+      submit_presentation 2>>"$LOG_FILE" || true
+      open_wallet_ui
+      exit 0
+    fi
+    accept_cli presentation
     ;;
 esac
-`, "{{BINARY_PATH}}", binaryPath), "{{PORT}}", fmt.Sprintf("%d", listenerPort))
+`, "{{BINARY_PATH}}", binaryPath), "{{PORT}}", fmt.Sprintf("%d", listenerPort)), "{{AUTO_ACCEPT}}", fmt.Sprintf("%t", autoAccept))
 
 	if err := os.WriteFile(handlerPath, []byte(handler), 0755); err != nil {
 		return fmt.Errorf("writing handler script: %w", err)
@@ -164,6 +220,12 @@ end open location
 	fmt.Printf("  App bundle: %s\n", bundlePath)
 	fmt.Printf("  Handler:    %s\n", handlerPath)
 	fmt.Printf("  Binary:     %s\n", binaryPath)
+	fmt.Printf("  Mode:       ")
+	if autoAccept {
+		fmt.Printf("auto-accept\n")
+	} else {
+		fmt.Printf("interactive UI\n")
+	}
 	fmt.Printf("  Schemes:    openid4vp://, eudi-openid4vp://, haip-vp://, openid-credential-offer://, haip-vci://\n")
 	return nil
 }

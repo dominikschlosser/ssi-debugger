@@ -373,6 +373,10 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log("  ERROR: %v", err)
 		s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+		s.wallet.NotifyError(WalletError{
+			Message: "Credential issuance failed",
+			Detail:  err.Error(),
+		})
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

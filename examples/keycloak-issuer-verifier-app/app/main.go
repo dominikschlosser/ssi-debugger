@@ -67,6 +67,7 @@ type homePageData struct {
 type issuePageData struct {
 	Title         string
 	WalletUIURL   string
+	OfferHref     template.URL
 	OfferURI      string
 	AcceptCommand string
 	HasOffer      bool
@@ -574,6 +575,7 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, http.StatusOK, "issue.html", issuePageData{
 		Title:         "Membership Credential Offer",
 		WalletUIURL:   s.cfg.WalletUIURL,
+		OfferHref:     template.URL(offerURI),
 		OfferURI:      offerURI,
 		AcceptCommand: "oid4vc-dev wallet accept '" + offerURI + "'",
 		HasOffer:      true,

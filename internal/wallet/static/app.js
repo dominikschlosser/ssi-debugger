@@ -99,7 +99,9 @@
 
     try {
       // Detect type
-      const isVCI = uri.includes('credential_offer') || uri.startsWith('openid-credential-offer://');
+      const isVCI = uri.includes('credential_offer') ||
+        uri.startsWith('openid-credential-offer://') ||
+        uri.startsWith('haip-vci://');
       const endpoint = isVCI ? '/api/offers' : '/api/presentations';
 
       const resp = await fetch(endpoint, {

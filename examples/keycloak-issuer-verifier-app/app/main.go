@@ -24,6 +24,7 @@ type config struct {
 	AppHost                string
 	AppPort                string
 	AppBaseURL             string
+	WalletUIURL            string
 	KeycloakBaseURL        string
 	KeycloakCACert         string
 	KeycloakRealm          string
@@ -65,6 +66,7 @@ func loadConfig() config {
 		AppHost:                appHost,
 		AppPort:                appPort,
 		AppBaseURL:             appBaseURL,
+		WalletUIURL:            getenvDefault("WALLET_UI_URL", "http://localhost:8085/"),
 		KeycloakBaseURL:        getenvDefault("KEYCLOAK_BASE_URL", "http://localhost:8080"),
 		KeycloakCACert:         os.Getenv("KEYCLOAK_CA_CERT"),
 		KeycloakRealm:          getenvDefault("KEYCLOAK_REALM", "wallet-app-demo"),
@@ -241,7 +243,7 @@ func (s *server) createOfferURI(accessToken string) (string, error) {
 }
 
 func (s *server) createLoginURL(mode string) (string, error) {
-	if mode != "password" && mode != "wallet" {
+	if mode != "login" && mode != "password" && mode != "wallet" {
 		return "", fmt.Errorf("unsupported login mode: %s", mode)
 	}
 	state := "s-" + randomToken(8)
@@ -294,7 +296,6 @@ func (s *server) exchangeCode(code, state string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokenData["login_method"] = authSession.Mode
 	return tokenData, nil
 }
 
@@ -499,6 +500,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleAPICredentialOffer(w, r)
 	case "/keycloak-trustlist.jwt":
 		s.handleTrustList(w, r)
+	case "/login":
+		s.redirectToLogin(w, r, "login")
 	case "/login/password":
 		s.redirectToLogin(w, r, "password")
 	case "/login/wallet":
@@ -519,24 +522,17 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.writeHTML(w, http.StatusOK, page("Keycloak Issuance and Verification Demo", fmt.Sprintf(`
 <section class="hero">
-  <div class="eyebrow">Combined Example</div>
-  <h1>Login with Keycloak, issue a credential, then log back in with that same credential.</h1>
-  <p>This sample app demonstrates the complete round-trip. First you authenticate with username and password through Keycloak. Then the app uses that user session to create an OpenID4VCI offer. Finally it forces a fresh OID4VP wallet login and Keycloak verifies the credential either through issuer metadata over HTTPS or through the generated trust list over HTTP, then links it back to the same user through the stable <code>keycloak_user_id</code> claim.</p>
+  <h1>Keycloak issuer + verifier demo</h1>
+  <p>Sign in, issue a credential, then sign in again with the wallet.</p>
   <div class="grid">
     <section class="panel">
-      <h2>1. Password login</h2>
-      <p>Authenticate with the normal Keycloak browser login first. In the demo realm, use <code>alice</code> / <code>alice</code>.</p>
-      <a class="cta secondary" href="/login/password">Sign In With Password</a>
+      <h2>Start</h2>
+      <p>Use <code>alice</code> / <code>alice</code>.</p>
+      <a class="cta secondary" href="/login">Sign In</a>
       <pre>curl -fsS %s/api/login-url?mode=password</pre>
     </section>
-    <section class="panel">
-      <h2>2. Wallet login</h2>
-      <p>After issuing the credential, start a fresh wallet-based login. Keycloak links it back to the same account through the stable <code>keycloak_user_id</code> claim.</p>
-      <a class="cta" href="/login/wallet">Sign In With Wallet</a>
-      <pre>curl -fsS %s/api/login-url?mode=wallet</pre>
-    </section>
   </div>
-</section>`, s.cfg.AppBaseURL, s.cfg.AppBaseURL)))
+</section>`, s.cfg.AppBaseURL)))
 		return
 	}
 
@@ -544,11 +540,12 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	accessClaims, _ := json.MarshalIndent(appSession.AccessTokenClaims, "", "  ")
 	s.writeHTML(w, http.StatusOK, page("Keycloak Issuance and Verification Demo", fmt.Sprintf(`
 <section class="hero">
-  <div class="eyebrow">Authenticated Session</div>
-  <h1>Current login method: %s</h1>
-  <p>The app keeps the current OIDC session locally. Use it to create a credential for the logged-in Keycloak user, then start a fresh wallet login back into the same application through the credential's <code>keycloak_user_id</code> binding.</p>
-  <a class="cta secondary" href="/issue">Issue Membership Credential</a>
-  <a class="cta" href="/login/wallet">Sign In With Wallet</a>
+  <h1>Signed in with %s</h1>
+  <p>Issue a credential, then log out and sign in again through Keycloak.</p>
+  <form action="/issue" method="post" style="display:inline">
+    <button class="cta secondary" type="submit">Issue Membership Credential</button>
+  </form>
+  <a class="cta muted" href="%s">Open Wallet UI</a>
   <a class="cta muted" href="/logout">Logout</a>
   <div class="grid">
     <section class="panel">
@@ -560,14 +557,13 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
       <pre>%s</pre>
     </section>
   </div>
-  <p class="note">Issuance uses the current app session's access token instead of a separate password grant. Wallet login adds <code>prompt=login</code> so Keycloak does not reuse the existing browser session. The verifier trust source depends on the setup: HTTPS uses issuer metadata, HTTP uses the generated trust list.</p>
-</section>`, html.EscapeString(appSession.LoginMethod), html.EscapeString(string(idClaims)), html.EscapeString(string(accessClaims)))))
+</section>`, html.EscapeString(appSession.LoginMethod), html.EscapeString(s.cfg.WalletUIURL), html.EscapeString(string(idClaims)), html.EscapeString(string(accessClaims)))))
 }
 
 func (s *server) handleAPILoginURL(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
 	if mode == "" {
-		mode = "wallet"
+		mode = "login"
 	}
 	loginURL, err := s.createLoginURL(mode)
 	if err != nil {
@@ -615,38 +611,49 @@ func (s *server) redirectToLogin(w http.ResponseWriter, r *http.Request, mode st
 }
 
 func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		s.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	appSession, ok := s.currentAppSession(r)
 	if !ok {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+
+	if r.Method == http.MethodGet {
+		s.writeHTML(w, http.StatusOK, page("Issue Credential", fmt.Sprintf(`
+<section class="hero">
+  <h1>Create credential offer</h1>
+  <p>This generates a new offer for the current session.</p>
+  <form action="/issue" method="post" style="display:inline">
+    <button class="cta secondary" type="submit">Create Offer</button>
+  </form>
+  <a class="cta muted" href="%s">Open Wallet UI</a>
+  <p class="note"><a href="/">Back to the demo app</a></p>
+</section>`, html.EscapeString(s.cfg.WalletUIURL))))
+		return
+	}
+
 	offerURI, err := s.createOfferURI(appSession.AccessToken)
 	if err != nil {
 		s.writeError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if r.Method == http.MethodPost {
-		http.Redirect(w, r, offerURI, http.StatusFound)
-		return
-	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET, POST")
-		s.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	safeURI := html.EscapeString(offerURI)
 	acceptCommand := html.EscapeString("oid4vc-dev wallet accept '" + offerURI + "'")
 	s.writeHTML(w, http.StatusOK, page("Issue Credential", fmt.Sprintf(`
 <section class="hero">
-  <div class="eyebrow">Issuance</div>
-  <h1>Membership credential offer.</h1>
-  <p>The app created this offer using the current Keycloak session. Open it in the registered wallet, or redeem it manually from the command line.</p>
+  <h1>Credential offer</h1>
+  <p>Open it in the wallet or redeem it with the CLI.</p>
   <a class="cta secondary" href="%s">Open Offer In Wallet</a>
-  <p class="note">On macOS, register the handler once with <code>oid4vc-dev wallet register</code>. The default interactive mode opens the wallet UI after the offer is handed off. Use <code>oid4vc-dev wallet register --auto-accept</code> only for silent background handling.</p>
+  <a class="cta muted" href="%s">Open Wallet UI</a>
   <pre>%s</pre>
   <pre>%s</pre>
   <p class="note"><a href="/">Back to the demo app</a></p>
-</section>`, safeURI, acceptCommand, safeURI)))
+</section>`, safeURI, html.EscapeString(s.cfg.WalletUIURL), acceptCommand, safeURI)))
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -684,8 +691,7 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		description := r.URL.Query().Get("error_description")
 		s.writeHTML(w, http.StatusBadRequest, page("Login Failed", fmt.Sprintf(`
 <section class="hero">
-  <div class="eyebrow">Verification</div>
-  <h1>Keycloak login failed.</h1>
+  <h1>Login failed</h1>
   <pre>%s
 %s</pre>
   <p class="note"><a href="/">Back to the demo app</a></p>
@@ -708,19 +714,23 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	accessToken, _ := tokenData["access_token"].(string)
 	refreshToken, _ := tokenData["refresh_token"].(string)
-	loginMethod, _ := tokenData["login_method"].(string)
 	idToken, _ := tokenData["id_token"].(string)
+	accessClaims := decodeJWTPayload(accessToken)
+	loginType, _ := accessClaims["login_type"].(string)
+	if loginType == "" {
+		loginType = "unknown"
+	}
 
 	sessionID := "app-" + randomToken(12)
 	s.appMu.Lock()
 	s.appSessions[sessionID] = appSession{
 		CreatedAt:         time.Now(),
-		LoginMethod:       loginMethod,
+		LoginMethod:       loginType,
 		IDToken:           idToken,
 		AccessToken:       accessToken,
 		RefreshToken:      refreshToken,
 		IDTokenClaims:     decodeJWTPayload(idToken),
-		AccessTokenClaims: decodeJWTPayload(accessToken),
+		AccessTokenClaims: accessClaims,
 	}
 	s.appMu.Unlock()
 

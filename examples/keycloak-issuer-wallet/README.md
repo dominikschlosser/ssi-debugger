@@ -26,7 +26,7 @@ sequenceDiagram
     W->>KC: fetch issuer metadata
     W->>KC: redeem pre-authorized offer and submit proof
     KC-->>W: dc+sd-jwt credential
-    W-->>U: credential stored in .wallet
+    W-->>U: credential stored in ~/.oid4vc-dev/wallet
 ```
 
 ## Files
@@ -42,7 +42,7 @@ sequenceDiagram
 ```bash
 cd examples/keycloak-issuer-wallet
 ./start.sh
-oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" list
+oid4vc-dev wallet list
 ```
 
 If `oid4vc-dev` is not already installed, `start.sh` installs the latest release with `go install github.com/dominikschlosser/oid4vc-dev@latest`.
@@ -57,7 +57,7 @@ Manual flow:
 
 ```bash
 OFFER_URI=$(./scripts/create-offer.sh)
-oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" accept "$OFFER_URI"
+oid4vc-dev wallet accept "$OFFER_URI"
 ```
 
 ## Parameters
@@ -91,7 +91,7 @@ oid4vc-dev wallet --wallet-dir "$(pwd)/.wallet" accept "$OFFER_URI"
 
 | Parameter | Value |
 |---|---|
-| Wallet directory | `$(pwd)/.wallet` by default |
+| Wallet directory | `~/.oid4vc-dev/wallet` |
 | Input | `openid-credential-offer://?credential_offer_uri=...` |
 | Storage result | imported `dc+sd-jwt` VC in local wallet store |
 
@@ -104,13 +104,11 @@ OID4VCI_CLIENT_ID=oid4vc-demo-client
 OID4VCI_CREDENTIAL_SCOPE=membership-credential
 OID4VCI_USER=alice
 OID4VCI_USER_PASSWORD=alice
-OID4VC_DEV_BIN=/path/to/oid4vc-dev
-OID4VC_WALLET_DIR=$(pwd)/.wallet
 ```
 
 ## Cleanup
 
 ```bash
 docker compose down -v
-rm -rf .wallet
+oid4vc-dev wallet remove --all
 ```

@@ -2101,16 +2101,44 @@ func TestOnUIRequest_CalledOnInteractiveOfferImport(t *testing.T) {
 	}
 
 	before := len(srv.wallet.GetCredentials())
-	resp := serverRequest(t, srv, http.MethodPost, "/api/offers", string(body))
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- serverRequest(t, srv, http.MethodPost, "/api/offers", string(body))
+	}()
+
+	var reqID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		pending := srv.wallet.GetPendingRequests()
+		if len(pending) > 0 {
+			reqID = pending[0].ID
+			break
+		}
+	}
+	if reqID == "" {
+		t.Fatal("no pending issuance consent request found")
 	}
 	if !callbackCalled {
 		t.Fatal("expected onUIRequest callback to be called")
 	}
+	if got := len(srv.wallet.GetCredentials()); got != before {
+		t.Fatalf("interactive issuance should not import before approval, before=%d after=%d", before, got)
+	}
+
+	approveReq := httptest.NewRequest("POST", "/api/requests/"+reqID+"/approve", strings.NewReader(`{}`))
+	approveReq.Header.Set("Content-Type", "application/json")
+	approveRec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("approve failed: %d %s", approveRec.Code, approveRec.Body.String())
+	}
+
+	resp := <-done
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
 	after := len(srv.wallet.GetCredentials())
 	if after != before+1 {
-		t.Fatalf("expected one imported credential, got before=%d after=%d", before, after)
+		t.Fatalf("expected one imported credential after approval, got before=%d after=%d", before, after)
 	}
 }
 

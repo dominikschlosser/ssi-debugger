@@ -298,10 +298,23 @@
   function showConsentDialog(req) {
     consentOverlay.classList.add('active');
 
-    let html = '<div class="consent-title">Presentation Request</div>' +
-      '<div class="consent-verifier">Verifier: ' + escHtml(req.client_id) + '</div>';
+    const isIssuance = req.type === 'issuance';
+    let html = '<div class="consent-title">' + (isIssuance ? 'Credential Offer' : 'Presentation Request') + '</div>' +
+      '<div class="consent-verifier">' + (isIssuance ? 'Issuer: ' : 'Verifier: ') + escHtml(req.client_id) + '</div>';
 
-    if (req.matched_credentials && req.matched_credentials.length > 0) {
+    if (isIssuance && req.offer_configs && req.offer_configs.length > 0) {
+      html += '<div class="consent-credential">' +
+        '<div class="consent-credential-header">' +
+          '<span style="font-size:12px;font-weight:600;">Credential configuration</span>' +
+        '</div>' +
+        '<div class="consent-claims">';
+      req.offer_configs.forEach(cfg => {
+        html += '<div class="consent-claim"><span class="consent-claim-name">' + escHtml(cfg) + '</span></div>';
+      });
+      html += '</div></div>';
+    }
+
+    if (!isIssuance && req.matched_credentials && req.matched_credentials.length > 0) {
       req.matched_credentials.forEach((mc, idx) => {
         const formatClass = mc.format === 'dc+sd-jwt' ? 'format-sdjwt' : mc.format === 'jwt_vc_json' ? 'format-jwt' : 'format-mdoc';
         const formatLabel = mc.format === 'dc+sd-jwt' ? 'SD-JWT' : mc.format === 'jwt_vc_json' ? 'JWT VC' : 'mDoc';
@@ -354,12 +367,19 @@
       denyBtn.disabled = true;
 
       try {
+        const approveBody = isIssuance ? {} : { selected_claims: selected };
         const resp = await fetch('/api/requests/' + req.id + '/approve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ selected_claims: selected })
+          body: JSON.stringify(approveBody)
         });
         const result = await resp.json();
+        if (isIssuance) {
+          consentOverlay.classList.remove('active');
+          await loadCredentials();
+          await loadLog();
+          return;
+        }
         showSubmissionResult(result);
       } catch (e) {
         console.error('Approve failed:', e);

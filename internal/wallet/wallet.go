@@ -140,12 +140,14 @@ type ConsentRequest struct {
 	ID           string                       `json:"id"`
 	Type         string                       `json:"type"` // "presentation" or "issuance"
 	AuthRequest  *oid4vc.AuthorizationRequest `json:"-"`
+	OfferURI     string                       `json:"-"`
 	MatchedCreds []CredentialMatch            `json:"matched_credentials"`
 	Status       string                       `json:"status"` // "pending", "approved", "denied"
 	ResultCh     chan ConsentResult           `json:"-"`
 	SubmissionCh chan SubmissionResult        `json:"-"` // result of VP submission after approval
 	CreatedAt    time.Time                    `json:"created_at"`
 	ClientID     string                       `json:"client_id"`
+	OfferConfigs []string                     `json:"offer_configs,omitempty"`
 	Nonce        string                       `json:"nonce,omitempty"`
 	ResponseURI  string                       `json:"response_uri,omitempty"`
 	DCQLQuery    map[string]any               `json:"dcql_query,omitempty"`
@@ -493,6 +495,9 @@ func MarshalConsentRequest(r *ConsentRequest) map[string]any {
 	}
 	if r.DCQLQuery != nil {
 		m["dcql_query"] = r.DCQLQuery
+	}
+	if len(r.OfferConfigs) > 0 {
+		m["offer_configs"] = r.OfferConfigs
 	}
 	return m
 }

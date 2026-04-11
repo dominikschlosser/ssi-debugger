@@ -17,7 +17,7 @@ VC metadata based trust is the standards-aligned setup and must be served via HT
 2. `./scripts/bootstrap.sh` creates the realm, users, clients, and first-broker flow, imports a persistent RS256 realm signing key from `keycloak-signing-key.pem` / `keycloak-signing-cert.pem`, then runs `./scripts/generate-keycloak-trustlist.go` to write `keycloak-trustlist.jwt` for that same signing certificate.
 3. `./scripts/start-app.sh` runs the local Go app on `http://127.0.0.1:8090` and serves `http://127.0.0.1:8090/keycloak-trustlist.jwt`.
 4. The OID4VP identity provider is configured with `trustListUrl=http://host.docker.internal:8090/keycloak-trustlist.jwt`, `trustListLoTEType=http://uri.etsi.org/19602/LoTEType/local`, `trustListMaxCacheTtlSeconds=0`, and `trustListMaxStaleAgeSeconds=0` so Keycloak always refetches the current trust list in this demo setup.
-5. The password login, issuance, and wallet login steps are the same as in the HTTPS setup.
+5. The login, issuance, and wallet-login steps are the same as in the HTTPS setup.
 6. During wallet login, `keycloak-extension-oid4vp` validates the SD-JWT `x5c` chain against the custom trust list instead of using issuer metadata.
 
 ### HTTPS + VC Metadata
@@ -28,7 +28,7 @@ VC metadata based trust is the standards-aligned setup and must be served via HT
 4. A browser login with username/password creates a normal Keycloak app session.
 5. The app uses that session's access token to call Keycloak's `create-credential-offer` endpoint and hands the offer to `oid4vc-dev`.
 6. The wallet stores the issued credential, including `keycloak_user_id`.
-7. A second login uses `kc_idp_hint=oid4vp`; `keycloak-extension-oid4vp` verifies the credential by resolving the issuer signing key from the issuer metadata / VC metadata endpoints over HTTPS, and the custom first-broker flow links it back to the existing Keycloak user.
+7. After logout, a second login goes through the normal Keycloak login page and can select the wallet option there. `keycloak-extension-oid4vp` verifies the credential by resolving the issuer signing key from the issuer metadata / VC metadata endpoints over HTTPS, and the custom first-broker flow links it back to the existing Keycloak user.
 
 ## Flow Diagram
 
@@ -50,8 +50,8 @@ sequenceDiagram
     APP->>W: openid-credential-offer://...
     W->>KC: OID4VCI credential request
     KC-->>W: dc+sd-jwt credential with keycloak_user_id
-    U->>APP: Login With Wallet
-    APP->>KC: OIDC auth with kc_idp_hint=oid4vp
+    U->>APP: Logout, then Sign In again
+    APP->>KC: OIDC auth via standard login page
     KC->>EXT: start OID4VP broker login
     EXT-->>W: openid4vp:// request
     W->>EXT: direct_post VP token
@@ -75,7 +75,7 @@ sequenceDiagram
     APP->>KC: create-credential-offer
     W->>KC: OID4VCI credential request
     KC-->>W: SD-JWT VC with x5c chain
-    APP->>KC: wallet login
+    APP->>KC: second login via standard login page
     W->>EXT: direct_post VP token
     EXT->>APP: fetch /keycloak-trustlist.jwt
     EXT->>EXT: verify SD-JWT x5c chain against trust list
@@ -93,7 +93,7 @@ sequenceDiagram
     APP->>KC: create-credential-offer
     W->>KC: OID4VCI credential request
     KC-->>W: SD-JWT VC with iss=https://localhost:8443/realms/wallet-app-demo
-    APP->>KC: wallet login
+    APP->>KC: second login via standard login page
     W->>EXT: direct_post VP token
     EXT->>KC: fetch issuer metadata / JWKS over HTTPS
     EXT->>EXT: verify SD-JWT signature with issuer metadata key
@@ -135,7 +135,7 @@ Then open `http://127.0.0.1:8090/` and:
 1. log in as `alice` / `alice`
 2. issue the membership credential
 3. open the offer in `oid4vc-dev`
-4. start wallet login
+4. log out, sign in again, and choose the wallet option in Keycloak
 5. present the credential back to Keycloak
 
 For browser-driven issuance and wallet login on macOS, register the URL handlers once so `openid-credential-offer://` and `openid4vp://` links hand the URI to `oid4vc-dev` and open the wallet UI in interactive mode:
@@ -219,7 +219,7 @@ Setup only:
 
 | Parameter | Value |
 |---|---|
-| Wallet store | `$(pwd)/.wallet` |
+| Wallet store | `~/.oid4vc-dev/wallet` |
 | Local wallet port in smoke flow | `8085` |
 
 ## Useful Overrides
@@ -235,8 +235,6 @@ OID4VCI_CREDENTIAL_SCOPE=membership-credential
 OID4VP_TRUST_MODE=trustlist
 OID4VP_TRUST_LIST_URL=http://host.docker.internal:8090/keycloak-trustlist.jwt
 KEYCLOAK_TRUST_LIST_PATH=$(pwd)/keycloak-trustlist.jwt
-OID4VC_DEV_BIN=/path/to/oid4vc-dev
-OID4VC_WALLET_DIR=$(pwd)/.wallet
 OID4VC_WALLET_PORT=8085
 ```
 
@@ -244,7 +242,7 @@ OID4VC_WALLET_PORT=8085
 
 ```bash
 docker compose down -v
-rm -rf .wallet
+oid4vc-dev wallet remove --all
 rm -f keycloak-trustlist.jwt
 rm -f keycloak-ca-cert.pem keycloak-ca-key.pem keycloak-cert.pem keycloak-key.pem
 ```

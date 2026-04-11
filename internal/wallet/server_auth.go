@@ -29,6 +29,10 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
+func newConsentID() string {
+	return uuid.New().String()
+}
+
 // AuthorizationRequestParams holds the extracted fields from an authorization request.
 type AuthorizationRequestParams struct {
 	ClientID         string
@@ -147,7 +151,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 	// Interactive mode: create consent request and wait
 	s.log("  Mode:          interactive — waiting for consent...")
 	consentReq := &ConsentRequest{
-		ID:           uuid.New().String(),
+		ID:           newConsentID(),
 		Type:         "presentation",
 		MatchedCreds: matches,
 		Status:       "pending",

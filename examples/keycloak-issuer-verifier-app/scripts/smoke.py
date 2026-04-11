@@ -19,8 +19,6 @@ DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "alice")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCENARIO_DIR = SCRIPT_DIR.parent
-REPO_ROOT = SCENARIO_DIR.parent.parent
-OID4VC_WALLET_DIR = Path(os.environ.get("OID4VC_WALLET_DIR", str(SCENARIO_DIR / ".wallet"))).resolve()
 KEYCLOAK_CA_CERT = Path(os.environ.get("KEYCLOAK_CA_CERT", str(SCENARIO_DIR / "keycloak-ca-cert.pem"))).resolve()
 
 
@@ -88,28 +86,25 @@ def strip_ansi(text):
 
 
 def resolve_oid4vc_dev_command():
-    override = os.environ.get("OID4VC_DEV_BIN")
-    if override:
-        return override.split(), None
-
-    go_bin = shutil.which("go")
-    if go_bin:
-        return [go_bin, "run", str(REPO_ROOT)], REPO_ROOT
-
-    local_bin = REPO_ROOT / "oid4vc-dev"
-    if local_bin.is_file() and os.access(local_bin, os.X_OK):
-        return [str(local_bin)], None
-
     path_bin = shutil.which("oid4vc-dev")
     if path_bin:
         return [path_bin], None
 
-    fail("Unable to resolve oid4vc-dev. Set OID4VC_DEV_BIN or install Go / build the binary.")
+    fail("Unable to resolve oid4vc-dev in PATH. Install it first or run ./start.sh.")
 
 
-def ensure_wallet_dir():
-    shutil.rmtree(OID4VC_WALLET_DIR, ignore_errors=True)
-    OID4VC_WALLET_DIR.mkdir(parents=True, exist_ok=True)
+def reset_wallet():
+    cmd, cwd = resolve_oid4vc_dev_command()
+    full_cmd = cmd + ["wallet", "remove", "--all"]
+    result = subprocess.run(
+        full_cmd,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = strip_ansi((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
+        fail(f"oid4vc-dev wallet remove --all failed:\n{output}".rstrip())
 
 
 def fetch(cookie_jar, url, method="GET", data=None, headers=None):
@@ -209,7 +204,7 @@ def extract_redirect_uri(wallet_output):
 
 def run_wallet_accept(url, auto_accept=False):
     cmd, cwd = resolve_oid4vc_dev_command()
-    full_cmd = cmd + ["wallet", "--wallet-dir", str(OID4VC_WALLET_DIR), "accept"]
+    full_cmd = cmd + ["wallet", "accept"]
     if auto_accept:
         full_cmd.extend(["--auto-accept", "--port", str(OID4VC_WALLET_PORT)])
     full_cmd.append(url)
@@ -238,10 +233,10 @@ def open_login_page(cookie_jar, login_url):
 
 
 def complete_password_login(cookie_jar):
-    login_url = get_json(cookie_jar, "/api/login-url?mode=password")["login_url"]
+    login_url = get_json(cookie_jar, "/api/login-url?mode=login")["login_url"]
     current_url, status, body = open_login_page(cookie_jar, login_url)
     if status != 200:
-        fail(f"Password login page returned HTTP {status}.")
+        fail(f"Login page returned HTTP {status}.")
 
     def is_password_form(form):
         names = {item["name"] for item in form["inputs"] if item["name"]}
@@ -272,7 +267,7 @@ def complete_password_login(cookie_jar):
         fail(f"App callback after password login returned HTTP {status}:\n{callback_body}".rstrip())
 
     status, _, app_home = fetch(cookie_jar, APP_BASE_URL + "/")
-    if status != 200 or "Current login method: password" not in app_home:
+    if status != 200 or "&#34;login_type&#34;: &#34;basic&#34;" not in app_home:
         fail(f"App session was not established after password login:\n{app_home[:1000]}".rstrip())
 
 
@@ -315,7 +310,15 @@ def follow_complete_auth(cookie_jar, start_url):
 
 
 def complete_wallet_login(cookie_jar):
-    login_url = get_json(cookie_jar, "/api/login-url?mode=wallet")["login_url"]
+    status, headers, _ = fetch(cookie_jar, APP_BASE_URL + "/logout")
+    location = headers.get("Location") or headers.get("location")
+    current_url = APP_BASE_URL + "/logout"
+    while 300 <= status < 400 and location:
+        current_url = urllib.parse.urljoin(current_url, location)
+        status, headers, body = fetch(cookie_jar, current_url)
+        location = headers.get("Location") or headers.get("location")
+
+    login_url = get_json(cookie_jar, "/api/login-url?mode=login")["login_url"]
     current_url, status, body = open_login_page(cookie_jar, login_url)
     if status != 200:
         fail(f"Wallet login page returned HTTP {status}.")
@@ -340,12 +343,12 @@ def complete_wallet_login(cookie_jar):
         fail(f"App callback after wallet login returned HTTP {status}:\n{callback_body}".rstrip())
 
     status, _, app_home = fetch(cookie_jar, APP_BASE_URL + "/")
-    if status != 200 or "Current login method: wallet" not in app_home:
+    if status != 200 or "&#34;login_type&#34;: &#34;wallet&#34;" not in app_home:
         fail(f"App session was not updated after wallet login:\n{app_home[:1000]}".rstrip())
 
 
 def main():
-    ensure_wallet_dir()
+    reset_wallet()
 
     print(f"Checking demo app at {APP_BASE_URL} ...")
     status, _, body = fetch(None, f"{APP_BASE_URL}/healthz")

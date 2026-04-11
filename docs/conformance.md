@@ -123,9 +123,20 @@ That keeps the conformance run aligned with real wallet behavior instead of carr
 
 ## Known gaps
 
-Current remaining gap in the hosted OIDF service:
+Current findings from a real run on April 11, 2026:
 
-- the OIDF site's plain `direct_post` alternate-happy-flow VP Final modules still fail before the wallet receives a request because the hosted suite currently tries to replace an encryption step that does not exist for unencrypted response modes
+- `oid4vp-1final-wallet-alternate-happy-flow` still fails in the hosted OIDF suite for the plain VP Final `direct_post` / `x509_hash` scenario before the wallet receives any request.
+  The exported OIDF result shows:
+  `CreateAuthorizationRequestSteps: replacement requested for missing condition: AddVP1FinalEncryptionParametersToClientMetadata`
+  This matches the upstream suite source in `VP1FinalWalletAlternateHappyFlow.java`, which tries to replace `AddVP1FinalEncryptionParametersToClientMetadata` even though `AbstractVP1FinalWalletTest` only adds that step for encrypted response modes like `direct_post.jwt`.
+- `oid4vp-1final-wallet-negative-test-response-uri-not-client-id` still runs in the hosted OIDF suite for the plain VP Final `direct_post` / `x509_hash` scenario and then fails after the wallet posts to `responseuri/bad`.
+  This currently looks like an upstream suite applicability issue, not a wallet regression:
+  `VP1FinalWalletResponseUriNotClientId.java` is annotated with `@VariantNotApplicable(... values={"x509_san_dns", "x509_hash", "decentralized_identifier", "pre_registered"})`, but the hosted plan still executed the module with `client_id_prefix=x509_hash`.
+- The wallet's stricter local rejection for actually invalid `redirect_uri:`-prefixed requests is still correct.
+  In the same April 11, 2026 run, the unsigned VP Final `redirect_uri` scenario rejected `response_uri=.../bad` locally with:
+  `redirect_uri: prefix value ".../responseuri" does not match response_uri ".../responseuri/bad"`
+
+These failures should stay visible in runs until the upstream suite behavior changes. Do not silently skip them in the wrapper.
 
 ## References
 

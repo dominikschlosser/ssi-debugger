@@ -379,6 +379,111 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 		s.wallet.mu.Unlock()
 	}
 
+	if !s.wallet.AutoAccept {
+		reqType, parsed, err := oid4vc.Parse(body.URI)
+		if err != nil {
+			s.log("  ERROR: %v", err)
+			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+			s.wallet.NotifyError(WalletError{
+				Message: "Credential offer parsing failed",
+				Detail:  err.Error(),
+			})
+			s.triggerUIRequest()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if reqType != oid4vc.TypeVCI {
+			err := fmt.Errorf("expected VCI credential offer, got VP")
+			s.log("  ERROR: %v", err)
+			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+			s.wallet.NotifyError(WalletError{
+				Message: "Credential offer parsing failed",
+				Detail:  err.Error(),
+			})
+			s.triggerUIRequest()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		offer, ok := parsed.(*oid4vc.CredentialOffer)
+		if !ok {
+			err := fmt.Errorf("unexpected credential offer type")
+			s.log("  ERROR: %v", err)
+			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+			s.wallet.NotifyError(WalletError{
+				Message: "Credential offer parsing failed",
+				Detail:  err.Error(),
+			})
+			s.triggerUIRequest()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		s.log("  Mode:          interactive — waiting for consent...")
+		consentReq := &ConsentRequest{
+			ID:           newConsentID(),
+			Type:         "issuance",
+			OfferURI:     body.URI,
+			Status:       "pending",
+			ResultCh:     make(chan ConsentResult, 1),
+			SubmissionCh: make(chan SubmissionResult, 1),
+			CreatedAt:    time.Now(),
+			ClientID:     offer.CredentialIssuer,
+			OfferConfigs: append([]string(nil), offer.CredentialConfigurationIDs...),
+		}
+
+		s.wallet.CreateConsentRequest(consentReq)
+		s.triggerUIRequest()
+		if s.onConsentRequest != nil {
+			s.onConsentRequest(consentReq)
+		}
+
+		select {
+		case consent := <-consentReq.ResultCh:
+			if !consent.Approved {
+				s.log("  Consent:       denied")
+				s.wallet.AddLog("issuance", fmt.Sprintf("Denied credential offer from %s", offer.CredentialIssuer), false)
+				consentReq.SubmissionCh <- SubmissionResult{Error: "user denied issuance", StatusCode: http.StatusForbidden}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":      "denied",
+					"error":       "user denied issuance",
+					"status_code": http.StatusForbidden,
+				})
+				return
+			}
+
+			s.log("  Consent:       approved")
+			result, err := s.wallet.ProcessCredentialOffer(body.URI)
+			if err != nil {
+				s.log("  ERROR: %v", err)
+				s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+				s.wallet.NotifyError(WalletError{
+					Message: "Credential issuance failed",
+					Detail:  err.Error(),
+				})
+				consentReq.SubmissionCh <- SubmissionResult{Error: err.Error(), StatusCode: http.StatusBadRequest}
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			s.log("  Received:      %s credential from %s", result.Format, result.Issuer)
+			if result.VerificationDetail != "" {
+				s.log("  Verification:  %s [%s]", result.VerificationDetail, result.VerificationStatus)
+			}
+			s.wallet.AddLog("issuance", fmt.Sprintf("Received %s credential from %s", result.Format, result.Issuer), true)
+			s.triggerSave()
+			consentReq.SubmissionCh <- SubmissionResult{StatusCode: http.StatusOK}
+			writeJSON(w, http.StatusOK, result)
+			return
+		case <-time.After(5 * time.Minute):
+			consentReq.Status = "denied"
+			s.wallet.AddLog("issuance", "Consent timeout", false)
+			consentReq.SubmissionCh <- SubmissionResult{Error: "consent timeout", StatusCode: http.StatusRequestTimeout}
+			writeJSON(w, http.StatusRequestTimeout, map[string]string{"error": "consent timeout"})
+			return
+		}
+	}
+
 	result, err := s.wallet.ProcessCredentialOffer(body.URI)
 	if err != nil {
 		s.log("  ERROR: %v", err)
@@ -400,9 +505,6 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	s.wallet.AddLog("issuance", fmt.Sprintf("Received %s credential from %s", result.Format, result.Issuer), true)
 	s.triggerSave()
-	if !s.wallet.AutoAccept {
-		s.triggerUIRequest()
-	}
 	writeJSON(w, http.StatusOK, result)
 }
 

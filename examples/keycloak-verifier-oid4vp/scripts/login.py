@@ -25,8 +25,6 @@ BROKER_USERNAME_PREFIX = os.environ.get("BROKER_USERNAME_PREFIX", "wallet-user")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCENARIO_DIR = SCRIPT_DIR.parent
-REPO_ROOT = SCENARIO_DIR.parent.parent
-OID4VC_WALLET_DIR = Path(os.environ.get("OID4VC_WALLET_DIR", str(SCENARIO_DIR / ".wallet"))).resolve()
 
 
 class LinkByIDParser(html.parser.HTMLParser):
@@ -99,23 +97,11 @@ def pkce_challenge(code_verifier):
 
 
 def resolve_oid4vc_dev_command():
-    override = os.environ.get("OID4VC_DEV_BIN")
-    if override:
-        return override.split(), None
-
-    go_bin = shutil.which("go")
-    if go_bin:
-        return [go_bin, "run", str(REPO_ROOT)], REPO_ROOT
-
-    local_bin = REPO_ROOT / "oid4vc-dev"
-    if local_bin.is_file() and os.access(local_bin, os.X_OK):
-        return [str(local_bin)], None
-
     path_bin = shutil.which("oid4vc-dev")
     if path_bin:
         return [path_bin], None
 
-    fail("Unable to resolve oid4vc-dev. Set OID4VC_DEV_BIN or install Go / build the binary.")
+    fail("Unable to resolve oid4vc-dev in PATH. Install it first or run ./start.sh.")
 
 
 def fetch(cookie_jar, url, method="GET", data=None, headers=None):
@@ -212,16 +198,10 @@ def decode_jwt_payload(jwt_token):
     return json.loads(raw.decode("utf-8"))
 
 
-def ensure_wallet_dir():
-    OID4VC_WALLET_DIR.mkdir(parents=True, exist_ok=True)
-
-
 def run_wallet_accept(wallet_url):
     cmd, cwd = resolve_oid4vc_dev_command()
     full_cmd = cmd + [
         "wallet",
-        "--wallet-dir",
-        str(OID4VC_WALLET_DIR),
         "accept",
         "--auto-accept",
         "--port",
@@ -334,8 +314,6 @@ def exchange_code(code, code_verifier):
 
 
 def main():
-    ensure_wallet_dir()
-
     state = f"s-{random_token(12)}"
     code_verifier = random_pkce_verifier()
     code_challenge = pkce_challenge(code_verifier)

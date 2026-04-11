@@ -268,7 +268,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	}
 
 	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Wallet server port")
-	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Headless mode: auto-approve all presentations")
+	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Headless mode: auto-accept presentations and credential offers")
 	cmd.Flags().StringSliceVar(&credFiles, "credential", nil, "Import credential from file (repeatable)")
 	cmd.Flags().BoolVar(&pid, "pid", false, "Auto-generate default EUDI PID credentials (SD-JWT + mDoc)")
 	cmd.Flags().StringVar(&keyPath, "key", "", "Holder private key file (PEM/JWK); uses stored key or auto-generates")

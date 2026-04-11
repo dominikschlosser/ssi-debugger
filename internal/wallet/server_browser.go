@@ -20,8 +20,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // handleBrowserPresentationAPI executes an OpenID4VP Browser API request and
@@ -136,7 +134,7 @@ func (s *Server) handleBrowserPresentationAPI(w http.ResponseWriter, r *http.Req
 
 	s.log("  Mode:          interactive — waiting for consent...")
 	consentReq := &ConsentRequest{
-		ID:           uuid.New().String(),
+		ID:           newConsentID(),
 		Type:         "presentation",
 		MatchedCreds: matches,
 		Status:       "pending",

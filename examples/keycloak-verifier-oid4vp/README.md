@@ -5,10 +5,10 @@ This example runs a local same-device OpenID4VP login against Keycloak using `oi
 ## How It Works
 
 1. `./scripts/download-extension.sh` downloads `keycloak-extension-oid4vp` `0.6.1` into `providers/`.
-2. `./scripts/generate-wallet.sh` creates a local `oid4vc-dev` wallet with PID credentials and a trust list endpoint reachable from Docker as `http://host.docker.internal:8085`.
+2. `./scripts/generate-wallet.sh` prepares the standard `oid4vc-dev` wallet with PID credentials and a trust list endpoint reachable from Docker as `http://host.docker.internal:8085`.
 3. `docker compose up` starts Keycloak `26.6.0` with the OID4VP provider jar mounted and the wallet CA certificate added to Keycloak's truststore.
 4. `./scripts/bootstrap.sh` creates realm `wallet-demo`, public client `wallet-mock`, and the `oid4vp` identity provider with a DCQL query for SD-JWT PID `urn:eudi:pid:de:1`.
-5. `./scripts/login.py` starts the OIDC browser login, extracts the `openid4vp://` request, hands it to `oid4vc-dev wallet accept --auto-accept`, follows the broker flow, and exchanges the returned code for tokens.
+5. `./scripts/login.py` starts the OIDC browser login, extracts the `openid4vp://` request, hands it to `oid4vc-dev wallet accept --auto-accept` for the automated headless path, follows the broker flow, and exchanges the returned code for tokens.
 
 ## Flow Diagram
 
@@ -24,7 +24,7 @@ sequenceDiagram
     U->>KC: start OIDC authorize request
     KC->>EXT: invoke oid4vp identity provider
     EXT-->>U: same-device login page with openid4vp:// request
-    U->>W: wallet accept --auto-accept --port 8085 openid4vp://...
+    U->>W: wallet accept --auto-accept --port 8085 openid4vp://... (headless script)
     W->>EXT: direct_post VP token
     EXT->>W: trust list and issuer metadata verification
     EXT-->>KC: brokered identity
@@ -107,7 +107,7 @@ Setup only:
 
 | Parameter | Value |
 |---|---|
-| Wallet store | `$(pwd)/.wallet` |
+| Wallet store | `~/.oid4vc-dev/wallet` |
 | Wallet base URL during wallet generation | `http://host.docker.internal:8085` |
 | Wallet port during presentation | `8085` |
 | Trust list endpoint on host | `http://localhost:8085/api/trustlist` |
@@ -122,8 +122,6 @@ OIDC_CLIENT_ID=wallet-mock
 OIDC_REDIRECT_URI=http://127.0.0.1:18080/callback
 OID4VP_TRUST_LIST_URL=http://host.docker.internal:8085/api/trustlist
 OID4VP_TRUST_LIST_LOTE_TYPE=http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList
-OID4VC_DEV_BIN=/path/to/oid4vc-dev
-OID4VC_WALLET_DIR=$(pwd)/.wallet
 OID4VC_WALLET_PORT=8085
 ```
 
@@ -131,6 +129,6 @@ OID4VC_WALLET_PORT=8085
 
 ```bash
 docker compose down -v
-rm -rf .wallet
+oid4vc-dev wallet remove --all
 rm -f wallet-ca-cert.pem wallet-ca-key.pem
 ```

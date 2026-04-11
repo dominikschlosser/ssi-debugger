@@ -4,13 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ensure_oid4vc_dev() {
-  if [[ -n "${OID4VC_DEV_BIN:-}" ]]; then
-    export PATH="$(dirname "${OID4VC_DEV_BIN}"):${PATH}"
-    return 0
-  fi
   if command -v oid4vc-dev >/dev/null 2>&1; then
-    export OID4VC_DEV_BIN="$(command -v oid4vc-dev)"
-    export PATH="$(dirname "${OID4VC_DEV_BIN}"):${PATH}"
     return 0
   fi
   if ! command -v go >/dev/null 2>&1; then
@@ -27,7 +21,6 @@ ensure_oid4vc_dev() {
 
   echo "oid4vc-dev not found. Installing latest with Go..."
   GOBIN="${gobin}" go install github.com/dominikschlosser/oid4vc-dev@latest
-  export OID4VC_DEV_BIN="${gobin}/oid4vc-dev"
   export PATH="${gobin}:${PATH}"
 }
 

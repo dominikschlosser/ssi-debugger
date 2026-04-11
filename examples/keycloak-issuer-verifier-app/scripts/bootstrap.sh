@@ -469,7 +469,20 @@ api_json POST "/admin/realms/${KEYCLOAK_REALM}/clients" \
       attributes: {
         "pkce.code.challenge.method": "S256",
         "oid4vci.enabled": "true"
-      }
+      },
+      protocolMappers: [
+        {
+          name: "login-type",
+          protocol: "openid-connect",
+          protocolMapper: "oid4vc-login-type-protocol-mapper",
+          consentRequired: false,
+          config: {
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
     }')"
 
 APP_CLIENT_UUID="$(lookup_client_id "$APP_CLIENT_ID")"
@@ -537,6 +550,19 @@ api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances" \
         userMappingClaimMdoc: "keycloak_user_id",
         dcqlQuery: $dcql_query
       } + (if $trust_mode == "trustlist" then {trustListUrl: $trust_list_url, trustListLoTEType: $trust_list_lote_type} else {} end))
+    }')"
+
+echo "Adding wallet login session-note mapper to OID4VP identity provider..."
+api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances/oid4vp/mappers" \
+  "$(json_payload '
+    {
+      name: "login-type-wallet",
+      identityProviderAlias: "oid4vp",
+      identityProviderMapper: "hardcoded-user-session-attribute-idp-mapper",
+      config: {
+        attribute: "login_type",
+        "attribute.value": "wallet"
+      }
     }')"
 
 echo

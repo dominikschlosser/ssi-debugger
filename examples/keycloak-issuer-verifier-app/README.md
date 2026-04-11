@@ -14,9 +14,9 @@ VC metadata based trust is the standards-aligned setup and must be served via HT
 ### HTTP + Custom Trust List
 
 1. `./start.sh` or `./start.sh --http` downloads `keycloak-extension-oid4vp` `0.6.1`, builds the custom first-broker authenticator, and starts Keycloak on `http://localhost:8080`.
-2. `./scripts/bootstrap.sh` creates the same realm, users, clients, and first-broker flow, then runs `./scripts/generate-keycloak-trustlist.go` to fetch Keycloak's current signing certificate from the realm JWKS and write `keycloak-trustlist.jwt`.
+2. `./scripts/bootstrap.sh` creates the realm, users, clients, and first-broker flow, imports a persistent RS256 realm signing key from `keycloak-signing-key.pem` / `keycloak-signing-cert.pem`, then runs `./scripts/generate-keycloak-trustlist.go` to write `keycloak-trustlist.jwt` for that same signing certificate.
 3. `./scripts/start-app.sh` runs the local Go app on `http://127.0.0.1:8090` and serves `http://127.0.0.1:8090/keycloak-trustlist.jwt`.
-4. The OID4VP identity provider is configured with `trustListUrl=http://host.docker.internal:8090/keycloak-trustlist.jwt`.
+4. The OID4VP identity provider is configured with `trustListUrl=http://host.docker.internal:8090/keycloak-trustlist.jwt`, `trustListLoTEType=http://uri.etsi.org/19602/LoTEType/local`, `trustListMaxCacheTtlSeconds=0`, and `trustListMaxStaleAgeSeconds=0` so Keycloak always refetches the current trust list in this demo setup.
 5. The password login, issuance, and wallet login steps are the same as in the HTTPS setup.
 6. During wallet login, `keycloak-extension-oid4vp` validates the SD-JWT `x5c` chain against the custom trust list instead of using issuer metadata.
 
@@ -107,7 +107,8 @@ sequenceDiagram
 - `scripts/download-extension.sh`: downloads `keycloak-extension-oid4vp` `0.6.1`
 - `scripts/build-link-provider.sh`: builds the custom Keycloak first-broker authenticator
 - `scripts/generate-keycloak-cert.sh`: generates the local HTTPS certificate for Keycloak in `--https` mode
-- `scripts/generate-keycloak-trustlist.go`: generates `keycloak-trustlist.jwt` from the current Keycloak signing certificate in `--http` mode
+- `scripts/generate-keycloak-signing-cert.sh`: creates and reuses the persistent Keycloak RS256 signing keypair used in both HTTP and HTTPS mode
+- `scripts/generate-keycloak-trustlist.go`: generates `keycloak-trustlist.jwt` from the persistent Keycloak signing certificate in `--http` mode
 - `scripts/bootstrap.sh`: configures issuance, verification, user profile, and first-broker flow
 - `scripts/start-app.sh`: starts the Go sample app
 - `scripts/smoke.py`: runs the complete password-login, issuance, redemption, and wallet-login flow
@@ -133,11 +134,11 @@ Then open `http://127.0.0.1:8090/` and:
 
 1. log in as `alice` / `alice`
 2. issue the membership credential
-3. accept the offer in `oid4vc-dev`
+3. open the offer in `oid4vc-dev`
 4. start wallet login
 5. present the credential back to Keycloak
 
-For browser-driven issuance and wallet login on macOS, register the URL handlers once so `openid-credential-offer://` and `openid4vp://` links open the wallet:
+For browser-driven issuance and wallet login on macOS, register the URL handlers once so `openid-credential-offer://` and `openid4vp://` links hand the URI to `oid4vc-dev` and open the wallet UI in interactive mode:
 
 ```bash
 oid4vc-dev wallet register

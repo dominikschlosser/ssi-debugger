@@ -150,6 +150,7 @@ func (s *Server) handleBrowserPresentationAPI(w http.ResponseWriter, r *http.Req
 	}
 
 	s.wallet.CreateConsentRequest(consentReq)
+	s.triggerUIRequest()
 	if s.onConsentRequest != nil {
 		s.onConsentRequest(consentReq)
 	}

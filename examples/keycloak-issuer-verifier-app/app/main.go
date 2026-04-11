@@ -525,14 +525,14 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
   <div class="grid">
     <section class="panel">
       <h2>1. Password login</h2>
-      <p>Authenticate as the normal Keycloak user first. In the demo realm, use <code>alice</code> / <code>alice</code>.</p>
-      <a class="cta secondary" href="/login/password">Login With Password</a>
+      <p>Authenticate with the normal Keycloak browser login first. In the demo realm, use <code>alice</code> / <code>alice</code>.</p>
+      <a class="cta secondary" href="/login/password">Sign In With Password</a>
       <pre>curl -fsS %s/api/login-url?mode=password</pre>
     </section>
     <section class="panel">
       <h2>2. Wallet login</h2>
-      <p>After issuing the credential, start a fresh wallet-based login that is linked back to the same Keycloak account by credential user id.</p>
-      <a class="cta" href="/login/wallet">Login With Wallet</a>
+      <p>After issuing the credential, start a fresh wallet-based login. Keycloak links it back to the same account through the stable <code>keycloak_user_id</code> claim.</p>
+      <a class="cta" href="/login/wallet">Sign In With Wallet</a>
       <pre>curl -fsS %s/api/login-url?mode=wallet</pre>
     </section>
   </div>
@@ -546,9 +546,9 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 <section class="hero">
   <div class="eyebrow">Authenticated Session</div>
   <h1>Current login method: %s</h1>
-  <p>The sample app holds the current OIDC session locally. Use it to create a credential for the logged-in Keycloak user, then force a new wallet-based login back into the same application through the credential's <code>keycloak_user_id</code> binding.</p>
+  <p>The app keeps the current OIDC session locally. Use it to create a credential for the logged-in Keycloak user, then start a fresh wallet login back into the same application through the credential's <code>keycloak_user_id</code> binding.</p>
   <a class="cta secondary" href="/issue">Issue Membership Credential</a>
-  <a class="cta" href="/login/wallet">Login With Wallet</a>
+  <a class="cta" href="/login/wallet">Sign In With Wallet</a>
   <a class="cta muted" href="/logout">Logout</a>
   <div class="grid">
     <section class="panel">
@@ -560,7 +560,7 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
       <pre>%s</pre>
     </section>
   </div>
-  <p class="note">Issue uses the current app session's access token instead of a hard-coded password grant. Wallet login adds <code>prompt=login</code> so Keycloak does not short-circuit back to the existing browser session. The verifier trust source depends on the setup: HTTPS uses issuer metadata, HTTP uses the generated trust list.</p>
+  <p class="note">Issuance uses the current app session's access token instead of a separate password grant. Wallet login adds <code>prompt=login</code> so Keycloak does not reuse the existing browser session. The verifier trust source depends on the setup: HTTPS uses issuer metadata, HTTP uses the generated trust list.</p>
 </section>`, html.EscapeString(appSession.LoginMethod), html.EscapeString(string(idClaims)), html.EscapeString(string(accessClaims)))))
 }
 
@@ -639,10 +639,10 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	s.writeHTML(w, http.StatusOK, page("Issue Credential", fmt.Sprintf(`
 <section class="hero">
   <div class="eyebrow">Issuance</div>
-  <h1>Manual wallet handoff.</h1>
-  <p>The app created this offer using the current Keycloak user session. If the direct handoff from the main page is blocked by the browser, use the link below or redeem the offer manually.</p>
-  <a class="cta secondary" href="%s">Open Wallet</a>
-  <p class="note">On macOS, register the handler once with <code>oid4vc-dev wallet register</code>. Chrome is more likely to honor the direct handoff from the main page because it stays tied to the original click.</p>
+  <h1>Membership credential offer.</h1>
+  <p>The app created this offer using the current Keycloak session. Open it in the registered wallet, or redeem it manually from the command line.</p>
+  <a class="cta secondary" href="%s">Open Offer In Wallet</a>
+  <p class="note">On macOS, register the handler once with <code>oid4vc-dev wallet register</code>. The default interactive mode opens the wallet UI after the offer is handed off. Use <code>oid4vc-dev wallet register --auto-accept</code> only for silent background handling.</p>
   <pre>%s</pre>
   <pre>%s</pre>
   <p class="note"><a href="/">Back to the demo app</a></p>

@@ -82,10 +82,6 @@ ensure_listener() {
   return 1
 }
 
-open_wallet_ui() {
-  open "${LISTENER}/?source=url-handler&ts=$(date +%s)" >/dev/null 2>&1 || true
-}
-
 submit_offer() {
   curl -sf -X POST "$LISTENER/api/offers" \
     -H "Content-Type: application/json" \
@@ -117,9 +113,7 @@ case "$URI" in
       exit 0
     fi
     if ensure_listener; then
-      submit_offer 2>>"$LOG_FILE" || true
-      open_wallet_ui
-      exit 0
+      submit_offer 2>>"$LOG_FILE" && exit 0
     fi
     accept_cli offer
     ;;
@@ -129,9 +123,7 @@ case "$URI" in
       exit 0
     fi
     if ensure_listener; then
-      submit_presentation 2>>"$LOG_FILE" || true
-      open_wallet_ui
-      exit 0
+      submit_presentation 2>>"$LOG_FILE" && exit 0
     fi
     accept_cli presentation
     ;;

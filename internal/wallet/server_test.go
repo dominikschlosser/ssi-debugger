@@ -2084,6 +2084,61 @@ func TestOnConsentRequest_NotCalledOnAutoAccept(t *testing.T) {
 	}
 }
 
+func TestOnUIRequest_CalledOnInteractiveOfferImport(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	callbackCalled := false
+	srv.SetOnUIRequest(func() {
+		callbackCalled = true
+	})
+
+	issuer, offerURI := setupMockIssuer(t, srv.wallet, mockIssuerOpts{})
+	defer issuer.Close()
+
+	body, err := json.Marshal(map[string]any{"uri": offerURI})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	before := len(srv.wallet.GetCredentials())
+	resp := serverRequest(t, srv, http.MethodPost, "/api/offers", string(body))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !callbackCalled {
+		t.Fatal("expected onUIRequest callback to be called")
+	}
+	after := len(srv.wallet.GetCredentials())
+	if after != before+1 {
+		t.Fatalf("expected one imported credential, got before=%d after=%d", before, after)
+	}
+}
+
+func TestOnUIRequest_NotCalledOnAutoAcceptOfferImport(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	callbackCalled := false
+	srv.SetOnUIRequest(func() {
+		callbackCalled = true
+	})
+
+	issuer, offerURI := setupMockIssuer(t, srv.wallet, mockIssuerOpts{})
+	defer issuer.Close()
+
+	body, err := json.Marshal(map[string]any{"uri": offerURI})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	resp := serverRequest(t, srv, http.MethodPost, "/api/offers", string(body))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if callbackCalled {
+		t.Fatal("onUIRequest callback should not be called in auto-accept mode")
+	}
+}
+
 func TestPresentationFlow_RequestURIMethodPost(t *testing.T) {
 	w := generateTestWallet(t)
 	w.AutoAccept = true

@@ -8,6 +8,8 @@ KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-http://localhost:8080}"
 KEYCLOAK_ADMIN="${KEYCLOAK_ADMIN:-admin}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-wallet-app-demo}"
+KEYCLOAK_SIGNING_KEY_PATH="${KEYCLOAK_SIGNING_KEY_PATH:-${SCENARIO_DIR}/keycloak-signing-key.pem}"
+KEYCLOAK_SIGNING_CERT_PATH="${KEYCLOAK_SIGNING_CERT_PATH:-${SCENARIO_DIR}/keycloak-signing-cert.pem}"
 
 OID4VCI_CLIENT_ID="${OID4VCI_CLIENT_ID:-oid4vc-demo-client}"
 OID4VCI_CREDENTIAL_SCOPE="${OID4VCI_CREDENTIAL_SCOPE:-membership-credential}"
@@ -20,6 +22,7 @@ APP_CLIENT_ID="${APP_CLIENT_ID:-wallet-app}"
 APP_REDIRECT_URI="${APP_REDIRECT_URI:-http://127.0.0.1:8090/callback}"
 ALLOWED_ISSUER="${ALLOWED_ISSUER:-${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}}"
 OID4VP_TRUST_LIST_URL="${OID4VP_TRUST_LIST_URL:-http://host.docker.internal:8090/keycloak-trustlist.jwt}"
+OID4VP_TRUST_LIST_LOTE_TYPE="${OID4VP_TRUST_LIST_LOTE_TYPE:-http://uri.etsi.org/19602/LoTEType/local}"
 KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH:-${SCENARIO_DIR}/keycloak-trustlist.jwt}"
 OID4VP_TRUST_MODE="${OID4VP_TRUST_MODE:-trustlist}"
 
@@ -32,6 +35,7 @@ need() {
 
 need curl
 need jq
+need openssl
 if [[ "${OID4VP_TRUST_MODE}" == "trustlist" ]]; then
   need go
 fi
@@ -99,6 +103,70 @@ require_file() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
     echo "Required file not found: $path" >&2
+    exit 1
+  fi
+}
+
+realm_id() {
+  api GET "/admin/realms/${KEYCLOAK_REALM}" | jq -er '.id'
+}
+
+configure_static_realm_signing_key() {
+  local realm_id_value="$1"
+  local cert_b64 existing_id
+  cert_b64="$(openssl x509 -outform DER -in "${KEYCLOAK_SIGNING_CERT_PATH}" | base64 | tr -d '\n')"
+  existing_id="$(
+    api GET "/admin/realms/${KEYCLOAK_REALM}/components?type=org.keycloak.keys.KeyProvider" \
+      | jq -er --arg cert_b64 "$cert_b64" '
+          map(select(.providerId == "rsa"))[]
+          | select((.config.certificate[0] // "") | gsub("-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|[\\n\\r ]"; "") == $cert_b64)
+          | .id
+        ' 2>/dev/null | head -n 1 || true
+  )"
+  if [[ -n "${existing_id}" ]]; then
+    return 0
+  fi
+
+  api_json POST "/admin/realms/${KEYCLOAK_REALM}/components" \
+    "$(jq -cn \
+      --arg parent_id "${realm_id_value}" \
+      --rawfile private_key "${KEYCLOAK_SIGNING_KEY_PATH}" \
+      --rawfile certificate "${KEYCLOAK_SIGNING_CERT_PATH}" \
+      '{
+        name: "static-rsa-signing-key",
+        providerId: "rsa",
+        providerType: "org.keycloak.keys.KeyProvider",
+        parentId: $parent_id,
+        config: {
+          priority: ["1000"],
+          enabled: ["true"],
+          active: ["true"],
+          algorithm: ["RS256"],
+          privateKey: [$private_key],
+          certificate: [$certificate]
+        }
+      }')" >/dev/null
+
+  while read -r generated_id; do
+    if [[ -n "${generated_id}" ]]; then
+      api DELETE "/admin/realms/${KEYCLOAK_REALM}/components/${generated_id}" >/dev/null
+    fi
+  done < <(
+    api GET "/admin/realms/${KEYCLOAK_REALM}/components?type=org.keycloak.keys.KeyProvider" \
+      | jq -r '.[] | select(.providerId == "rsa-generated") | .id'
+  )
+}
+
+assert_static_realm_signing_key_active() {
+  local expected_cert active_cert
+  expected_cert="$(openssl x509 -outform DER -in "${KEYCLOAK_SIGNING_CERT_PATH}" | base64 | tr -d '\n')"
+  active_cert="$(
+    api GET "/admin/realms/${KEYCLOAK_REALM}/keys" \
+      | jq -er '.keys[] | select(.algorithm == "RS256" and .status == "ACTIVE") | .certificate' \
+      | head -n 1
+  )"
+  if [[ "${active_cert}" != "${expected_cert}" ]]; then
+    echo "Expected static Keycloak RS256 signing certificate to be active, but a different certificate is active." >&2
     exit 1
   fi
 }
@@ -184,6 +252,9 @@ ensure_user_profile_attribute() {
 
 require_file "${SCENARIO_DIR}/providers/keycloak-extension-oid4vp.jar"
 require_file "${SCENARIO_DIR}/providers/oid4vp-user-id-link-provider.jar"
+"${SCENARIO_DIR}/scripts/generate-keycloak-signing-cert.sh"
+require_file "${KEYCLOAK_SIGNING_KEY_PATH}"
+require_file "${KEYCLOAK_SIGNING_CERT_PATH}"
 
 DCQL_QUERY="$(jq -c -n '{
   credentials: [
@@ -224,6 +295,12 @@ fi
 echo "Creating realm ${KEYCLOAK_REALM}..."
 api_json POST "/admin/realms" \
   "$(json_payload --arg realm "$KEYCLOAK_REALM" '{realm: $realm, enabled: true, sslRequired: "NONE", verifiableCredentialsEnabled: true}')"
+
+REALM_ID="$(realm_id)"
+
+echo "Importing persistent RS256 realm signing key..."
+configure_static_realm_signing_key "${REALM_ID}"
+assert_static_realm_signing_key_active
 
 echo "Registering keycloak_user_id in the realm user profile..."
 ensure_user_profile_attribute "keycloak_user_id"
@@ -425,6 +502,7 @@ api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances" \
   "$(json_payload \
     --arg allowed_issuer "$ALLOWED_ISSUER" \
     --arg trust_list_url "$OID4VP_TRUST_LIST_URL" \
+    --arg trust_list_lote_type "$OID4VP_TRUST_LIST_LOTE_TYPE" \
     --arg trust_mode "$OID4VP_TRUST_MODE" \
     --arg dcql_query "$DCQL_QUERY" \
     --arg first_broker_flow_alias "$OID4VP_FIRST_BROKER_FLOW_ALIAS" \
@@ -452,11 +530,13 @@ api_json POST "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances" \
         x509SigningKeyJwk: "",
         trustedAuthoritiesMode: "none",
         allowedIssuers: $allowed_issuer,
+        trustListMaxCacheTtlSeconds: "0",
+        trustListMaxStaleAgeSeconds: "0",
         statusListMaxCacheTtlSeconds: "0",
         userMappingClaim: "keycloak_user_id",
         userMappingClaimMdoc: "keycloak_user_id",
         dcqlQuery: $dcql_query
-      } + (if $trust_mode == "trustlist" then {trustListUrl: $trust_list_url} else {} end))
+      } + (if $trust_mode == "trustlist" then {trustListUrl: $trust_list_url, trustListLoTEType: $trust_list_lote_type} else {} end))
     }')"
 
 echo
@@ -467,6 +547,7 @@ echo "  app_client=${APP_CLIENT_ID}"
 echo "  allowed_issuer=${ALLOWED_ISSUER}"
 if [[ "${OID4VP_TRUST_MODE}" == "trustlist" ]]; then
   echo "  trust_list_url=${OID4VP_TRUST_LIST_URL}"
+  echo "  trust_list_lote_type=${OID4VP_TRUST_LIST_LOTE_TYPE}"
 else
   echo "  trust_mode=metadata"
 fi

@@ -70,6 +70,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 			Message: "Authorization request validation failed",
 			Detail:  err.Error(),
 		})
+		s.triggerUIRequest()
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
@@ -92,6 +93,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 				Message: "HAIP 1.0 compliance check failed",
 				Detail:  strings.Join(violations, "; "),
 			})
+			s.triggerUIRequest()
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"error":             "invalid_request",
 				"error_description": "HAIP 1.0 compliance check failed: " + strings.Join(violations, "; "),
@@ -127,9 +129,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 			Message: "No matching credentials",
 			Detail:  fmt.Sprintf("Verifier %s requested credentials but none matched the query", authReq.ClientID),
 		})
-		if s.onConsentRequest != nil {
-			s.onConsentRequest(nil)
-		}
+		s.triggerUIRequest()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "no_match",
 			"error":  "no matching credentials found",
@@ -161,6 +161,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 	}
 
 	s.wallet.CreateConsentRequest(consentReq)
+	s.triggerUIRequest()
 
 	if s.onConsentRequest != nil {
 		s.onConsentRequest(consentReq)

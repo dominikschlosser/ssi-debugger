@@ -265,14 +265,34 @@ func walletImportCmd() *cobra.Command {
 // --- wallet remove ---
 
 func walletRemoveCmd() *cobra.Command {
-	return &cobra.Command{
+	var all bool
+
+	cmd := &cobra.Command{
 		Use:   "remove <id>",
 		Short: "Remove credential by ID",
-		Args:  cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) != 0 {
+					return fmt.Errorf("--all does not take a credential ID")
+				}
+				return nil
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, store, err := loadWallet()
 			if err != nil {
 				return err
+			}
+
+			if all {
+				count := len(w.GetCredentials())
+				w.Credentials = nil
+				if err := store.Save(w); err != nil {
+					return fmt.Errorf("saving wallet: %w", err)
+				}
+				fmt.Printf("Removed %d credential(s)\n", count)
+				return nil
 			}
 
 			if !w.RemoveCredential(args[0]) {
@@ -287,6 +307,8 @@ func walletRemoveCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "Remove all stored credentials")
+	return cmd
 }
 
 // --- wallet register ---

@@ -39,6 +39,7 @@ type Server struct {
 	mux              *http.ServeMux
 	onSave           func()
 	onConsentRequest func(req *ConsentRequest)
+	onUIRequest      func()
 	logFunc          func(format string, args ...any)
 	httpSrv          *http.Server
 	issuerSrv        *http.Server
@@ -171,6 +172,11 @@ func (s *Server) SetOnConsentRequest(fn func(req *ConsentRequest)) {
 	s.onConsentRequest = fn
 }
 
+// SetOnUIRequest sets a callback invoked when the interactive wallet UI should be shown.
+func (s *Server) SetOnUIRequest(fn func()) {
+	s.onUIRequest = fn
+}
+
 // SetLogger sets a logging function for verbose terminal output.
 func (s *Server) SetLogger(fn func(format string, args ...any)) {
 	s.logFunc = fn
@@ -184,6 +190,12 @@ func (s *Server) SetIssuerTLSCertificate(cert tls.Certificate) {
 func (s *Server) log(format string, args ...any) {
 	if s.logFunc != nil {
 		s.logFunc(format, args...)
+	}
+}
+
+func (s *Server) triggerUIRequest() {
+	if s.onUIRequest != nil {
+		s.onUIRequest()
 	}
 }
 
@@ -286,9 +298,7 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 			Message: "Failed to parse authorization request",
 			Detail:  err.Error(),
 		})
-		if s.onConsentRequest != nil {
-			s.onConsentRequest(nil)
-		}
+		s.triggerUIRequest()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -377,6 +387,9 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 			Message: "Credential issuance failed",
 			Detail:  err.Error(),
 		})
+		if !s.wallet.AutoAccept {
+			s.triggerUIRequest()
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -387,6 +400,9 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	s.wallet.AddLog("issuance", fmt.Sprintf("Received %s credential from %s", result.Format, result.Issuer), true)
 	s.triggerSave()
+	if !s.wallet.AutoAccept {
+		s.triggerUIRequest()
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

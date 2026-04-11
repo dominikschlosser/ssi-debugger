@@ -249,11 +249,11 @@ so the wallet automatically receives incoming protocol requests.`,
 				fmt.Printf(format+"\n", args...)
 			})
 
-			// Open browser consent UI for incoming requests when not in auto-accept mode
+			// Open browser UI for incoming interactive presentation and issuance flows.
 			if !w.AutoAccept {
-				srv.SetOnConsentRequest(func(req *wallet.ConsentRequest) {
+				srv.SetOnUIRequest(func() {
 					url := fmt.Sprintf("http://localhost:%d", port)
-					fmt.Printf("  Opening consent UI: %s\n", url)
+					fmt.Printf("  Opening wallet UI: %s\n", url)
 					openBrowser(url)
 				})
 			}

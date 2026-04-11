@@ -8,5 +8,7 @@ keycloak-ca-cert.pem
 keycloak-ca-key.pem
 keycloak-cert.pem
 keycloak-key.pem
+keycloak-signing-cert.pem
+keycloak-signing-key.pem
 wallet-ca-cert.pem
 wallet-ca-key.pem

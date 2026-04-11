@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.7] - 2026-04-12
+
+### Fixed
+
+- interactive wallet issuance after UI approval now reuses the parsed credential offer instead of refetching one-shot `credential_offer_uri` endpoints
+- wallet UI issuance approvals now surface errors correctly and refresh imported credentials immediately on success
+- Keycloak example offer links now render as the correct custom wallet schemes instead of broken sanitized browser URLs
+
+## [1.8.6] - 2026-04-12
+
+### Changed
+
+- aligned the HAIP Keycloak example structure and docs with the baseline issuer+verifier example so both are easier to compare as reference setups
+
+### Fixed
+
+- `wallet accept --auto-accept` now reuses an already running wallet server instead of conflicting on the local port
+- `wallet accept` without an explicit port now probes the standard wallet port before falling back to a one-shot server
+- HAIP example helper layout and related scripts/build wiring were cleaned up
+
 ## [1.8.5] - 2026-04-11
 
 ### Added

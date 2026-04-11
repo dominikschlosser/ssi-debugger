@@ -115,8 +115,8 @@ sequenceDiagram
 - `scripts/download-extension.sh`: downloads `keycloak-extension-oid4vp` `0.6.1`
 - `scripts/build-link-provider.sh`: builds the custom Keycloak first-broker authenticator
 - `scripts/generate-keycloak-signing-cert.sh`: creates and reuses the persistent Keycloak RS256 signing keypair
-- `scripts/generate-keycloak-trustlist.go`: generates `keycloak-trustlist.jwt` from the persistent Keycloak signing certificate
-- `scripts/generate-verifier-material.go`: generates the verifier certificate chain and ES256 signing JWK used for `x509_hash`
+- `scripts/generate-keycloak-trustlist/main.go`: generates `keycloak-trustlist.jwt` from the persistent Keycloak signing certificate
+- `scripts/generate-verifier-material/main.go`: generates the verifier certificate chain and ES256 signing JWK used for `x509_hash`
 - `scripts/bootstrap.sh`: configures issuance, verification, user profile, and HAIP verifier material
 - `scripts/start-app.sh`: starts the Go sample app
 - `scripts/smoke.py`: runs the complete password-login, issuance, redemption, and wallet-login flow

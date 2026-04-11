@@ -44,6 +44,10 @@ type mockIssuerOpts struct {
 	credentialConfigFormat string
 	// inspectCredentialRequest validates the credential request body sent by the wallet.
 	inspectCredentialRequest func(*testing.T, map[string]any)
+	// offerViaURI, if true, exposes the offer through credential_offer_uri instead of inline JSON.
+	offerViaURI bool
+	// oneShotOfferURI, if true, the credential_offer_uri succeeds once and then returns HTTP 400.
+	oneShotOfferURI bool
 }
 
 func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Server, string) {
@@ -63,6 +67,8 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 
 	// Use a closure-based handler to capture serverURL dynamically.
 	var serverURL string
+	var offerFetches int
+	var offerMu sync.Mutex
 
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch {
@@ -126,6 +132,28 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 			rw.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(rw).Encode(credResp)
 
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/credential-offer"):
+			offerMu.Lock()
+			offerFetches++
+			currentFetch := offerFetches
+			offerMu.Unlock()
+			if opts.oneShotOfferURI && currentFetch > 1 {
+				rw.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(rw).Encode(map[string]string{"error": "offer_expired"})
+				return
+			}
+			offer := map[string]any{
+				"credential_issuer":            serverURL,
+				"credential_configuration_ids": []string{"test-config"},
+				"grants": map[string]any{
+					"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+						"pre-authorized_code": "test-pre-auth-code",
+					},
+				},
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(rw).Encode(offer)
+
 		default:
 			rw.WriteHeader(http.StatusNotFound)
 		}
@@ -145,6 +173,9 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 	}
 	offerJSON, _ := json.Marshal(offer)
 	offerURI := "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
+	if opts.offerViaURI {
+		offerURI = "openid-credential-offer://?credential_offer_uri=" + url.QueryEscape(serverURL+"/credential-offer")
+	}
 
 	return srv, offerURI
 }

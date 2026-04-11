@@ -557,11 +557,24 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		replayableOfferURI, err := buildReplayableOfferURI(body.URI, offer)
+		if err != nil {
+			s.log("  ERROR: %v", err)
+			s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
+			s.wallet.NotifyError(WalletError{
+				Message: "Credential offer parsing failed",
+				Detail:  err.Error(),
+			})
+			s.triggerUIRequest()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
 		s.log("  Mode:          interactive — waiting for consent...")
 		consentReq := &ConsentRequest{
 			ID:           newConsentID(),
 			Type:         "issuance",
-			OfferURI:     body.URI,
+			OfferURI:     replayableOfferURI,
 			Status:       "pending",
 			ResultCh:     make(chan ConsentResult, 1),
 			SubmissionCh: make(chan SubmissionResult, 1),
@@ -591,7 +604,7 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 			}
 
 			s.log("  Consent:       approved")
-			result, err := s.wallet.ProcessCredentialOffer(body.URI)
+			result, err := s.wallet.ProcessCredentialOffer(consentReq.OfferURI)
 			if err != nil {
 				s.log("  ERROR: %v", err)
 				s.wallet.AddLog("issuance", fmt.Sprintf("Failed: %v", err), false)
@@ -644,6 +657,22 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	s.wallet.AddLog("issuance", fmt.Sprintf("Received %s credential from %s", result.Format, result.Issuer), true)
 	s.triggerSave()
 	writeJSON(w, http.StatusOK, result)
+}
+
+func buildReplayableOfferURI(original string, offer *oid4vc.CredentialOffer) (string, error) {
+	if offer == nil {
+		return "", fmt.Errorf("missing credential offer")
+	}
+	raw, err := json.Marshal(offer.FullJSON)
+	if err != nil {
+		return "", fmt.Errorf("serializing parsed credential offer: %w", err)
+	}
+
+	scheme := "openid-credential-offer://"
+	if strings.HasPrefix(strings.TrimSpace(original), "haip-vci://") {
+		scheme = "haip-vci://"
+	}
+	return scheme + "?credential_offer=" + url.QueryEscape(string(raw)), nil
 }
 
 // handleListCredentials returns all stored credentials.

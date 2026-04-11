@@ -375,6 +375,11 @@
         });
         const result = await resp.json();
         if (isIssuance) {
+          if (!resp.ok || result.error || (result.status_code && result.status_code >= 400)) {
+            const detail = result.error || ('HTTP ' + (result.status_code || resp.status));
+            showErrorDialog('Credential issuance failed', detail);
+            return;
+          }
           consentOverlay.classList.remove('active');
           await loadCredentials();
           await loadLog();

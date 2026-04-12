@@ -43,11 +43,8 @@
         {
           "name": "keycloak-user-id-mapper",
           "protocol": "oid4vc",
-          "protocolMapper": "oid4vc-user-attribute-mapper",
-          "config": {
-            "claim.name": "keycloak_user_id",
-            "userAttribute": "keycloak_user_id"
-          }
+          "protocolMapper": "oid4vc-user-id-claim-mapper",
+          "config": {}
         },
         {
           "name": "given-name-mapper",

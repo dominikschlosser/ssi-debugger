@@ -376,6 +376,9 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	reqServer.log("  Client ID:     %s", parsed.ClientID)
 	reqServer.log("  Response Mode: %s", parsed.ResponseMode)
 	reqServer.log("  Response URI:  %s", parsed.ResponseURI)
+	if parsed.State != "" {
+		reqServer.log("  State:         %s", parsed.State)
+	}
 	if parsed.Nonce != "" {
 		reqServer.log("  Nonce:         %s", parsed.Nonce)
 	}

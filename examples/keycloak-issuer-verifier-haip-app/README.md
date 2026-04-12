@@ -12,7 +12,7 @@ The example stays on local HTTP to keep the setup small. In a production-style d
 
 ## How It Works
 
-The static realm import provides the stable parts of the example. `bootstrap.sh` fills in the runtime parts: the persistent Keycloak signing key, the generated trust list, the verifier certificate chain and signing key for `x509_hash`, and the real `keycloak_user_id` value for `alice`.
+The static realm import provides the stable parts of the example. `bootstrap.sh` fills in the runtime parts: the persistent Keycloak signing key, the generated trust list, and the verifier certificate chain and signing key for `x509_hash`.
 
 The UI follows the same structure as the baseline example: Go handlers in `app/main.go`, templates in `app/templates/`, and CSS in `app/static/`.
 

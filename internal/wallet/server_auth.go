@@ -315,6 +315,9 @@ func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *Author
 	}
 
 	s.log("  Submitting authorization error to %s", responseURI)
+	if authReq.State != "" {
+		s.log("  State:         %s", authReq.State)
+	}
 
 	params := PresentationParams{
 		Nonce:          authReq.Nonce,
@@ -369,6 +372,9 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 	}
 
 	s.log("  Submitting VP token to %s", responseURI)
+	if authReq.State != "" {
+		s.log("  State:         %s", authReq.State)
+	}
 
 	prepared, err := s.preparePresentation(authReq, matches)
 	if err != nil {

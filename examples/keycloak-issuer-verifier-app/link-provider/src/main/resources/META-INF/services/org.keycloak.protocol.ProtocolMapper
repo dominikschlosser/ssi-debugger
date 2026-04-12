@@ -1,1 +1,2 @@
 dev.oid4vc.examples.keycloak.LoginTypeProtocolMapper
+dev.oid4vc.examples.keycloak.Oid4vcUserIDClaimMapper

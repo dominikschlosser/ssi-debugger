@@ -13,7 +13,7 @@ The issuance flow is the same in both modes. The only difference is how wallet-l
 
 ## How It Works
 
-The static realm import provides the stable parts of the example. `bootstrap.sh` fills in the runtime parts: the persistent RS256 signing key, the generated trust list in HTTP mode, and the real `keycloak_user_id` value for `alice`.
+The static realm import provides the stable parts of the example. `bootstrap.sh` fills in the runtime parts: the persistent RS256 signing key, the generated trust list in HTTP mode, and the HTTP-only admin setting for the local demo.
 
 ### Trust Modes
 

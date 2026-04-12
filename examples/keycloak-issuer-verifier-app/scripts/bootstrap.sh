@@ -174,38 +174,13 @@ assert_static_realm_signing_key_active() {
   fi
 }
 
-ensure_user_profile_attribute() {
-  local attribute_name="$1"
-  local profile_json
-  local updated_profile_json
-
-  profile_json="$(api GET "/admin/realms/${KEYCLOAK_REALM}/users/profile")"
-  updated_profile_json="$(
-    printf '%s' "$profile_json" | jq -c --arg attribute_name "$attribute_name" '
-      if any(.attributes[]?; .name == $attribute_name) then
-        .
-      else
-        .attributes += [{
-          name: $attribute_name,
-          displayName: "Keycloak user id",
-          permissions: {
-            view: ["admin"],
-            edit: ["admin"]
-          },
-          multivalued: false
-        }]
-      end
-    '
-  )"
-  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/profile" "$updated_profile_json" >/dev/null
-}
-
-set_user_keycloak_id() {
-  local user_id="$1"
-  local user_rep
-  user_rep="$(api GET "/admin/realms/${KEYCLOAK_REALM}/users/${user_id}")"
-  api_json PUT "/admin/realms/${KEYCLOAK_REALM}/users/${user_id}" \
-    "$(printf '%s' "$user_rep" | jq -c --arg user_id "$user_id" '.attributes.keycloak_user_id = [$user_id]')" >/dev/null
+set_realm_ssl_required() {
+  local realm_name="$1"
+  local ssl_required="$2"
+  local realm_rep
+  realm_rep="$(api GET "/admin/realms/${realm_name}")"
+  api_json PUT "/admin/realms/${realm_name}" \
+    "$(printf '%s' "$realm_rep" | jq -c --arg ssl_required "$ssl_required" '.sslRequired = $ssl_required')" >/dev/null
 }
 
 set_user_password() {
@@ -276,13 +251,10 @@ echo "Importing persistent RS256 realm signing key..."
 configure_static_realm_signing_key "${REALM_ID}"
 assert_static_realm_signing_key_active
 
-echo "Registering keycloak_user_id in the realm user profile..."
-ensure_user_profile_attribute "keycloak_user_id"
-
 USER_ID="$(lookup_user_id "${OID4VCI_USER}")"
 
-echo "Persisting the Keycloak user ID as keycloak_user_id..."
-set_user_keycloak_id "${USER_ID}"
+echo "Allowing the master admin UI over HTTP for the local demo..."
+set_realm_ssl_required "master" "NONE"
 
 echo "Setting password for ${OID4VCI_USER}..."
 set_user_password "${USER_ID}"

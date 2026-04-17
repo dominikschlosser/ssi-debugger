@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCENARIO_DIR}/../.." && pwd)"
+source "${REPO_ROOT}/examples/lib/public-ngrok.sh"
+example_load_env_files "${REPO_ROOT}/.env" "${SCENARIO_DIR}/.env"
 
 KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-http://localhost:8080}"
 KEYCLOAK_ADMIN="${KEYCLOAK_ADMIN:-admin}"
@@ -15,13 +18,17 @@ OID4VCI_USER="${OID4VCI_USER:-alice}"
 OID4VCI_USER_PASSWORD="${OID4VCI_USER_PASSWORD:-alice}"
 OID4VCI_CREDENTIAL_SCOPE="${OID4VCI_CREDENTIAL_SCOPE:-membership-credential}"
 APP_CLIENT_ID="${APP_CLIENT_ID:-wallet-app}"
-APP_REDIRECT_URI="${APP_REDIRECT_URI:-http://127.0.0.1:8090/callback}"
+APP_BASE_URL="${APP_BASE_URL:-http://127.0.0.1:8090}"
+APP_REDIRECT_URI="${APP_REDIRECT_URI:-${APP_BASE_URL%/}/callback}"
 OID4VP_FIRST_BROKER_FLOW_ALIAS="${OID4VP_FIRST_BROKER_FLOW_ALIAS:-oid4vp-user-id-auto-link}"
 ALLOWED_ISSUER="${ALLOWED_ISSUER:-${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}}"
 OID4VP_TRUST_LIST_URL="${OID4VP_TRUST_LIST_URL:-http://host.docker.internal:8090/keycloak-trustlist.jwt}"
 OID4VP_TRUST_LIST_LOTE_TYPE="${OID4VP_TRUST_LIST_LOTE_TYPE:-http://uri.etsi.org/19602/LoTEType/local}"
 KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH:-${SCENARIO_DIR}/keycloak-trustlist.jwt}"
 OID4VP_TRUST_MODE="${OID4VP_TRUST_MODE:-trustlist}"
+OID4VP_PUBLIC_WALLET="${OID4VP_PUBLIC_WALLET:-false}"
+OID4VP_SANDBOX_PEM_PATH="${OID4VP_SANDBOX_PEM_PATH:-}"
+OID4VP_SANDBOX_VERIFIER_INFO_PATH="${OID4VP_SANDBOX_VERIFIER_INFO_PATH:-}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -101,6 +108,13 @@ require_file() {
   if [[ ! -f "$path" ]]; then
     echo "Required file not found: $path" >&2
     exit 1
+  fi
+}
+
+optional_file() {
+  local path="$1"
+  if [[ -n "${path}" ]] && [[ -f "${path}" ]]; then
+    printf '%s\n' "${path}"
   fi
 }
 
@@ -195,6 +209,24 @@ set_user_password() {
 
 update_identity_provider() {
   local instance_json
+  local sandbox_pem_path=""
+  local sandbox_verifier_info_path=""
+  local public_wallet_flag="false"
+
+  if [[ "${OID4VP_PUBLIC_WALLET}" == "true" ]]; then
+    public_wallet_flag="true"
+    sandbox_pem_path="$(
+      optional_file "${OID4VP_SANDBOX_PEM_PATH}" \
+        || example_find_sandbox_pem "${REPO_ROOT}" "${SCENARIO_DIR}" \
+        || true
+    )"
+    sandbox_verifier_info_path="$(
+      optional_file "${OID4VP_SANDBOX_VERIFIER_INFO_PATH}" \
+        || example_find_sandbox_verifier_info "${REPO_ROOT}" "${SCENARIO_DIR}" \
+        || true
+    )"
+  fi
+
   instance_json="$(
     api GET "/admin/realms/${KEYCLOAK_REALM}/identity-provider/instances/oid4vp" \
       | jq -c \
@@ -203,15 +235,31 @@ update_identity_provider() {
         --arg trust_list_lote_type "$OID4VP_TRUST_LIST_LOTE_TYPE" \
         --arg trust_mode "$OID4VP_TRUST_MODE" \
         --arg dcql_query "$DCQL_QUERY" \
-        --arg first_broker_flow_alias "$OID4VP_FIRST_BROKER_FLOW_ALIAS" '
+        --arg first_broker_flow_alias "$OID4VP_FIRST_BROKER_FLOW_ALIAS" \
+        --arg public_wallet_flag "$public_wallet_flag" \
+        --rawfile sandbox_pem "${sandbox_pem_path}" \
+        --rawfile verifier_info "${sandbox_verifier_info_path}" '
           .firstBrokerLoginFlowAlias = $first_broker_flow_alias
           | .config.allowedIssuers = $allowed_issuer
+          | .config.sameDeviceEnabled = "true"
+          | .config.crossDeviceEnabled = (if $public_wallet_flag == "true" then "true" else (.config.crossDeviceEnabled // "false") end)
           | .config.dcqlQuery = $dcql_query
           | if $trust_mode == "trustlist" then
               .config.trustListUrl = $trust_list_url
               | .config.trustListLoTEType = $trust_list_lote_type
             else
               .config |= del(.trustListUrl, .trustListLoTEType)
+            end
+          | if $public_wallet_flag == "true" and ($sandbox_pem | length) > 0 then
+              .config.clientIdScheme = "x509_san_dns"
+              | .config.x509CertificatePem = $sandbox_pem
+            else
+              .
+            end
+          | if $public_wallet_flag == "true" and ($verifier_info | length) > 0 then
+              .config.verifierInfo = $verifier_info
+            else
+              .
             end
         '
   )"
@@ -289,3 +337,12 @@ fi
 echo "  credential_configuration_id=${OID4VCI_CREDENTIAL_SCOPE}"
 echo "  first_broker_flow=${OID4VP_FIRST_BROKER_FLOW_ALIAS}"
 echo "  app_redirect_uri=${APP_REDIRECT_URI}"
+if [[ "${OID4VP_PUBLIC_WALLET}" == "true" ]]; then
+  echo "  cross_device_enabled=true"
+  if [[ -n "$(optional_file "${OID4VP_SANDBOX_PEM_PATH}" || example_find_sandbox_pem "${REPO_ROOT}" "${SCENARIO_DIR}" || true)" ]]; then
+    echo "  verifier_cert=sandbox"
+  fi
+  if [[ -n "$(optional_file "${OID4VP_SANDBOX_VERIFIER_INFO_PATH}" || example_find_sandbox_verifier_info "${REPO_ROOT}" "${SCENARIO_DIR}" || true)" ]]; then
+    echo "  verifier_info=sandbox"
+  fi
+fi

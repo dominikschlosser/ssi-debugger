@@ -2,11 +2,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+source "${REPO_ROOT}/examples/lib/public-ngrok.sh"
+example_load_env_files "${REPO_ROOT}/.env" "${SCRIPT_DIR}/.env"
 APP_PID=""
+PROXY_PID=""
 compose_args=(-f docker-compose.yml)
 transport="http"
 trust_mode="trustlist"
 cleanup_enabled="false"
+public_mode="false"
+keycloak_ngrok_domain="${KEYCLOAK_NGROK_DOMAIN:-${NGROK_DOMAIN:-}}"
+public_proxy_port="${PUBLIC_PROXY_PORT:-18090}"
+ngrok_override=""
 
 ensure_oid4vc_dev() {
   if command -v oid4vc-dev >/dev/null 2>&1; then
@@ -31,13 +39,15 @@ ensure_oid4vc_dev() {
 
 usage() {
   cat <<'EOF'
-Usage: ./start.sh [--http|--https] [--setup-only|--smoke]
+Usage: ./start.sh [--http|--https] [--setup-only|--smoke] [--public] [--keycloak-domain <name>]
 
   default      Same as --http: start Keycloak on http://localhost:8080, bootstrap the realm, and start the demo app
   --http       Use http://localhost:8080 and a custom trust list for verifier trust
   --https      Use https://localhost:8443 and issuer metadata for verifier trust
   --smoke      Run the full headless smoke flow after setup
   --setup-only Download/build dependencies, start Keycloak, and bootstrap the realm only
+  --public     Publish both Keycloak and the demo app through one ngrok HTTPS hostname
+  --keycloak-domain  Fixed ngrok hostname (otherwise detect from sandbox cert SAN when available)
 EOF
 }
 
@@ -46,13 +56,21 @@ cleanup() {
     kill "${APP_PID}" >/dev/null 2>&1 || true
     wait "${APP_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${PROXY_PID}" ]]; then
+    kill "${PROXY_PID}" >/dev/null 2>&1 || true
+    wait "${PROXY_PID}" >/dev/null 2>&1 || true
+  fi
   if [[ "${cleanup_enabled}" == "true" ]]; then
     docker compose "${compose_args[@]}" down --remove-orphans >/dev/null 2>&1 || true
   fi
+  if [[ -n "${ngrok_override}" ]]; then
+    rm -f "${ngrok_override}" >/dev/null 2>&1 || true
+  fi
+  example_stop_ngrok
 }
 
 wait_for_app() {
-  local app_base_url="${APP_BASE_URL:-http://127.0.0.1:8090}"
+  local app_base_url="http://${APP_HOST:-127.0.0.1}:${APP_PORT:-8090}"
   local health_url="${app_base_url}/healthz"
   for _ in $(seq 1 60); do
     if curl -fsS "${health_url}" >/dev/null 2>&1; then
@@ -64,11 +82,40 @@ wait_for_app() {
   exit 1
 }
 
+wait_for_proxy() {
+  local proxy_url="http://127.0.0.1:${public_proxy_port}/"
+  local status=""
+
+  for _ in $(seq 1 40); do
+    if [[ -n "${PROXY_PID}" ]] && ! kill -0 "${PROXY_PID}" 2>/dev/null; then
+      echo "Public reverse proxy exited before becoming ready." >&2
+      exit 1
+    fi
+    status="$(curl -s -o /dev/null -w '%{http_code}' "${proxy_url}" || true)"
+    if [[ "${status}" =~ ^(200|302|400|401|403|404|502)$ ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "Public reverse proxy did not become ready at ${proxy_url}" >&2
+  exit 1
+}
+
 mode="app"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --setup-only) mode="setup-only" ;;
     --smoke) mode="smoke" ;;
+    --public) public_mode="true" ;;
+    --keycloak-domain)
+      keycloak_ngrok_domain="$2"
+      shift
+      ;;
+    --domain)
+      keycloak_ngrok_domain="$2"
+      shift
+      ;;
     --http)
       transport="http"
       trust_mode="trustlist"
@@ -95,18 +142,54 @@ ensure_oid4vc_dev
 ./scripts/download-extension.sh
 ./scripts/build-link-provider.sh
 
-case "${transport}" in
-  http)
-    export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-http://localhost:8080}"
-    compose_args=(-f docker-compose.yml)
-    ;;
-  https)
-    export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-https://localhost:8443}"
-    export KEYCLOAK_CA_CERT="${KEYCLOAK_CA_CERT:-${SCRIPT_DIR}/keycloak-ca-cert.pem}"
-    ./scripts/generate-keycloak-cert.sh
-    compose_args=(-f docker-compose.yml -f docker-compose.https.yml)
-    ;;
-esac
+if [[ "${public_mode}" == "true" ]]; then
+  export OID4VP_PUBLIC_WALLET="true"
+  export OID4VP_SANDBOX_PEM_PATH="${OID4VP_SANDBOX_PEM_PATH:-$(example_find_sandbox_pem "${REPO_ROOT}" "${SCRIPT_DIR}" || true)}"
+  export OID4VP_SANDBOX_VERIFIER_INFO_PATH="${OID4VP_SANDBOX_VERIFIER_INFO_PATH:-$(example_find_sandbox_verifier_info "${REPO_ROOT}" "${SCRIPT_DIR}" || true)}"
+  if [[ -z "${keycloak_ngrok_domain}" ]]; then
+    keycloak_ngrok_domain="$(example_env_keycloak_ngrok_domain || true)"
+  fi
+  detected_domain="$(example_default_ngrok_domain "${REPO_ROOT}" "${SCRIPT_DIR}" "" || true)"
+  if [[ -n "${detected_domain}" ]] && [[ "${detected_domain}" != "${keycloak_ngrok_domain}" ]]; then
+    echo "Using ngrok hostname from sandbox certificate SAN: ${detected_domain}"
+    keycloak_ngrok_domain="${detected_domain}"
+  fi
+  (
+    cd "${REPO_ROOT}"
+    exec go run ./examples/lib/single-host-proxy \
+      --listen "127.0.0.1:${public_proxy_port}" \
+      --app "http://127.0.0.1:8090" \
+      --keycloak "http://127.0.0.1:8080"
+  ) &
+  PROXY_PID=$!
+  wait_for_proxy
+  public_base_url="$(example_start_ngrok_tunnel "keycloak-issuer-verifier-app-public" "${public_proxy_port}" "${keycloak_ngrok_domain}")"
+  export KEYCLOAK_BASE_URL="${public_base_url}"
+  export APP_BASE_URL="${public_base_url}"
+  export APP_REDIRECT_URI="${public_base_url%/}/callback"
+  export OID4VP_TRUST_LIST_URL="${public_base_url%/}/keycloak-trustlist.jwt"
+  export ALLOWED_ISSUER="${public_base_url%/}/realms/${KEYCLOAK_REALM:-wallet-app-demo}"
+  unset KEYCLOAK_CA_CERT
+  compose_args=(-f docker-compose.yml)
+  ngrok_override="${SCRIPT_DIR}/docker-compose.ngrok.override.yml"
+  example_write_keycloak_public_override "${ngrok_override}" "${KEYCLOAK_BASE_URL}"
+  compose_args+=(-f "${ngrok_override}")
+  echo "Public URL: ${public_base_url}"
+else
+  export OID4VP_PUBLIC_WALLET="false"
+  case "${transport}" in
+    http)
+      export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-http://localhost:8080}"
+      compose_args=(-f docker-compose.yml)
+      ;;
+    https)
+      export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-https://localhost:8443}"
+      export KEYCLOAK_CA_CERT="${KEYCLOAK_CA_CERT:-${SCRIPT_DIR}/keycloak-ca-cert.pem}"
+      ./scripts/generate-keycloak-cert.sh
+      compose_args=(-f docker-compose.yml -f docker-compose.https.yml)
+      ;;
+  esac
+fi
 
 export OID4VP_TRUST_MODE="${OID4VP_TRUST_MODE:-${trust_mode}}"
 export KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH:-${SCRIPT_DIR}/keycloak-trustlist.jwt}"

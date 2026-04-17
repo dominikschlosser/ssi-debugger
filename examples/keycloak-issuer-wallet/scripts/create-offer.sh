@@ -18,8 +18,16 @@ need() {
 need curl
 need jq
 
+curl_common() {
+  if [[ "${KEYCLOAK_BASE_URL}" == https://* ]] && [[ -n "${KEYCLOAK_CA_CERT:-}" ]] && [[ -f "${KEYCLOAK_CA_CERT}" ]]; then
+    curl --cacert "${KEYCLOAK_CA_CERT}" "$@"
+  else
+    curl "$@"
+  fi
+}
+
 USER_TOKEN="$(
-  curl -fsS \
+  curl_common -fsS \
     -X POST "${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=password" \
@@ -30,14 +38,26 @@ USER_TOKEN="$(
 )"
 
 OFFER_JSON="$(
-  curl -fsS \
+  curl_common -fsS \
     -H "Authorization: Bearer ${USER_TOKEN}" \
     "${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}/protocol/oid4vc/create-credential-offer?credential_configuration_id=${OID4VCI_CREDENTIAL_SCOPE}&pre_authorized=true&type=uri"
 )"
 
 ISSUER="$(printf '%s' "$OFFER_JSON" | jq -er '.issuer')"
 NONCE="$(printf '%s' "$OFFER_JSON" | jq -er '.nonce')"
-RAW_OFFER_URI="${ISSUER%/}/${NONCE#/}"
-ENCODED_OFFER_URI="$(jq -rn --arg uri "$RAW_OFFER_URI" '$uri|@uri')"
+PUBLIC_ISSUER="$(
+  jq -rn \
+    --arg issuer "${ISSUER}" \
+    --arg base "${KEYCLOAK_BASE_URL%/}" \
+    '$issuer | sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/]+"; $base)'
+)"
+RAW_OFFER_URI="${PUBLIC_ISSUER%/}/${NONCE#/}"
+INLINE_OFFER_JSON="$(
+  curl_common -fsS "${RAW_OFFER_URI}" \
+    | jq -c --arg base "${KEYCLOAK_BASE_URL%/}" '
+        .credential_issuer |= sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/]+"; $base)
+      '
+)"
+ENCODED_OFFER_JSON="$(jq -rn --arg offer "$INLINE_OFFER_JSON" '$offer|@uri')"
 
-printf 'openid-credential-offer://?credential_offer_uri=%s\n' "$ENCODED_OFFER_URI"
+printf 'openid-credential-offer://?credential_offer=%s\n' "$ENCODED_OFFER_JSON"

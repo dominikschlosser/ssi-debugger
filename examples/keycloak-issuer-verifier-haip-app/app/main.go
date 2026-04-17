@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"io/fs"
 	"log"
@@ -20,6 +23,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/makiuchi-d/gozxing"
+	"github.com/makiuchi-d/gozxing/qrcode"
 )
 
 //go:embed templates/*.html static/*
@@ -69,6 +75,8 @@ type issuePageData struct {
 	WalletUIURL   string
 	OfferHref     template.URL
 	OfferURI      string
+	OfferPayload  string
+	QRCodeDataURL template.URL
 	AcceptCommand string
 	HasOffer      bool
 }
@@ -276,15 +284,12 @@ func prettyJSON(value any) string {
 	return string(raw)
 }
 
-func wrapCredentialOfferURI(rawOfferURI string, walletScheme string) (string, error) {
-	rawOfferURI = strings.TrimSpace(rawOfferURI)
-	if rawOfferURI == "" {
-		return "", fmt.Errorf("credential offer URI missing in Keycloak response")
+func wrapCredentialOfferJSON(rawOfferJSON string, walletScheme string) (string, error) {
+	rawOfferJSON = strings.TrimSpace(rawOfferJSON)
+	if rawOfferJSON == "" {
+		return "", fmt.Errorf("credential offer JSON missing")
 	}
-	if strings.HasPrefix(rawOfferURI, "openid-credential-offer://") || strings.HasPrefix(rawOfferURI, "haip-vci://") {
-		return rawOfferURI, nil
-	}
-	return walletScheme + "?credential_offer_uri=" + url.QueryEscape(rawOfferURI), nil
+	return walletScheme + "?credential_offer=" + url.QueryEscape(rawOfferJSON), nil
 }
 
 func walletOfferHref(raw string) (template.URL, error) {
@@ -300,6 +305,93 @@ func walletOfferHref(raw string) (template.URL, error) {
 	default:
 		return "", fmt.Errorf("unexpected wallet offer scheme: %s", parsed.Scheme)
 	}
+}
+
+func credentialOfferPayload(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	inline := strings.TrimSpace(parsed.Query().Get("credential_offer"))
+	if inline == "" {
+		if target := strings.TrimSpace(parsed.Query().Get("credential_offer_uri")); target != "" {
+			return target
+		}
+		return raw
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(inline), &decoded); err != nil {
+		return inline
+	}
+	return prettyJSON(decoded)
+}
+
+func qrCodeDataURL(content string) (template.URL, error) {
+	matrix, err := qrcode.NewQRCodeWriter().Encode(content, gozxing.BarcodeFormat_QR_CODE, 320, 320, nil)
+	if err != nil {
+		return "", fmt.Errorf("encoding QR code: %w", err)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, matrix.GetWidth(), matrix.GetHeight()))
+	light := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	dark := color.RGBA{R: 15, G: 23, B: 42, A: 255}
+	for y := 0; y < matrix.GetHeight(); y++ {
+		for x := 0; x < matrix.GetWidth(); x++ {
+			if matrix.Get(x, y) {
+				img.Set(x, y, dark)
+				continue
+			}
+			img.Set(x, y, light)
+		}
+	}
+
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		return "", fmt.Errorf("encoding QR PNG: %w", err)
+	}
+
+	// #nosec G203 -- this is a generated in-memory PNG data URL, not user input.
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBuf.Bytes())), nil
+}
+
+func rewriteOfferIssuer(rawIssuer, publicBase string) (string, error) {
+	issuerURL, err := url.Parse(strings.TrimSpace(rawIssuer))
+	if err != nil {
+		return "", fmt.Errorf("parsing issuer URL: %w", err)
+	}
+	publicURL, err := url.Parse(strings.TrimSpace(publicBase))
+	if err != nil {
+		return "", fmt.Errorf("parsing public base URL: %w", err)
+	}
+	if issuerURL.Scheme == "" || issuerURL.Host == "" {
+		return "", fmt.Errorf("issuer URL missing scheme or host")
+	}
+	issuerURL.Scheme = publicURL.Scheme
+	issuerURL.Host = publicURL.Host
+	return strings.TrimRight(issuerURL.String(), "/"), nil
+}
+
+func rewriteCredentialOfferForPublic(rawOffer map[string]any, publicBase string) (string, error) {
+	cloned := make(map[string]any, len(rawOffer))
+	for key, value := range rawOffer {
+		cloned[key] = value
+	}
+	if issuer, _ := cloned["credential_issuer"].(string); strings.TrimSpace(issuer) != "" {
+		publicIssuer, err := rewriteOfferIssuer(issuer, publicBase)
+		if err != nil {
+			return "", err
+		}
+		cloned["credential_issuer"] = publicIssuer
+	}
+	encoded, err := json.Marshal(cloned)
+	if err != nil {
+		return "", fmt.Errorf("encoding credential offer JSON: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func (s *server) createOfferURI(accessToken string) (string, error) {
@@ -319,7 +411,20 @@ func (s *server) createOfferURI(accessToken string) (string, error) {
 	if strings.TrimSpace(issuer) == "" || strings.TrimSpace(nonce) == "" {
 		return "", fmt.Errorf("unexpected Keycloak credential offer response: expected JSON with issuer and nonce")
 	}
-	return wrapCredentialOfferURI(strings.TrimRight(issuer, "/")+"/"+strings.TrimLeft(nonce, "/"), "haip-vci://")
+	publicIssuer, err := rewriteOfferIssuer(issuer, s.cfg.KeycloakBaseURL)
+	if err != nil {
+		return "", err
+	}
+	publicOfferURI := publicIssuer + "/" + strings.TrimLeft(nonce, "/")
+	offerPayload, err := s.jsonRequest(http.MethodGet, publicOfferURI, nil, nil)
+	if err != nil {
+		return "", fmt.Errorf("fetching credential offer JSON: %w", err)
+	}
+	inlineOffer, err := rewriteCredentialOfferForPublic(offerPayload, s.cfg.KeycloakBaseURL)
+	if err != nil {
+		return "", err
+	}
+	return wrapCredentialOfferJSON(inlineOffer, "haip-vci://")
 }
 
 func (s *server) createLoginURL(mode string) (string, error) {
@@ -592,11 +697,18 @@ func (s *server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	qrDataURL, err := qrCodeDataURL(offerURI)
+	if err != nil {
+		s.writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.renderTemplate(w, http.StatusOK, "issue.html", issuePageData{
 		Title:         "Membership Credential Offer",
 		WalletUIURL:   s.cfg.WalletUIURL,
 		OfferHref:     offerHref,
 		OfferURI:      offerURI,
+		OfferPayload:  credentialOfferPayload(offerURI),
+		QRCodeDataURL: qrDataURL,
 		AcceptCommand: "oid4vc-dev wallet accept '" + offerURI + "'",
 		HasOffer:      true,
 	})

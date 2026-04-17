@@ -15,11 +15,12 @@ REPO_ROOT="$(cd "${SCENARIO_DIR}/../.." && pwd)"
 need go
 export APP_HOST="${APP_HOST:-127.0.0.1}"
 export APP_PORT="${APP_PORT:-8091}"
+export APP_BASE_URL="${APP_BASE_URL:-http://127.0.0.1:${APP_PORT}}"
 export KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
 export KEYCLOAK_REALM="${KEYCLOAK_REALM:-wallet-haip-demo}"
 export OID4VCI_CREDENTIAL_SCOPE="${OID4VCI_CREDENTIAL_SCOPE:-membership-credential}"
 export APP_CLIENT_ID="${APP_CLIENT_ID:-wallet-haip-app}"
-export APP_REDIRECT_URI="${APP_REDIRECT_URI:-http://127.0.0.1:${APP_PORT}/callback}"
+export APP_REDIRECT_URI="${APP_REDIRECT_URI:-${APP_BASE_URL%/}/callback}"
 export KEYCLOAK_TRUST_LIST_PATH="${KEYCLOAK_TRUST_LIST_PATH:-${SCENARIO_DIR}/keycloak-trustlist.jwt}"
 
 cd "${REPO_ROOT}"

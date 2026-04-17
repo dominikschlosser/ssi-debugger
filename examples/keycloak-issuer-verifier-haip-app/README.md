@@ -41,7 +41,7 @@ sequenceDiagram
     U->>APP: Issue membership credential
     APP->>KC: create-credential-offer
     KC-->>APP: issuer + nonce
-    APP->>W: haip-vci://...?credential_offer_uri=...
+    APP->>W: haip-vci://...?credential_offer=...
     W->>KC: redeem credential
     KC-->>W: sd-jwt credential with keycloak_user_id
 
@@ -70,10 +70,10 @@ sequenceDiagram
     APP->>KC: GET /realms/wallet-haip-demo/protocol/oid4vc/create-credential-offer?credential_configuration_id=membership-credential&pre_authorized=true&type=uri
     Note over APP,KC: Authorization: Bearer <wallet-haip-app access_token>
     KC-->>APP: {issuer, nonce}
-    APP-->>U: HTML page with haip-vci://?credential_offer_uri=...
+    APP->>KC: GET public credential-offer URI once
+    APP-->>U: HTML page with haip-vci://?credential_offer=...
 
-    U->>W: wallet accept 'haip-vci://...?credential_offer_uri=...'
-    W->>KC: GET /realms/wallet-haip-demo/protocol/oid4vc/credential-offer/{nonce}
+    U->>W: wallet accept 'haip-vci://...?credential_offer=...'
     W->>KC: GET /realms/wallet-haip-demo/.well-known/openid-credential-issuer
     W->>KC: POST /realms/wallet-haip-demo/protocol/oid4vc/credential
     Note over W,KC: pre-authorized flow<br/>proof.jwt=...
@@ -123,6 +123,17 @@ sequenceDiagram
 - `app/main.go`: sample application routes and OIDC flow handling
 - `app/templates/`: external HTML templates for the demo UI
 - `app/static/`: CSS for the demo UI
+
+## Why Inline `credential_offer`
+
+This example uses the OpenID4VCI by-value `credential_offer` form instead of handing wallets a `credential_offer_uri`.
+
+- OpenID4VCI allows both by-value and by-reference offers.
+- The Keycloak `create-credential-offer` endpoint in 26.6 creates an internal offer URI and does not directly return by-value JSON.
+- Some external wallets dereference `credential_offer_uri` more than once across parse and issuance steps.
+- Current Keycloak behavior for that generated offer URI is effectively one-shot in this flow, so the second fetch fails with `invalid_credential_offer_request`.
+- The example therefore resolves the offer once server-side and gives the wallet an inline `credential_offer=...` URI instead.
+- The demo realm also omits `vc.credential_identifier`, so wallets that still request credentials by `credential_configuration_id` continue to interoperate. With that attribute set, Keycloak 26.6 requires a final `credential_identifier` field on the credential request.
 
 ## Quick Start
 

@@ -239,7 +239,7 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	}
 	s.store.Add(entry)
 
-	if s.writer != nil {
+	if s.writer != nil && (entry.Class != ClassUnknown || s.config.AllTraffic) {
 		s.writer.WriteEntry(entry)
 	}
 

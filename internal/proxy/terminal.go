@@ -17,6 +17,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -173,35 +174,38 @@ func hasKeyPrefix(keys []string, prefix string) bool {
 }
 
 func buildRenderedSections(entry *TrafficEntry) []renderedSection {
-	if entry.Decoded == nil {
-		return nil
+	var sections []renderedSection
+	if shouldRenderRawRequest(entry) {
+		sections = appendSection(sections, "request headers", sortedRenderedFields(headerFieldsForDisplay(entry.RequestHeaders), entry.Class, "request_headers"))
+		sections = appendSection(sections, "request body", sortedRenderedFields(rawBodyFields(entry.RequestBody), entry.Class, "request_body"))
 	}
 
-	var sections []renderedSection
-	switch entry.Class {
-	case ClassVCITokenRequest, ClassOIDCTokenRequest:
-		sections = appendSection(sections, "request", sortedRenderedFields(filterMap(entry.Decoded, "response"), entry.Class, "request"))
-		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
-	case ClassVCICredentialRequest:
-		sections = appendSection(sections, "request", sortedRenderedFields(mapValue(entry.Decoded, "request"), entry.Class, "request"))
-		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
-		sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "request", "response"), entry.Class, "derived"))
-	case ClassVCINonceRequest:
-		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
-		sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "response", "c_nonce"), entry.Class, "derived"))
-	case ClassVCIMetadata, ClassOIDCMetadata:
-		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "metadata"), entry.Class, "response"))
-	case ClassVPRequestObject:
-		sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "wallet_metadata", "wallet_nonce"), entry.Class, "request"))
-		sections = appendSection(sections, "response", sortedRenderedFields(pickKeys(entry.Decoded, "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "response"))
-		sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "wallet_metadata", "wallet_nonce", "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "derived"))
-	case ClassVPAuthResponse:
-		sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "request"))
-		sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "derived"))
-	case ClassVPAuthRequest, ClassOIDCAuthRequest, ClassVCICredentialOffer, ClassOIDCCallback:
-		sections = appendSection(sections, "request", sortedRenderedFields(entry.Decoded, entry.Class, "request"))
-	default:
-		sections = appendSection(sections, "derived", sortedRenderedFields(entry.Decoded, entry.Class, "derived"))
+	if entry.Decoded != nil {
+		switch entry.Class {
+		case ClassVCITokenRequest, ClassOIDCTokenRequest:
+			sections = appendSection(sections, "request", sortedRenderedFields(filterMap(entry.Decoded, "response"), entry.Class, "request"))
+			sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+		case ClassVCICredentialRequest:
+			sections = appendSection(sections, "request", sortedRenderedFields(mapValue(entry.Decoded, "request"), entry.Class, "request"))
+			sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+			sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "request", "response"), entry.Class, "derived"))
+		case ClassVCINonceRequest:
+			sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+			sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "response", "c_nonce"), entry.Class, "derived"))
+		case ClassVCIMetadata, ClassOIDCMetadata:
+			sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "metadata"), entry.Class, "response"))
+		case ClassVPRequestObject:
+			sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "wallet_metadata", "wallet_nonce"), entry.Class, "request"))
+			sections = appendSection(sections, "response", sortedRenderedFields(pickKeys(entry.Decoded, "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "response"))
+			sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "wallet_metadata", "wallet_nonce", "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "derived"))
+		case ClassVPAuthResponse:
+			sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "request"))
+			sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "derived"))
+		case ClassVPAuthRequest, ClassOIDCAuthRequest, ClassVCICredentialOffer, ClassOIDCCallback:
+			sections = appendSection(sections, "request", sortedRenderedFields(entry.Decoded, entry.Class, "request"))
+		default:
+			sections = appendSection(sections, "derived", sortedRenderedFields(entry.Decoded, entry.Class, "derived"))
+		}
 	}
 
 	return sections
@@ -233,6 +237,9 @@ func printDecodeSection(credentials, labels []string, dashboardPort int) {
 }
 
 func sortedRenderedFields(fields map[string]any, class TrafficClass, section string) []renderedField {
+	if len(fields) == 0 {
+		return nil
+	}
 	keys := sortedFieldKeys(fields, class, section)
 	rendered := make([]renderedField, 0, len(keys))
 	for _, key := range keys {
@@ -259,6 +266,10 @@ func sortedFieldKeys(fields map[string]any, class TrafficClass, section string) 
 
 func fieldPriority(key string, class TrafficClass, section string) int {
 	priorities := map[string]int{
+		"Host":                    5,
+		"Authorization":           6,
+		"DPoP":                    7,
+		"Content-Type":            8,
 		"grant_type":              10,
 		"client_id":               20,
 		"code":                    30,
@@ -303,6 +314,45 @@ func fieldPriority(key string, class TrafficClass, section string) int {
 	}
 
 	return 1000
+}
+
+func shouldRenderRawRequest(entry *TrafficEntry) bool {
+	switch entry.Method {
+	case "POST", "PUT", "PATCH":
+		return true
+	default:
+		return entry.RequestBody != ""
+	}
+}
+
+func headerFieldsForDisplay(headers http.Header) map[string]any {
+	if len(headers) == 0 {
+		return nil
+	}
+	fields := make(map[string]any)
+	for key, values := range headers {
+		if strings.HasPrefix(strings.ToLower(key), "x-proxy-") {
+			continue
+		}
+		if len(values) == 1 {
+			fields[key] = values[0]
+			continue
+		}
+		copied := make([]string, len(values))
+		copy(copied, values)
+		fields[key] = copied
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func rawBodyFields(body string) map[string]any {
+	if body == "" {
+		return nil
+	}
+	return map[string]any{"body": body}
 }
 
 func filterMap(m map[string]any, skipKeys ...string) map[string]any {

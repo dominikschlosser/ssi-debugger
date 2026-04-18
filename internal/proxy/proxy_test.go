@@ -212,28 +212,16 @@ func TestServerClassifiesVPAuthRequest(t *testing.T) {
 	}
 }
 
-func TestServerDoesNotWriteUnknownTrafficWhenAllTrafficDisabled(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-	}))
-	defer backend.Close()
-
-	targetURL, _ := url.Parse(backend.URL)
-	var captured []*TrafficEntry
-	writer := &testWriter{entries: &captured}
-
-	srv := NewServer(Config{TargetURL: targetURL, AllTraffic: false}, writer)
-	proxy := httptest.NewServer(srv)
-	defer proxy.Close()
-
-	resp, err := http.Get(proxy.URL + "/resources/img/keycloak-bg.jpg")
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+func TestShouldEmitEntrySuppressesUnknownWithoutAllTraffic(t *testing.T) {
+	entry := &TrafficEntry{Class: ClassUnknown}
+	if shouldEmitEntry(entry, false) {
+		t.Fatal("expected unknown traffic to be suppressed when allTraffic=false")
 	}
-	resp.Body.Close()
-
-	if len(captured) != 0 {
-		t.Fatalf("expected unknown traffic to be suppressed, got %d entries", len(captured))
+	if !shouldEmitEntry(entry, true) {
+		t.Fatal("expected unknown traffic to be emitted when allTraffic=true")
+	}
+	if !shouldEmitEntry(&TrafficEntry{Class: ClassVPAuthRequest}, false) {
+		t.Fatal("expected classified traffic to be emitted")
 	}
 }
 

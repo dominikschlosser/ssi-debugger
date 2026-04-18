@@ -237,11 +237,19 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	} else {
 		Classify(entry)
 	}
+	if !shouldEmitEntry(entry, s.config.AllTraffic) {
+		return nil
+	}
+
 	s.store.Add(entry)
 
-	if s.writer != nil && (entry.Class != ClassUnknown || s.config.AllTraffic) {
+	if s.writer != nil {
 		s.writer.WriteEntry(entry)
 	}
 
 	return nil
+}
+
+func shouldEmitEntry(entry *TrafficEntry, allTraffic bool) bool {
+	return allTraffic || entry.Class != ClassUnknown
 }

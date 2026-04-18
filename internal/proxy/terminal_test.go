@@ -17,6 +17,7 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -196,6 +197,10 @@ func TestPrintEntryGroupsRequestResponseAndDecodeSections(t *testing.T) {
 		StatusCode: 200,
 		Class:      ClassVCITokenRequest,
 		ClassLabel: "VCI Token Request",
+		RequestHeaders: http.Header{
+			"Content-Type": {"application/x-www-form-urlencoded"},
+		},
+		RequestBody: "grant_type=authorization_code&code=abc123",
 		Decoded: map[string]any{
 			"client_id":     "wallet-app",
 			"grant_type":    "authorization_code",
@@ -230,6 +235,9 @@ func TestPrintEntryGroupsRequestResponseAndDecodeSections(t *testing.T) {
 	if !strings.Contains(output, "\n\n  decode:\n") {
 		t.Fatalf("expected blank line before decode section, got %q", output)
 	}
+	if !strings.Contains(output, "  request headers:\n") || !strings.Contains(output, "  request body:\n") {
+		t.Fatalf("expected raw request sections for POST, got %q", output)
+	}
 	if strings.Index(output, "grant_type: authorization_code") > strings.Index(output, "code_verifier: verifier") {
 		t.Fatalf("expected prioritized request field order, got %q", output)
 	}
@@ -241,6 +249,37 @@ func TestPrintEntryGroupsRequestResponseAndDecodeSections(t *testing.T) {
 	}
 	if !strings.Contains(output, "refresh_token: http://localhost:9091/decode?credential=refresh-value") {
 		t.Fatalf("expected working decode URL for refresh token, got %q", output)
+	}
+}
+
+func TestPrintEntryShowsPostHeadersAndBodyButFiltersInternalHeaders(t *testing.T) {
+	entry := &TrafficEntry{
+		Method:     "POST",
+		URL:        "http://issuer.example/credential",
+		StatusCode: 200,
+		Class:      ClassVCICredentialRequest,
+		ClassLabel: "VCI Credential Request",
+		RequestHeaders: http.Header{
+			"Authorization":   {"DPoP token-123"},
+			"Content-Type":    {"application/json"},
+			"X-Proxy-ReqBody": {"internal"},
+		},
+		RequestBody: `{"credential_identifier":"membership-credential_0000"}`,
+	}
+
+	output := captureOutput(t, func() { PrintEntry(entry, 0) })
+
+	if !strings.Contains(output, "  request headers:\n") {
+		t.Fatalf("expected request headers section, got %q", output)
+	}
+	if !strings.Contains(output, "Authorization: DPoP token-123") {
+		t.Fatalf("expected authorization header in output, got %q", output)
+	}
+	if !strings.Contains(output, "  request body:\n") || !strings.Contains(output, `body: {"credential_identifier":"membership-credential_0000"}`) {
+		t.Fatalf("expected request body section, got %q", output)
+	}
+	if strings.Contains(output, "X-Proxy-ReqBody") {
+		t.Fatalf("expected internal proxy headers to be hidden, got %q", output)
 	}
 }
 

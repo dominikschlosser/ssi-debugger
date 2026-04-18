@@ -23,8 +23,6 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-
-	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 var (
@@ -152,7 +150,7 @@ func flowSummary(entry *TrafficEntry) string {
 		if label == "" || value == "" {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", label, format.Truncate(value, 32)))
+		parts = append(parts, fmt.Sprintf("%s=%s", label, value))
 		if len(parts) == 3 {
 			break
 		}
@@ -404,7 +402,7 @@ func printDecodedField(key string, val any, depth int) {
 	case string:
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)
-		valueColor.Println(format.Truncate(v, 120))
+		valueColor.Println(v)
 	default:
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)

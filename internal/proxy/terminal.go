@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -39,11 +40,28 @@ var (
 type TerminalWriter struct {
 	AllTraffic    bool
 	DashboardPort int // if > 0, print /decode links
+	lastFlowID    string
+}
+
+type renderedField struct {
+	key string
+	val any
+}
+
+type renderedSection struct {
+	title  string
+	fields []renderedField
 }
 
 func (tw *TerminalWriter) WriteEntry(entry *TrafficEntry) {
 	if entry.Class == ClassUnknown && !tw.AllTraffic {
 		return
+	}
+	if entry.FlowID != "" && entry.FlowID != tw.lastFlowID {
+		printFlowHeader(entry)
+		tw.lastFlowID = entry.FlowID
+	} else if entry.FlowID == "" {
+		tw.lastFlowID = ""
 	}
 	PrintEntry(entry, tw.DashboardPort)
 }
@@ -53,13 +71,11 @@ func (tw *TerminalWriter) WriteEntry(entry *TrafficEntry) {
 func PrintEntry(entry *TrafficEntry, dashboardPort int) {
 	ts := entry.Timestamp.Format("15:04:05")
 
-	// Status color
 	statusFn := successColor.Sprintf
 	if entry.StatusCode >= 400 {
 		statusFn = errorColor.Sprintf
 	}
 
-	// Header line
 	fmt.Printf("%s %s %s %s  %s  %s\n",
 		dimColor.Sprint("━━━"),
 		dimColor.Sprintf("[%s]", ts),
@@ -69,23 +85,261 @@ func PrintEntry(entry *TrafficEntry, dashboardPort int) {
 		classColor.Sprintf("[%s]", entry.ClassLabel),
 	)
 
-	// Decoded fields
-	if entry.Decoded != nil {
-		for key, val := range entry.Decoded {
-			printDecodedField(key, val, 1)
+	sections := buildRenderedSections(entry)
+	if len(sections) > 0 {
+		fmt.Println()
+		for i, section := range sections {
+			printSection(section)
+			if i < len(sections)-1 {
+				fmt.Println()
+			}
 		}
 	}
 
-	// Decode commands for detected credentials
-	for i, cred := range entry.Credentials {
-		label := ""
-		if i < len(entry.CredentialLabels) {
-			label = entry.CredentialLabels[i]
+	if len(entry.Credentials) > 0 {
+		if len(sections) > 0 {
+			fmt.Println()
 		}
-		printDecodeHint(cred, label, dashboardPort)
+		printDecodeSection(entry.Credentials, entry.CredentialLabels, dashboardPort)
 	}
 
 	fmt.Println()
+	fmt.Println()
+}
+
+func printFlowHeader(entry *TrafficEntry) {
+	title := flowTitle(entry)
+	summary := flowSummary(entry)
+
+	fmt.Printf("%s %s  %s\n",
+		dimColor.Sprint("═══"),
+		classColor.Sprintf("[%s]", entry.FlowID),
+		headerColor.Sprint(title),
+	)
+	if summary != "" {
+		dimColor.Printf("    %s\n\n", summary)
+	} else {
+		fmt.Println()
+	}
+}
+
+func flowTitle(entry *TrafficEntry) string {
+	keys := ExtractCorrelationKeys(entry)
+	if hasKeyPrefix(keys, "vp:") || strings.HasPrefix(entry.ClassLabel, "VP") {
+		return "VP Flow"
+	}
+	if hasKeyPrefix(keys, "vci:pre-authorized_code:") {
+		return "VCI Pre-Authorized Flow"
+	}
+	if hasKeyPrefix(keys, "vci:") && (hasKeyPrefix(keys, "oauth:code:") || entry.Class == ClassOIDCAuthRequest || entry.Class == ClassOIDCTokenRequest || entry.Class == ClassOIDCCallback) {
+		return "VCI Authorization Code Flow"
+	}
+	if hasKeyPrefix(keys, "vci:") || strings.HasPrefix(entry.ClassLabel, "VCI") {
+		return "VCI Flow"
+	}
+	if hasKeyPrefix(keys, "oidc:") || strings.HasPrefix(entry.ClassLabel, "OIDC") {
+		return "OIDC Flow"
+	}
+	return "Flow"
+}
+
+func flowSummary(entry *TrafficEntry) string {
+	keys := ExtractCorrelationKeys(entry)
+	parts := make([]string, 0, 3)
+	for _, key := range keys {
+		label, value := describeFlowKey(key)
+		if label == "" || value == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", label, format.Truncate(value, 32)))
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
+func describeFlowKey(key string) (string, string) {
+	return describeCorrelationKey(key)
+}
+
+func hasKeyPrefix(keys []string, prefix string) bool {
+	for _, key := range keys {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildRenderedSections(entry *TrafficEntry) []renderedSection {
+	if entry.Decoded == nil {
+		return nil
+	}
+
+	var sections []renderedSection
+	switch entry.Class {
+	case ClassVCITokenRequest, ClassOIDCTokenRequest:
+		sections = appendSection(sections, "request", sortedRenderedFields(filterMap(entry.Decoded, "response"), entry.Class, "request"))
+		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+	case ClassVCICredentialRequest:
+		sections = appendSection(sections, "request", sortedRenderedFields(mapValue(entry.Decoded, "request"), entry.Class, "request"))
+		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+		sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "request", "response"), entry.Class, "derived"))
+	case ClassVCINonceRequest:
+		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "response"), entry.Class, "response"))
+		sections = appendSection(sections, "derived", sortedRenderedFields(filterMap(entry.Decoded, "response", "c_nonce"), entry.Class, "derived"))
+	case ClassVCIMetadata, ClassOIDCMetadata:
+		sections = appendSection(sections, "response", sortedRenderedFields(mapValue(entry.Decoded, "metadata"), entry.Class, "response"))
+	case ClassVPRequestObject:
+		sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "wallet_metadata", "wallet_nonce"), entry.Class, "request"))
+		sections = appendSection(sections, "response", sortedRenderedFields(pickKeys(entry.Decoded, "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "response"))
+		sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "wallet_metadata", "wallet_nonce", "header", "payload", "encrypted", "encryption_alg", "encryption_enc", "encryption_jwks", "wallet_nonce_in_response"), entry.Class, "derived"))
+	case ClassVPAuthResponse:
+		sections = appendSection(sections, "request", sortedRenderedFields(pickKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "request"))
+		sections = appendSection(sections, "derived", sortedRenderedFields(excludeKeys(entry.Decoded, "response_preview", "vp_token_preview", "id_token_preview", "state", "presentation_submission"), entry.Class, "derived"))
+	case ClassVPAuthRequest, ClassOIDCAuthRequest, ClassVCICredentialOffer, ClassOIDCCallback:
+		sections = appendSection(sections, "request", sortedRenderedFields(entry.Decoded, entry.Class, "request"))
+	default:
+		sections = appendSection(sections, "derived", sortedRenderedFields(entry.Decoded, entry.Class, "derived"))
+	}
+
+	return sections
+}
+
+func appendSection(sections []renderedSection, title string, fields []renderedField) []renderedSection {
+	if len(fields) == 0 {
+		return sections
+	}
+	return append(sections, renderedSection{title: title, fields: fields})
+}
+
+func printSection(section renderedSection) {
+	labelColor.Printf("  %s:\n", section.title)
+	for _, field := range section.fields {
+		printDecodedField(field.key, field.val, 2)
+	}
+}
+
+func printDecodeSection(credentials, labels []string, dashboardPort int) {
+	labelColor.Printf("  decode:\n")
+	for i, credential := range credentials {
+		label := ""
+		if i < len(labels) {
+			label = labels[i]
+		}
+		printDecodeHint(credential, label, dashboardPort)
+	}
+}
+
+func sortedRenderedFields(fields map[string]any, class TrafficClass, section string) []renderedField {
+	keys := sortedFieldKeys(fields, class, section)
+	rendered := make([]renderedField, 0, len(keys))
+	for _, key := range keys {
+		rendered = append(rendered, renderedField{key: key, val: fields[key]})
+	}
+	return rendered
+}
+
+func sortedFieldKeys(fields map[string]any, class TrafficClass, section string) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		pi := fieldPriority(keys[i], class, section)
+		pj := fieldPriority(keys[j], class, section)
+		if pi != pj {
+			return pi < pj
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func fieldPriority(key string, class TrafficClass, section string) int {
+	priorities := map[string]int{
+		"grant_type":              10,
+		"client_id":               20,
+		"code":                    30,
+		"pre-authorized_code":     40,
+		"tx_code":                 50,
+		"code_verifier":           60,
+		"redirect_uri":            70,
+		"scope":                   80,
+		"state":                   90,
+		"nonce":                   100,
+		"response_type":           110,
+		"response_mode":           120,
+		"token_type":              130,
+		"expires_in":              140,
+		"refresh_expires_in":      150,
+		"c_nonce":                 160,
+		"authorization_details":   170,
+		"access_token":            180,
+		"refresh_token":           190,
+		"id_token":                200,
+		"credential":              210,
+		"credentials":             220,
+		"credential_decoded":      230,
+		"vp_token_preview":        240,
+		"id_token_preview":        250,
+		"response_preview":        260,
+		"presentation_submission": 270,
+		"response_payload":        280,
+		"vp_token_decoded":        290,
+		"id_token_header":         300,
+		"id_token_payload":        310,
+		"header":                  320,
+		"payload":                 330,
+		"metadata":                340,
+	}
+
+	if priority, ok := priorities[key]; ok {
+		if section == "response" && (class == ClassVCIMetadata || class == ClassOIDCMetadata) {
+			return priority - 200
+		}
+		return priority
+	}
+
+	return 1000
+}
+
+func filterMap(m map[string]any, skipKeys ...string) map[string]any {
+	skip := make(map[string]struct{}, len(skipKeys))
+	for _, key := range skipKeys {
+		skip[key] = struct{}{}
+	}
+
+	filtered := make(map[string]any)
+	for key, value := range m {
+		if _, ok := skip[key]; ok {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
+}
+
+func pickKeys(m map[string]any, wantedKeys ...string) map[string]any {
+	picked := make(map[string]any)
+	for _, key := range wantedKeys {
+		if value, ok := m[key]; ok {
+			picked[key] = value
+		}
+	}
+	return picked
+}
+
+func excludeKeys(m map[string]any, excludedKeys ...string) map[string]any {
+	return filterMap(m, excludedKeys...)
+}
+
+func mapValue(m map[string]any, key string) map[string]any {
+	if value, ok := m[key].(map[string]any); ok {
+		return value
+	}
+	return nil
 }
 
 func printDecodedField(key string, val any, depth int) {
@@ -94,15 +348,14 @@ func printDecodedField(key string, val any, depth int) {
 	switch v := val.(type) {
 	case map[string]any:
 		labelColor.Printf("%s┌ %s:\n", prefix, key)
-		for k, inner := range v {
-			printDecodedField(k, inner, depth+1)
+		for _, k := range sortedFieldKeys(v, ClassUnknown, "nested") {
+			printDecodedField(k, v[k], depth+1)
 		}
 	case string:
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)
 		valueColor.Println(format.Truncate(v, 120))
 	default:
-		// Marshal slices, nested maps, etc. as indented JSON
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)
 		if b, err := json.MarshalIndent(val, prefix+"  ", "  "); err == nil {
@@ -114,21 +367,27 @@ func printDecodedField(key string, val any, depth int) {
 }
 
 func printDecodeHint(credential, label string, dashboardPort int) {
+	prefix := strings.Repeat("  ", 2)
+
 	if dashboardPort > 0 {
-		url := fmt.Sprintf("http://localhost:%d/decode?credential=%s", dashboardPort, url.QueryEscape(credential))
+		decodeURL := fmt.Sprintf("http://localhost:%d/decode?credential=%s", dashboardPort, url.QueryEscape(credential))
+		dimColor.Printf("%s┌ ", prefix)
 		if label != "" {
-			dimColor.Printf("  → %s: ", label)
+			dimColor.Printf("%s: ", label)
 		} else {
-			dimColor.Print("  → Decode: ")
+			dimColor.Print("link: ")
 		}
-		fmt.Println(url)
-	} else {
-		dimColor.Printf("  → oid4vc-dev decode")
-		if label != "" {
-			dimColor.Printf("  (%s)", label)
-		}
-		dimColor.Println()
+		fmt.Println(decodeURL)
+		return
 	}
+
+	dimColor.Printf("%s┌ ", prefix)
+	if label != "" {
+		dimColor.Printf("%s: ", label)
+	} else {
+		dimColor.Print("link: ")
+	}
+	dimColor.Println("oid4vc-dev decode")
 }
 
 func truncateURL(u string, maxLen int) string {

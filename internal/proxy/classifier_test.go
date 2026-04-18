@@ -1044,6 +1044,78 @@ func TestExtractCorrelationKeyVCICredentialRequestNoAuth(t *testing.T) {
 	}
 }
 
+func TestExtractCorrelationKeysVPAuthRequestIncludesRequestURI(t *testing.T) {
+	entry := &TrafficEntry{
+		Method: "GET",
+		URL:    "http://example.com/authorize?client_id=test&response_type=vp_token&request_uri=https%3A%2F%2Fverifier.example%2Freq%2F123",
+		Class:  ClassVPAuthRequest,
+	}
+
+	keys := ExtractCorrelationKeys(entry)
+	if !containsString(keys, "vp:request_uri:https://verifier.example/req/123") {
+		t.Fatalf("expected request_uri correlation key, got %v", keys)
+	}
+}
+
+func TestExtractCorrelationKeysVPAuthResponseUsesDecryptedState(t *testing.T) {
+	entry := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: "response=encrypted-jarm",
+		Class:       ClassVPAuthResponse,
+		Decoded: map[string]any{
+			"response_payload": map[string]any{"state": "request-123"},
+		},
+	}
+
+	keys := ExtractCorrelationKeys(entry)
+	if !containsString(keys, "vp:state:request-123") {
+		t.Fatalf("expected decrypted state correlation key, got %v", keys)
+	}
+}
+
+func TestExtractCorrelationKeysVCITokenResponseIncludesAccessTokenAndCredentialIdentifiers(t *testing.T) {
+	entry := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/token",
+		RequestBody: "grant_type=authorization_code&code=auth-code-456",
+		Class:       ClassVCITokenRequest,
+		Decoded: map[string]any{
+			"response": map[string]any{
+				"access_token": "token-123",
+				"authorization_details": []any{
+					map[string]any{
+						"credential_configuration_id": "membership-credential",
+						"credential_identifiers": []any{
+							"membership-credential_0000",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	keys := ExtractCorrelationKeys(entry)
+	if !containsString(keys, "oauth:code:auth-code-456") {
+		t.Fatalf("expected code correlation key, got %v", keys)
+	}
+	if !containsString(keys, "vci:access_token:token-123") {
+		t.Fatalf("expected access token correlation key, got %v", keys)
+	}
+	if !containsString(keys, "vci:credential_identifier:membership-credential_0000") {
+		t.Fatalf("expected credential identifier correlation key, got %v", keys)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // --- decodeJARMResponse with CEK decryption ---
 
 func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {

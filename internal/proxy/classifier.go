@@ -697,8 +697,8 @@ func parseFormOrJSON(body string) map[string]string {
 	return result
 }
 
-// ExtractCorrelationKey returns a state or nonce value that can be used
-// to group related protocol entries into a flow. Returns "" if no key found.
+// ExtractCorrelationKey returns the first correlation key for backward compatibility.
+// Prefer ExtractCorrelationKeys for flow grouping.
 func ExtractCorrelationKey(entry *TrafficEntry) string {
 	u, _ := url.Parse(entry.URL)
 
@@ -714,7 +714,6 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 		}
 
 	case ClassVPRequestObject:
-		// Look for state/nonce in the decoded JWT payload
 		if entry.Decoded != nil {
 			if payload, ok := entry.Decoded["payload"].(map[string]any); ok {
 				if v, ok := payload["state"].(string); ok && v != "" {
@@ -731,6 +730,13 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 		if v, ok := fields["state"]; ok && v != "" {
 			return v
 		}
+		if entry.Decoded != nil {
+			if payload, ok := entry.Decoded["response_payload"].(map[string]any); ok {
+				if v, ok := payload["state"].(string); ok && v != "" {
+					return v
+				}
+			}
+		}
 
 	case ClassVCITokenRequest:
 		fields := parseFormOrJSON(entry.RequestBody)
@@ -742,15 +748,10 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 		}
 
 	case ClassVCINonceRequest:
-		if auth := entry.RequestHeaders.Get("Authorization"); auth != "" {
-			return auth
-		}
+		return entry.RequestHeaders.Get("Authorization")
 
 	case ClassVCICredentialRequest:
-		// Correlate via access token (Authorization header)
-		if auth := entry.RequestHeaders.Get("Authorization"); auth != "" {
-			return auth
-		}
+		return entry.RequestHeaders.Get("Authorization")
 
 	case ClassOIDCAuthRequest:
 		if u != nil {
@@ -781,14 +782,12 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 	case ClassVCICredentialOffer:
 		if u != nil {
 			if offer := u.Query().Get("credential_offer"); offer != "" {
-				var m map[string]any
-				if err := json.Unmarshal([]byte(offer), &m); err == nil {
-					if grants, ok := m["grants"].(map[string]any); ok {
-						if preAuth, ok := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any); ok {
-							if code, ok := preAuth["pre-authorized_code"].(string); ok && code != "" {
-								return code
-							}
-						}
+				var keys []string
+				appendVCIOfferKeys(&keys, offer)
+				for _, key := range keys {
+					label, value := describeCorrelationKey(key)
+					if label == "pre-authorized_code" {
+						return value
 					}
 				}
 			}
@@ -796,6 +795,252 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 	}
 
 	return ""
+}
+
+// ExtractCorrelationKeys returns all correlation aliases that can be used to
+// group related protocol entries into the same flow.
+func ExtractCorrelationKeys(entry *TrafficEntry) []string {
+	u, _ := url.Parse(entry.URL)
+	var keys []string
+
+	switch entry.Class {
+	case ClassVPAuthRequest:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				keys = append(keys, "vp:state:"+v)
+			}
+			if v := u.Query().Get("nonce"); v != "" {
+				keys = append(keys, "vp:nonce:"+v)
+			}
+			if v := u.Query().Get("request_uri"); v != "" {
+				keys = append(keys, "vp:request_uri:"+v)
+			}
+		}
+
+	case ClassVPRequestObject:
+		if u != nil && u.String() != "" {
+			keys = append(keys, "vp:request_uri:"+u.String())
+		}
+		// Look for state/nonce in the decoded JWT payload
+		if entry.Decoded != nil {
+			if payload, ok := entry.Decoded["payload"].(map[string]any); ok {
+				if v, ok := payload["state"].(string); ok && v != "" {
+					keys = append(keys, "vp:state:"+v)
+				}
+				if v, ok := payload["nonce"].(string); ok && v != "" {
+					keys = append(keys, "vp:nonce:"+v)
+				}
+				if v, ok := payload["response_uri"].(string); ok && v != "" {
+					keys = append(keys, "vp:response_uri:"+v)
+				}
+			}
+		}
+
+	case ClassVPAuthResponse:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["state"]; ok && v != "" {
+			keys = append(keys, "vp:state:"+v)
+		}
+		if entry.Decoded != nil {
+			if payload, ok := entry.Decoded["response_payload"].(map[string]any); ok {
+				if v, ok := payload["state"].(string); ok && v != "" {
+					keys = append(keys, "vp:state:"+v)
+				}
+			}
+		}
+		if u != nil && u.String() != "" {
+			keys = append(keys, "vp:response_uri:"+u.String())
+		}
+
+	case ClassVCITokenRequest:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["pre-authorized_code"]; ok && v != "" {
+			keys = append(keys, "vci:pre-authorized_code:"+v)
+		}
+		if v, ok := fields["code"]; ok && v != "" {
+			keys = append(keys, "oauth:code:"+v)
+		}
+		if v, ok := fields["issuer_state"]; ok && v != "" {
+			keys = append(keys, "vci:issuer_state:"+v)
+		}
+		if entry.Decoded != nil {
+			appendVCITokenResponseKeys(&keys, entry.Decoded["response"])
+		}
+
+	case ClassVCINonceRequest:
+		appendAuthorizationKey(&keys, entry.RequestHeaders.Get("Authorization"))
+
+	case ClassVCICredentialRequest:
+		appendAuthorizationKey(&keys, entry.RequestHeaders.Get("Authorization"))
+		if entry.Decoded != nil {
+			appendVCICredentialKeys(&keys, entry.Decoded["request"])
+			appendVCICredentialKeys(&keys, entry.Decoded["response"])
+		}
+
+	case ClassOIDCAuthRequest:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				keys = append(keys, "oidc:state:"+v)
+			}
+			if v := u.Query().Get("nonce"); v != "" {
+				keys = append(keys, "oidc:nonce:"+v)
+			}
+			if v := u.Query().Get("issuer_state"); v != "" {
+				keys = append(keys, "vci:issuer_state:"+v)
+			}
+		}
+
+	case ClassOIDCTokenRequest:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["code"]; ok && v != "" {
+			keys = append(keys, "oauth:code:"+v)
+		}
+		if v, ok := fields["issuer_state"]; ok && v != "" {
+			keys = append(keys, "vci:issuer_state:"+v)
+		}
+		if entry.Decoded != nil {
+			appendVCITokenResponseKeys(&keys, entry.Decoded["response"])
+		}
+
+	case ClassOIDCCallback:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				keys = append(keys, "oidc:state:"+v)
+			}
+			if v := u.Query().Get("code"); v != "" {
+				keys = append(keys, "oauth:code:"+v)
+			}
+		}
+
+	case ClassVCICredentialOffer:
+		if u != nil {
+			if offer := u.Query().Get("credential_offer"); offer != "" {
+				appendVCIOfferKeys(&keys, offer)
+			}
+			if offerURI := u.Query().Get("credential_offer_uri"); offerURI != "" {
+				keys = append(keys, "vci:credential_offer_uri:"+offerURI)
+			}
+		}
+	}
+
+	return uniqueStrings(keys)
+}
+
+func appendAuthorizationKey(keys *[]string, auth string) {
+	if auth == "" {
+		return
+	}
+	token := normalizeAuthorizationToken(auth)
+	if token == "" {
+		return
+	}
+	*keys = append(*keys, "vci:access_token:"+token)
+}
+
+func appendVCIOfferKeys(keys *[]string, rawOffer string) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(rawOffer), &m); err != nil {
+		return
+	}
+	if issuer, ok := m["credential_issuer"].(string); ok && issuer != "" {
+		*keys = append(*keys, "vci:credential_issuer:"+issuer)
+	}
+	if grants, ok := m["grants"].(map[string]any); ok {
+		if preAuth, ok := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any); ok {
+			if code, ok := preAuth["pre-authorized_code"].(string); ok && code != "" {
+				*keys = append(*keys, "vci:pre-authorized_code:"+code)
+			}
+			if issuerState, ok := preAuth["issuer_state"].(string); ok && issuerState != "" {
+				*keys = append(*keys, "vci:issuer_state:"+issuerState)
+			}
+		}
+		if authCode, ok := grants["authorization_code"].(map[string]any); ok {
+			if issuerState, ok := authCode["issuer_state"].(string); ok && issuerState != "" {
+				*keys = append(*keys, "vci:issuer_state:"+issuerState)
+			}
+		}
+	}
+}
+
+func appendVCITokenResponseKeys(keys *[]string, raw any) {
+	resp, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if token, ok := resp["access_token"].(string); ok && token != "" {
+		*keys = append(*keys, "vci:access_token:"+token)
+	}
+	appendVCICredentialKeys(keys, resp)
+}
+
+func appendVCICredentialKeys(keys *[]string, raw any) {
+	body, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if v, ok := body["credential_identifier"].(string); ok && v != "" {
+		*keys = append(*keys, "vci:credential_identifier:"+v)
+	}
+	if v, ok := body["credential_configuration_id"].(string); ok && v != "" {
+		*keys = append(*keys, "vci:credential_configuration_id:"+v)
+	}
+	if authDetails, ok := body["authorization_details"].([]any); ok {
+		for _, item := range authDetails {
+			obj, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if v, ok := obj["credential_configuration_id"].(string); ok && v != "" {
+				*keys = append(*keys, "vci:credential_configuration_id:"+v)
+			}
+			if ids, ok := obj["credential_identifiers"].([]any); ok {
+				for _, id := range ids {
+					if s, ok := id.(string); ok && s != "" {
+						*keys = append(*keys, "vci:credential_identifier:"+s)
+					}
+				}
+			}
+		}
+	}
+}
+
+func normalizeAuthorizationToken(auth string) string {
+	auth = strings.TrimSpace(auth)
+	if auth == "" {
+		return ""
+	}
+	parts := strings.Fields(auth)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return auth
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func describeCorrelationKey(key string) (string, string) {
+	parts := strings.SplitN(key, ":", 3)
+	if len(parts) != 3 {
+		return "", key
+	}
+	return parts[1], parts[2]
 }
 
 // extractCredentials pulls raw credential strings from the entry so the

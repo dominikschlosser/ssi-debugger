@@ -49,12 +49,18 @@ func (s *Store) Add(entry *TrafficEntry) {
 	entry.ID = s.nextID
 
 	// Flow correlation
-	if key := ExtractCorrelationKey(entry); key != "" {
-		if flowID, ok := s.flows[key]; ok {
-			entry.FlowID = flowID
-		} else {
+	if keys := ExtractCorrelationKeys(entry); len(keys) > 0 {
+		for _, key := range keys {
+			if flowID, ok := s.flows[key]; ok {
+				entry.FlowID = flowID
+				break
+			}
+		}
+		if entry.FlowID == "" {
 			s.nextFlowID++
 			entry.FlowID = fmt.Sprintf("flow-%d", s.nextFlowID)
+		}
+		for _, key := range keys {
 			s.flows[key] = entry.FlowID
 		}
 	}

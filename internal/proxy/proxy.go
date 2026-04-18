@@ -43,15 +43,17 @@ type Server struct {
 	rewriter *Rewriter
 	proxy    *httputil.ReverseProxy
 	writer   EntryWriter
+	classify *StatefulClassifier
 	scanner  *OutputScanner // optional: scans subprocess stdout for keys/credentials
 }
 
 // NewServer creates a new debugging reverse proxy server.
 func NewServer(cfg Config, writer EntryWriter) *Server {
 	s := &Server{
-		config: cfg,
-		store:  NewStore(1000),
-		writer: writer,
+		config:   cfg,
+		store:    NewStore(1000),
+		writer:   writer,
+		classify: NewStatefulClassifier(),
 	}
 
 	proxyHost := fmt.Sprintf("localhost:%d", cfg.ProxyPort)
@@ -230,7 +232,11 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		DebugJWK:        debugJWK,
 	}
 
-	Classify(entry)
+	if s.classify != nil {
+		s.classify.Classify(entry)
+	} else {
+		Classify(entry)
+	}
 	s.store.Add(entry)
 
 	if s.writer != nil {

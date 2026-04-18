@@ -131,6 +131,7 @@ ensure_oid4vc_dev
 ./scripts/build-link-provider.sh
 
 if [[ "${public_mode}" == "true" ]]; then
+  public_proxy_port="$(example_resolve_free_port "${public_proxy_port}" "public proxy")"
   export OID4VP_PUBLIC_WALLET="true"
   export OID4VP_SANDBOX_PEM_PATH="${OID4VP_SANDBOX_PEM_PATH:-$(example_find_sandbox_pem "${REPO_ROOT}" "${SCRIPT_DIR}" || true)}"
   export OID4VP_SANDBOX_VERIFIER_INFO_PATH="${OID4VP_SANDBOX_VERIFIER_INFO_PATH:-$(example_find_sandbox_verifier_info "${REPO_ROOT}" "${SCRIPT_DIR}" || true)}"

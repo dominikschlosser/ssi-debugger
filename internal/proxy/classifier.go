@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/web"
@@ -30,6 +31,38 @@ func Classify(entry *TrafficEntry) {
 	entry.ClassLabel = entry.Class.Label()
 	entry.Decoded = decodeEntry(entry)
 	entry.Credentials, entry.CredentialLabels = extractCredentials(entry)
+}
+
+// StatefulClassifier learns advertised protocol endpoints from earlier traffic
+// so later dynamic requests can be classified without relying on fixed paths.
+type StatefulClassifier struct {
+	mu        sync.Mutex
+	endpoints map[string]TrafficClass
+}
+
+func NewStatefulClassifier() *StatefulClassifier {
+	return &StatefulClassifier{
+		endpoints: make(map[string]TrafficClass),
+	}
+}
+
+func (c *StatefulClassifier) Classify(entry *TrafficEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	class := classifyEntry(entry)
+	if class == ClassUnknown {
+		if learned, ok := c.endpoints[endpointKeyFromRawURL(entry.URL)]; ok {
+			class = learned
+		}
+	}
+
+	entry.Class = class
+	entry.ClassLabel = entry.Class.Label()
+	entry.Decoded = decodeEntry(entry)
+	entry.Credentials, entry.CredentialLabels = extractCredentials(entry)
+
+	c.learn(entry)
 }
 
 func classifyEntry(e *TrafficEntry) TrafficClass {
@@ -46,14 +79,29 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 		return ClassVCIMetadata
 	}
 
+	// OIDC: .well-known/openid-configuration
+	if strings.Contains(path, ".well-known/openid-configuration") {
+		return ClassOIDCMetadata
+	}
+
 	// VCI: credential_offer or credential_offer_uri in query
 	if query.Has("credential_offer") || query.Has("credential_offer_uri") {
 		return ClassVCICredentialOffer
 	}
 
-	// VP Auth Request: client_id + response_type containing vp_token or id_token (SIOPv2)
-	if query.Get("client_id") != "" && containsResponseType(query.Get("response_type"), "vp_token", "id_token") {
+	// VP Auth Request: client_id + VP-specific response_type or transport hints.
+	if isVPAuthRequest(query) {
 		return ClassVPAuthRequest
+	}
+
+	// OIDC Authorization Request
+	if isOIDCAuthRequest(query) {
+		return ClassOIDCAuthRequest
+	}
+
+	// OIDC callback back to the client app.
+	if isOIDCCallback(e.Method, query, e.RequestBody) {
+		return ClassOIDCCallback
 	}
 
 	// VP Request Object: GET returns a JWT (standard request_uri fetch)
@@ -68,12 +116,21 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 
 	// POST-based classification
 	if e.Method == "POST" {
+		if isVCINonceRequest(path, e.ResponseBody) {
+			return ClassVCINonceRequest
+		}
+
 		// VP Auth Response (direct_post or direct_post.jwt)
 		if hasBodyField(e.RequestBody, "vp_token") ||
 			hasBodyField(e.RequestBody, "presentation_submission") ||
 			hasBodyField(e.RequestBody, "id_token") ||
 			hasBodyField(e.RequestBody, "response") {
 			return ClassVPAuthResponse
+		}
+
+		// OIDC Token Request: detect well-known OIDC endpoints before generic /token handling.
+		if isOIDCTokenRequest(path, e.RequestBody, e.ResponseBody) {
+			return ClassOIDCTokenRequest
 		}
 
 		// VCI Token Request: path ends with /token
@@ -117,6 +174,9 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			}
 			if v := q.Get("request_uri_method"); v != "" {
 				decoded["request_uri_method"] = v
+			}
+			if v := q.Get("redirect_uri"); v != "" {
+				decoded["redirect_uri"] = v
 			}
 			// Parse JSON query params into proper objects
 			if v := q.Get("dcql_query"); v != "" {
@@ -251,6 +311,17 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			}
 		}
 
+	case ClassVCINonceRequest:
+		if e.ResponseBody != "" {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
+				decoded["response"] = resp
+				if nonce, ok := resp["c_nonce"]; ok {
+					decoded["c_nonce"] = nonce
+				}
+			}
+		}
+
 	case ClassVCICredentialRequest:
 		if e.RequestBody != "" {
 			var reqBody map[string]any
@@ -268,6 +339,61 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 						decoded["credential_decoded"] = credDecoded
 					}
 				}
+			}
+		}
+
+	case ClassOIDCMetadata:
+		if e.ResponseBody != "" {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(e.ResponseBody), &m); err == nil {
+				decoded["metadata"] = m
+			}
+		}
+
+	case ClassOIDCAuthRequest:
+		u, _ := url.Parse(e.URL)
+		if u != nil {
+			q := u.Query()
+			decoded["client_id"] = q.Get("client_id")
+			decoded["response_type"] = q.Get("response_type")
+			if v := q.Get("scope"); v != "" {
+				decoded["scope"] = v
+			}
+			if v := q.Get("redirect_uri"); v != "" {
+				decoded["redirect_uri"] = v
+			}
+			if v := q.Get("state"); v != "" {
+				decoded["state"] = v
+			}
+			if v := q.Get("nonce"); v != "" {
+				decoded["nonce"] = v
+			}
+		}
+
+	case ClassOIDCTokenRequest:
+		fields := parseFormOrJSON(e.RequestBody)
+		for k, v := range fields {
+			decoded[k] = v
+		}
+		if e.ResponseBody != "" {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
+				decoded["response"] = resp
+			}
+		}
+
+	case ClassOIDCCallback:
+		u, _ := url.Parse(e.URL)
+		if u != nil {
+			q := u.Query()
+			if v := q.Get("code"); v != "" {
+				decoded["code"] = v
+			}
+			if v := q.Get("state"); v != "" {
+				decoded["state"] = v
+			}
+			if v := q.Get("error"); v != "" {
+				decoded["error"] = v
 			}
 		}
 	}
@@ -424,6 +550,90 @@ func containsResponseType(responseType string, targets ...string) bool {
 	return false
 }
 
+func containsScope(scope string, target string) bool {
+	for _, part := range strings.Fields(scope) {
+		if part == target {
+			return true
+		}
+	}
+	return false
+}
+
+func isVPAuthRequest(query url.Values) bool {
+	if query.Get("client_id") == "" {
+		return false
+	}
+	responseType := query.Get("response_type")
+	if containsResponseType(responseType, "vp_token") {
+		return true
+	}
+	if !containsResponseType(responseType, "id_token") {
+		return false
+	}
+	return query.Get("response_uri") != "" ||
+		query.Get("request_uri") != "" ||
+		query.Get("request_uri_method") != "" ||
+		query.Get("presentation_definition") != "" ||
+		query.Get("dcql_query") != "" ||
+		query.Get("client_metadata") != "" ||
+		query.Get("client_metadata_uri") != ""
+}
+
+func isOIDCAuthRequest(query url.Values) bool {
+	if query.Get("client_id") == "" || query.Get("redirect_uri") == "" {
+		return false
+	}
+	responseType := query.Get("response_type")
+	if !containsResponseType(responseType, "code", "token", "id_token") {
+		return false
+	}
+	return containsScope(query.Get("scope"), "openid") || strings.Contains(query.Get("response_mode"), "form_post")
+}
+
+func isOIDCCallback(method string, query url.Values, body string) bool {
+	if method == "GET" {
+		return query.Get("code") != "" || query.Get("error") != ""
+	}
+	if method == "POST" {
+		return (hasBodyField(body, "code") || hasBodyField(body, "error")) &&
+			!hasBodyField(body, "grant_type")
+	}
+	return false
+}
+
+func isVCINonceRequest(path, responseBody string) bool {
+	if !strings.HasSuffix(path, "/nonce") && !strings.Contains(path, "/protocol/oid4vc/nonce") {
+		return false
+	}
+	return hasBodyField(responseBody, "c_nonce")
+}
+
+func isOIDCTokenRequest(path, requestBody, responseBody string) bool {
+	if strings.Contains(path, "/protocol/openid-connect/token") {
+		return true
+	}
+	if hasBodyField(responseBody, "id_token") {
+		return true
+	}
+	fields := parseFormOrJSON(requestBody)
+	return fields["grant_type"] == "authorization_code" && fields["redirect_uri"] != ""
+}
+
+func endpointKeyFromRawURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u == nil {
+		return rawURL
+	}
+	return endpointKey(u)
+}
+
+func endpointKey(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
 func hasBodyField(body, field string) bool {
 	if values, err := url.ParseQuery(body); err == nil && values.Has(field) {
 		return true
@@ -531,10 +741,41 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 			return v
 		}
 
+	case ClassVCINonceRequest:
+		if auth := entry.RequestHeaders.Get("Authorization"); auth != "" {
+			return auth
+		}
+
 	case ClassVCICredentialRequest:
 		// Correlate via access token (Authorization header)
 		if auth := entry.RequestHeaders.Get("Authorization"); auth != "" {
 			return auth
+		}
+
+	case ClassOIDCAuthRequest:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				return v
+			}
+			if v := u.Query().Get("nonce"); v != "" {
+				return v
+			}
+		}
+
+	case ClassOIDCTokenRequest:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["code"]; ok && v != "" {
+			return v
+		}
+
+	case ClassOIDCCallback:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				return v
+			}
+			if v := u.Query().Get("code"); v != "" {
+				return v
+			}
 		}
 
 	case ClassVCICredentialOffer:
@@ -626,6 +867,19 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 				}
 			}
 		}
+
+	case ClassOIDCTokenRequest:
+		if e.ResponseBody != "" {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
+				for _, key := range []string{"id_token", "access_token", "refresh_token"} {
+					if tok, ok := resp[key].(string); ok && tok != "" && isJWTBody(tok) {
+						creds = append(creds, tok)
+						labels = append(labels, key)
+					}
+				}
+			}
+		}
 	}
 
 	return creds, labels
@@ -681,4 +935,52 @@ func extractVPTokenCredentials(vpToken string) ([]string, []string) {
 	}
 
 	return creds, labels
+}
+
+func (c *StatefulClassifier) learn(entry *TrafficEntry) {
+	switch entry.Class {
+	case ClassVPAuthRequest:
+		if raw, ok := entry.Decoded["request_uri"].(string); ok && raw != "" {
+			c.endpoints[endpointKeyFromRawURL(raw)] = ClassVPRequestObject
+		}
+		if raw, ok := entry.Decoded["response_uri"].(string); ok && raw != "" {
+			c.endpoints[endpointKeyFromRawURL(raw)] = ClassVPAuthResponse
+		}
+
+	case ClassVPRequestObject:
+		if payload, ok := entry.Decoded["payload"].(map[string]any); ok {
+			if raw, ok := payload["response_uri"].(string); ok && raw != "" {
+				c.endpoints[endpointKeyFromRawURL(raw)] = ClassVPAuthResponse
+			}
+		}
+
+	case ClassVCIMetadata, ClassOIDCMetadata:
+		metadata, ok := entry.Decoded["metadata"].(map[string]any)
+		if !ok {
+			return
+		}
+
+		learnEndpoint := func(field string, class TrafficClass) {
+			raw, ok := metadata[field].(string)
+			if !ok || raw == "" {
+				return
+			}
+			c.endpoints[endpointKeyFromRawURL(raw)] = class
+		}
+
+		if entry.Class == ClassVCIMetadata {
+			learnEndpoint("token_endpoint", ClassVCITokenRequest)
+			learnEndpoint("credential_endpoint", ClassVCICredentialRequest)
+			learnEndpoint("nonce_endpoint", ClassVCINonceRequest)
+			return
+		}
+
+		learnEndpoint("authorization_endpoint", ClassOIDCAuthRequest)
+		learnEndpoint("token_endpoint", ClassOIDCTokenRequest)
+
+	case ClassOIDCAuthRequest:
+		if raw, ok := entry.Decoded["redirect_uri"].(string); ok && raw != "" {
+			c.endpoints[endpointKeyFromRawURL(raw)] = ClassOIDCCallback
+		}
+	}
 }

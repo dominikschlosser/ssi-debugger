@@ -154,6 +154,50 @@ example_env_app_ngrok_domain() {
   return 1
 }
 
+example_port_is_listening() {
+  local port="$1"
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
+    return
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :${port} )" 2>/dev/null | tail -n +2 | grep -q .
+    return
+  fi
+
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -an 2>/dev/null | grep -E "[\\.:]${port}[[:space:]].*LISTEN" >/dev/null
+    return
+  fi
+
+  echo "Missing required command: lsof, ss, or netstat" >&2
+  exit 1
+}
+
+example_resolve_free_port() {
+  local preferred_port="$1"
+  local label="${2:-local}"
+  local candidate
+
+  if ! example_port_is_listening "${preferred_port}"; then
+    printf '%s\n' "${preferred_port}"
+    return 0
+  fi
+
+  for candidate in $(seq $((preferred_port + 1)) $((preferred_port + 50))); do
+    if ! example_port_is_listening "${candidate}"; then
+      echo "${label} port ${preferred_port} is already in use; using ${candidate} instead." >&2
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "Could not find a free ${label} port near ${preferred_port}. Set the port explicitly and retry." >&2
+  exit 1
+}
+
 example_wait_for_ngrok_url() {
   local local_port="$1"
   local api_port

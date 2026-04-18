@@ -182,6 +182,7 @@ header h1 {
 
 .badge-vp { background: rgba(122, 162, 247, 0.2); color: var(--accent); }
 .badge-vci { background: rgba(158, 206, 106, 0.2); color: var(--green); }
+.badge-oidc { background: rgba(224, 175, 104, 0.2); color: var(--yellow); }
 .badge-unknown { background: rgba(86, 95, 137, 0.2); color: var(--text-dim); }
 
 .entry-time {

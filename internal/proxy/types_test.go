@@ -28,7 +28,12 @@ func TestTrafficClassLabel(t *testing.T) {
 		{ClassVCICredentialOffer, "VCI Credential Offer"},
 		{ClassVCIMetadata, "VCI Metadata"},
 		{ClassVCITokenRequest, "VCI Token Request"},
+		{ClassVCINonceRequest, "VCI Nonce Request"},
 		{ClassVCICredentialRequest, "VCI Credential Request"},
+		{ClassOIDCMetadata, "OIDC Metadata"},
+		{ClassOIDCAuthRequest, "OIDC Auth Request"},
+		{ClassOIDCTokenRequest, "OIDC Token Request"},
+		{ClassOIDCCallback, "OIDC Callback"},
 	}
 
 	for _, tt := range tests {

@@ -84,6 +84,7 @@
   function badgeClass(classLabel) {
     if (classLabel.startsWith("VP")) return "badge-vp";
     if (classLabel.startsWith("VCI")) return "badge-vci";
+    if (classLabel.startsWith("OIDC")) return "badge-oidc";
     return "badge-unknown";
   }
 

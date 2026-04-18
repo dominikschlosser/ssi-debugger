@@ -31,7 +31,12 @@ const (
 	ClassVCICredentialOffer                // credential_offer / credential_offer_uri
 	ClassVCIMetadata                       // .well-known/openid-credential-issuer
 	ClassVCITokenRequest                   // POST to token endpoint
+	ClassVCINonceRequest                   // POST to nonce endpoint
 	ClassVCICredentialRequest              // POST to credential endpoint
+	ClassOIDCMetadata                      // .well-known/openid-configuration
+	ClassOIDCAuthRequest                   // OIDC authorization request
+	ClassOIDCTokenRequest                  // OIDC token request
+	ClassOIDCCallback                      // Redirect/callback back to the client
 )
 
 var classLabels = map[TrafficClass]string{
@@ -42,7 +47,12 @@ var classLabels = map[TrafficClass]string{
 	ClassVCICredentialOffer:   "VCI Credential Offer",
 	ClassVCIMetadata:          "VCI Metadata",
 	ClassVCITokenRequest:      "VCI Token Request",
+	ClassVCINonceRequest:      "VCI Nonce Request",
 	ClassVCICredentialRequest: "VCI Credential Request",
+	ClassOIDCMetadata:         "OIDC Metadata",
+	ClassOIDCAuthRequest:      "OIDC Auth Request",
+	ClassOIDCTokenRequest:     "OIDC Token Request",
+	ClassOIDCCallback:         "OIDC Callback",
 }
 
 // Label returns a human-readable label for the traffic class.

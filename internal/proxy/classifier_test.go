@@ -161,6 +161,69 @@ func TestClassifyVCICredentialRequestPlural(t *testing.T) {
 	}
 }
 
+func TestClassifyVCINonceRequest(t *testing.T) {
+	e := &TrafficEntry{
+		Method:       "POST",
+		URL:          "https://issuer.example/realms/demo/protocol/oid4vc/nonce",
+		StatusCode:   200,
+		ResponseBody: `{"c_nonce":"nonce-123"}`,
+	}
+	Classify(e)
+	if e.Class != ClassVCINonceRequest {
+		t.Errorf("expected ClassVCINonceRequest, got %d (%s)", e.Class, e.ClassLabel)
+	}
+}
+
+func TestClassifyOIDCMetadata(t *testing.T) {
+	e := &TrafficEntry{
+		Method:     "GET",
+		URL:        "https://issuer.example/.well-known/openid-configuration",
+		StatusCode: 200,
+	}
+	Classify(e)
+	if e.Class != ClassOIDCMetadata {
+		t.Errorf("expected ClassOIDCMetadata, got %d (%s)", e.Class, e.ClassLabel)
+	}
+}
+
+func TestClassifyOIDCAuthRequest(t *testing.T) {
+	e := &TrafficEntry{
+		Method:     "GET",
+		URL:        "https://issuer.example/auth?client_id=wallet-app&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback&response_type=code&scope=openid&state=s1",
+		StatusCode: 302,
+	}
+	Classify(e)
+	if e.Class != ClassOIDCAuthRequest {
+		t.Errorf("expected ClassOIDCAuthRequest, got %d (%s)", e.Class, e.ClassLabel)
+	}
+}
+
+func TestClassifyOIDCTokenRequest(t *testing.T) {
+	e := &TrafficEntry{
+		Method:       "POST",
+		URL:          "https://issuer.example/realms/demo/protocol/openid-connect/token",
+		RequestBody:  "grant_type=authorization_code&code=abc&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback",
+		StatusCode:   200,
+		ResponseBody: `{"access_token":"opaque","id_token":"header.payload.sig"}`,
+	}
+	Classify(e)
+	if e.Class != ClassOIDCTokenRequest {
+		t.Errorf("expected ClassOIDCTokenRequest, got %d (%s)", e.Class, e.ClassLabel)
+	}
+}
+
+func TestClassifyOIDCCallback(t *testing.T) {
+	e := &TrafficEntry{
+		Method:     "GET",
+		URL:        "https://app.example/callback?code=abc&state=s1",
+		StatusCode: 302,
+	}
+	Classify(e)
+	if e.Class != ClassOIDCCallback {
+		t.Errorf("expected ClassOIDCCallback, got %d (%s)", e.Class, e.ClassLabel)
+	}
+}
+
 func TestClassifyUnknown(t *testing.T) {
 	e := &TrafficEntry{
 		Method:     "GET",
@@ -1285,6 +1348,77 @@ func TestClassifyVPAuthRequestWithRequestURIMethod(t *testing.T) {
 
 	if e.Decoded["request_uri_method"] != "post" {
 		t.Errorf("expected request_uri_method=post, got %v", e.Decoded["request_uri_method"])
+	}
+}
+
+func TestStatefulClassifierLearnsVCINonceEndpointFromMetadata(t *testing.T) {
+	c := NewStatefulClassifier()
+
+	meta := &TrafficEntry{
+		Method:       "GET",
+		URL:          "https://issuer.example/.well-known/openid-credential-issuer",
+		StatusCode:   200,
+		ResponseBody: `{"nonce_endpoint":"https://issuer.example/custom/nonce"}`,
+	}
+	c.Classify(meta)
+
+	entry := &TrafficEntry{
+		Method:       "POST",
+		URL:          "https://issuer.example/custom/nonce",
+		StatusCode:   200,
+		ResponseBody: `{"c_nonce":"nonce-123"}`,
+	}
+	c.Classify(entry)
+
+	if entry.Class != ClassVCINonceRequest {
+		t.Errorf("expected ClassVCINonceRequest, got %d (%s)", entry.Class, entry.ClassLabel)
+	}
+}
+
+func TestStatefulClassifierLearnsOIDCTokenEndpointFromMetadata(t *testing.T) {
+	c := NewStatefulClassifier()
+
+	meta := &TrafficEntry{
+		Method:       "GET",
+		URL:          "https://issuer.example/.well-known/openid-configuration",
+		StatusCode:   200,
+		ResponseBody: `{"token_endpoint":"https://issuer.example/custom/token"}`,
+	}
+	c.Classify(meta)
+
+	entry := &TrafficEntry{
+		Method:       "POST",
+		URL:          "https://issuer.example/custom/token",
+		RequestBody:  "grant_type=authorization_code&code=abc",
+		StatusCode:   200,
+		ResponseBody: `{"access_token":"opaque","id_token":"header.payload.sig"}`,
+	}
+	c.Classify(entry)
+
+	if entry.Class != ClassOIDCTokenRequest {
+		t.Errorf("expected ClassOIDCTokenRequest, got %d (%s)", entry.Class, entry.ClassLabel)
+	}
+}
+
+func TestStatefulClassifierLearnsOIDCCallbackFromAuthRequest(t *testing.T) {
+	c := NewStatefulClassifier()
+
+	auth := &TrafficEntry{
+		Method:     "GET",
+		URL:        "https://issuer.example/auth?client_id=wallet-app&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback&response_type=code&scope=openid&state=s1",
+		StatusCode: 302,
+	}
+	c.Classify(auth)
+
+	callback := &TrafficEntry{
+		Method:     "GET",
+		URL:        "https://app.example/callback?state=s1",
+		StatusCode: 302,
+	}
+	c.Classify(callback)
+
+	if callback.Class != ClassOIDCCallback {
+		t.Errorf("expected ClassOIDCCallback, got %d (%s)", callback.Class, callback.ClassLabel)
 	}
 }
 

@@ -31,8 +31,6 @@ func TestTerminalWriterImplementsEntryWriter(t *testing.T) {
 
 func TestTerminalWriterAllTrafficFalseSkipsUnknown(t *testing.T) {
 	tw := &TerminalWriter{AllTraffic: false}
-	// This entry is ClassUnknown — WriteEntry should not call PrintEntry.
-	// We can't easily mock PrintEntry, but we verify no panic occurs.
 	entry := &TrafficEntry{
 		Class:      ClassUnknown,
 		ClassLabel: "Unknown",
@@ -40,14 +38,15 @@ func TestTerminalWriterAllTrafficFalseSkipsUnknown(t *testing.T) {
 		URL:        "http://example.com/favicon.ico",
 		StatusCode: 200,
 	}
-	// Should not panic
-	tw.WriteEntry(entry)
+
+	output := captureOutput(t, func() { tw.WriteEntry(entry) })
+	if output != "" {
+		t.Fatalf("expected no terminal output for unknown traffic by default, got %q", output)
+	}
 }
 
 func TestTerminalWriterAllTrafficTrueIncludesUnknown(t *testing.T) {
 	tw := &TerminalWriter{AllTraffic: true}
-	// This should call PrintEntry (which writes to stdout).
-	// We verify it doesn't panic; output goes to terminal.
 	entry := &TrafficEntry{
 		Class:      ClassUnknown,
 		ClassLabel: "Unknown",
@@ -55,8 +54,11 @@ func TestTerminalWriterAllTrafficTrueIncludesUnknown(t *testing.T) {
 		URL:        "http://example.com/other",
 		StatusCode: 200,
 	}
-	// Should not panic
-	tw.WriteEntry(entry)
+
+	output := captureOutput(t, func() { tw.WriteEntry(entry) })
+	if !strings.Contains(output, "[Unknown]") {
+		t.Fatalf("expected unknown traffic to be printed when allTraffic=true, got %q", output)
+	}
 }
 
 // captureOutput redirects both os.Stdout and color.Output to capture all print output.
